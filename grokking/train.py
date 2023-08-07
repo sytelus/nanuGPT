@@ -41,6 +41,8 @@ def train(config:dict):
                     wandb_metrics=DEFAULT_WANDB_METRICS + [
                         {"name": "train/acc", "step_metric":"train/step", "summary":"max", "goal":"max"},
                         {"name": "val/acc", "step_metric":"train/step", "summary":"max", "goal":"max"},
+                        {"name": "lr", "step_metric":"train/step", "summary":"max", "goal":"max"},
+                        {"name": "ETA_hr", "step_metric":"train/step", "summary":"max", "goal":"max"},
                     ])
 
     logger.summary(config)
@@ -82,9 +84,9 @@ def train(config:dict):
         weight_decay=config['weight_decay']
         )
 
-    # scheduler
+    # scheduler provides warmup and then constant lr
     scheduler = torch.optim.lr_scheduler.LinearLR(
-        optimizer, start_factor = 0.1, total_iters=9
+        optimizer, start_factor = 1.e-8, total_iters=10
     )
 
     step, start_time = 0, time.time()
@@ -124,6 +126,7 @@ def train(config:dict):
                     "val/acc": val_acc,
                     "val/loss": val_loss,
                     "ETA_hr": (time.time() - start_time) / (step+1) * (num_steps - step) / 3600,
+                    "lr": optimizer.param_groups[0]['lr'],
                 }
                 logger.info(val_metrics)
 
