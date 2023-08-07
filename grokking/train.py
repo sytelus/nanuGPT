@@ -1,4 +1,5 @@
 from math import ceil
+import time
 import torch
 
 from grokking.data import get_data
@@ -65,11 +66,11 @@ def train(config:dict):
         seq_len=5
         ).to(device)
 
-    num_params = sum(p.numel() for p in model.parameters())
     logger.summary({'train_data_len': len(train_loader.dataset),
                     'val_data_len': len(val_loader.dataset),
                     'train_loader_len': len(train_loader),
                     'val_loader_len': len(val_loader),
+                    'epochs': ceil(num_steps / len(train_loader)),
                     'model_params': model.get_num_params(True),
                     'model_params_all': model.get_num_params(False),})
 
@@ -86,9 +87,7 @@ def train(config:dict):
         optimizer, start_factor = 0.1, total_iters=9
     )
 
-    num_epochs = ceil(num_steps / len(train_loader))
-
-    step = 0
+    step, start_time = 0, time.time()
     criterion = torch.nn.CrossEntropyLoss()
     model.train()
     while step < num_steps:
@@ -124,6 +123,7 @@ def train(config:dict):
                     "step": step,
                     "val/acc": val_acc,
                     "val/loss": val_loss,
+                    "ETA_hr": (time.time() - start_time) / (step+1) * (num_steps - step) / 3600,
                 }
                 logger.info(val_metrics)
 
@@ -131,3 +131,6 @@ def train(config:dict):
             if step >= num_steps:
                 break
 
+    logger.summary({"train_time": (time.time() - start_time)/3600,
+                    "step_time": (time.time() - start_time)/step,})
+    logger.finish()
