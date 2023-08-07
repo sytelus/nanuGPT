@@ -70,7 +70,8 @@ def train(config:dict):
                     'val_data_len': len(val_loader.dataset),
                     'train_loader_len': len(train_loader),
                     'val_loader_len': len(val_loader),
-                    'model_params': num_params})
+                    'model_params': model.get_num_params(True),
+                    'model_params_all': model.get_num_params(False),})
 
     # optimizer
     optimizer = torch.optim.AdamW(

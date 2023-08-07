@@ -20,7 +20,7 @@ class DecoderBlock(torch.nn.Module):
         (len(x), len(x)), -float("Inf"), device=x.device, dtype=x.dtype
     )
     attn_mask = torch.triu(attn_mask, diagonal=1)
-    
+
     a1, _ = self.self_attn(x, x, x, attn_mask=attn_mask)
     a1 = self.self_attn_norm (x + a1)
     a2 = self.ffn(a1)
@@ -53,3 +53,17 @@ class Transformer(torch.nn.Module):
     embedding = rearrange(embedding, 'b s d -> s b d')
 
     return self.model(embedding)
+
+  def get_num_params(self, non_embedding=True):
+      """
+      Return the number of parameters in the model.
+      For non-embedding count (default), the position embeddings get subtracted.
+      The token embeddings would too, except due to the parameter sharing these
+      params are actually used as weights in the final layer, so we include them.
+      """
+      n_params = sum(p.numel() for p in self.parameters())
+      if non_embedding:
+          n_params -= self.token_embeddings.weight.numel()
+          n_params -= self.position_embeddings.weight.numel()
+
+      return n_params
