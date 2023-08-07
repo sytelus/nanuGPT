@@ -113,7 +113,7 @@ def train(config:dict):
 
             if step % 20 == 0 or step+1 >= num_steps:
                 metrics = {
-                    "step": step,
+                    "train/step": step,
                     "train/acc": acc,
                     "train/loss": loss,
                 }
@@ -122,7 +122,7 @@ def train(config:dict):
             if step % eval_every == 0 or step+1 >= num_steps:
                 val_loss, val_acc = evaluate(model, val_loader, device, criterion)
                 val_metrics = {
-                    "step": step,
+                    "train/step": step,
                     "val/acc": val_acc,
                     "val/loss": val_loss,
                     "ETA_hr": (time.time() - start_time) / (step+1) * (num_steps - step) / 3600,
