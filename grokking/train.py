@@ -33,9 +33,9 @@ def evaluate(model, val_loader, device, criterion):
 
 def train(config:dict):
     if not config['device']:
-        device_name = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        device_name = 'cuda' if torch.cuda.is_available() else 'cpu'
     else:
-        device_name = torch.device(config['device'])
+        device_name = config['device']
 
     utils.setup_torch()
     utils.setup_seed(42)
