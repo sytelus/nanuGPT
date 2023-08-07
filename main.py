@@ -1,10 +1,12 @@
 from argparse import ArgumentParser
 
-from data import ALL_OPERATIONS
-from training import main
+from grokking.data import ALL_OPERATIONS
+from grokking.train import train
+
 
 if __name__ == "__main__":
     parser = ArgumentParser()
+    parser.add_argument("--use_wandb", type=bool, default="true")
     parser.add_argument("--operation", type=str, choices=ALL_OPERATIONS.keys(), default="x/y")
     parser.add_argument("--training_fraction", type=float, default=0.5)
     parser.add_argument("--prime", type=int, default=97)
@@ -16,6 +18,8 @@ if __name__ == "__main__":
     parser.add_argument("--weight_decay", type=float, default=1)
     parser.add_argument("--num_steps", type=int, default=1e5)
     parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--eval_every", type=int, default=100)
+
     args = parser.parse_args()
 
-    main(args)
+    train(vars(args))

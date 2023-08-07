@@ -1,5 +1,7 @@
+from typing import Tuple
 from math import ceil
 import torch
+from torch.utils.data import DataLoader
 
 DIVISION_MODULO_OPERATIONS = {
     "x/y": lambda x, y, p: (x*y % p, y, x),
@@ -41,7 +43,7 @@ def operation_mod_p_data(operation: str, p: int, eq_token: int, op_token: int):
 
     return inputs, labels
 
-def get_data(operation: str, prime: int, training_fraction: float, batch_size: int):
+def get_data(operation: str, prime: int, training_fraction: float, batch_size: int)->Tuple[DataLoader,DataLoader]:
     inputs, labels = operation_mod_p_data(operation, prime, prime, prime+1)
     dataset = torch.utils.data.TensorDataset(inputs, labels)
 
@@ -52,7 +54,7 @@ def get_data(operation: str, prime: int, training_fraction: float, batch_size: i
 
     batch_size = min(batch_size, ceil(len(dataset) / 2))
 
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
 
     return train_loader, val_loader
