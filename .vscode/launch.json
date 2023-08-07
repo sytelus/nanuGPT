@@ -10,6 +10,7 @@
             "request": "launch",
             "program": "${cwd}/main.py",
             "console": "integratedTerminal",
+            "args": ["--weight_decay", "0"]
         },
         {
             "name": "Python: Current File",
