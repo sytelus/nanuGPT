@@ -32,6 +32,11 @@ def evaluate(model, val_loader, device, criterion):
 
 
 def train(config:dict):
+    if not config['device']:
+        device_name = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    else:
+        device_name = torch.device(config['device'])
+
     utils.setup_torch()
     utils.setup_seed(42)
 
@@ -47,7 +52,7 @@ def train(config:dict):
 
     logger.summary(config)
 
-    device = torch.device(config['device'])
+    device = torch.device(device_name)
     num_steps = config['num_steps']
     eval_every = config['eval_every']
 
@@ -56,8 +61,8 @@ def train(config:dict):
         config['operation'],
         config['prime'],
         config['training_fraction'],
-        config['batch_size']
-        )
+        config['batch_size'],
+    )
 
     # create model
     model = Transformer(
@@ -68,7 +73,8 @@ def train(config:dict):
         seq_len=5
         ).to(device)
 
-    logger.summary({'train_data_len': len(train_loader.dataset),
+    logger.summary({"device_name": device_name,
+                    'train_data_len': len(train_loader.dataset),
                     'val_data_len': len(val_loader.dataset),
                     'train_loader_len': len(train_loader),
                     'val_loader_len': len(val_loader),
