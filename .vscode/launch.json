@@ -5,12 +5,12 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Train",
+            "name": "Train-Fast",
             "type": "python",
             "request": "launch",
             "program": "${cwd}/main.py",
             "console": "integratedTerminal",
-            "args": ["--weight_decay", "0"]
+            "args": ["configs/grok_fast.yaml"]
         },
         {
             "name": "Python: Current File",

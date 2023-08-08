@@ -1,6 +1,7 @@
 .env.DS_Store
 __pycache__/
 wandb/
+wandb_cache/
 outputs/
 out/
 # Byte-compiled / optimized / DLL files

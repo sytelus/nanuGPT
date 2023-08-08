@@ -1,6 +1,6 @@
 from math import ceil
 import time
-from typing import Mapping
+from typing import Mapping, Tuple
 import torch
 
 from grokking.data import get_data
@@ -10,22 +10,22 @@ from grokking import utils
 from grokking.utils import ExponentialMovingAverage, SmoothedDyDx
 
 @torch.no_grad()
-def evaluate(model, val_loader, device, criterion):
+def evaluate(model, val_loader, device, criterion)->Tuple[float, float]:
     # Set model to evaluation mode
     model.eval()
 
     correct = 0
-    loss = 0.
+    loss_sum = 0.
 
     # Loop over each batch from the validation set
     for batch in val_loader:
         inputs, labels = tuple(t.to(device) for t in batch)
 
         output = model(inputs)[-1,:,:]
-        correct += (torch.argmax(output, dim=1) == labels).sum()
-        loss += criterion(output, labels) * len(labels)
+        correct += (torch.argmax(output, dim=1) == labels).sum().item()
+        loss_sum += criterion(output, labels).item() * len(labels)
 
-    loss = loss / len(val_loader.dataset)
+    loss = loss_sum / len(val_loader.dataset)
     acc = correct / len(val_loader.dataset)
 
     model.train()
@@ -55,6 +55,7 @@ def train(config:Mapping):
                         {"name": "val/d_loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
                         {"name": "train/ewa_loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
                         {"name": "val/ewa_loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
+                        {"name": "w_norm_ewa", "step_metric":"train/step", "summary":"min", "goal":"min"},
                     ])
 
     logger.summary(config)
@@ -104,10 +105,11 @@ def train(config:Mapping):
 
     step, start_time = 0, time.time()
     ewa_train_loss, ewa_val_loss = ExponentialMovingAverage(weight=0.3), ExponentialMovingAverage(weight=0.3)
-    d_train_loss = SmoothedDyDx(y_ema_weight=0.3, x_ema_weight=0.3, dx_ema_weight=0.2,
-                                 dy_ema_weight=0.2, dydx_ema_weight=0.1)
-    d_val_loss = SmoothedDyDx(y_ema_weight=0.3, x_ema_weight=0.3, dx_ema_weight=0.2,
-                                 dy_ema_weight=0.2, dydx_ema_weight=0.1)
+    w_norm_ewa = ExponentialMovingAverage(weight=0.3)
+    d_train_loss = SmoothedDyDx(y_ema_weight=0.9, x_ema_weight=0.9, dx_ema_weight=0.9,
+                                 dy_ema_weight=0.9, dydx_ema_weight=0.1)
+    d_val_loss = SmoothedDyDx(y_ema_weight=0.9, x_ema_weight=0.9, dx_ema_weight=0.9,
+                                 dy_ema_weight=0.9, dydx_ema_weight=0.1)
     criterion = torch.nn.CrossEntropyLoss()
     model.train()
     while step < num_steps:
@@ -148,14 +150,18 @@ def train(config:Mapping):
             if step % eval_every == 0 or step+1 >= num_steps:
                 val_loss, val_acc = evaluate(model, val_loader, device, criterion)
 
-                ewa_val_loss.add(loss.item())
-                d_val_loss.add(loss.item(), step)
+                ewa_val_loss.add(val_loss)
+                d_val_loss.add(val_loss, step)
+
+                w_norm = model.weight_norm()
+                w_norm_ewa.add(w_norm)
 
                 val_metrics = {
                     "train/step": step,
-                    "val/acc": val_acc.item(),
-                    "val/loss": val_loss.item(),
-                    "w_norm": model.weight_norm(),
+                    "val/acc": val_acc,
+                    "val/loss": val_loss,
+                    "w_norm": w_norm,
+                    "w_norm_ewa": w_norm_ewa.value,
                     "ETA_hr": (time.time() - start_time) / (step+1) * (num_steps - step) / 3600,
                     "lr": optimizer.param_groups[0]['lr'],
                     "val/ewa_loss": ewa_val_loss.value,
