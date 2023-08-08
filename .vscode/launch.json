@@ -5,12 +5,28 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Train-Baseline",
+            "type": "python",
+            "request": "launch",
+            "program": "${cwd}/main.py",
+            "console": "integratedTerminal",
+            "args": ["configs/baseline.yaml"]
+        },
+        {
             "name": "Train-Fast",
             "type": "python",
             "request": "launch",
             "program": "${cwd}/main.py",
             "console": "integratedTerminal",
-            "args": ["configs/grok_fast.yaml"]
+            "args": ["configs/prime223.yaml"]
+        },
+        {
+            "name": "Train-50k",
+            "type": "python",
+            "request": "launch",
+            "program": "${cwd}/main.py",
+            "console": "integratedTerminal",
+            "args": ["configs/prime50k.yaml"]
         },
         {
             "name": "Python: Current File",

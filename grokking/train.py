@@ -65,12 +65,14 @@ def train(config:Mapping):
     eval_every = config['eval_every']
 
     # get dataset
+    start_time = time.time()
     train_loader, val_loader, tokenizer = get_data(
         config['operation'],
         config['prime'],
         config['training_fraction'],
         config['batch_size'],
     )
+    data_gen_time = time.time() - start_time
 
     # create model
     model = Transformer(
@@ -89,7 +91,8 @@ def train(config:Mapping):
                     'epochs': ceil(num_steps / len(train_loader)),
                     'model_params': model.get_num_params(True),
                     'model_params_all': model.get_num_params(False),
-                    'vocab_size': len(tokenizer),})
+                    'vocab_size': len(tokenizer),
+                    'data_gen_time_s': data_gen_time,})
 
     # optimizer
     optimizer = torch.optim.AdamW(
@@ -174,6 +177,6 @@ def train(config:Mapping):
             if step >= num_steps:
                 break
 
-    logger.summary({"train_time": (time.time() - start_time)/3600,
-                    "step_time": (time.time() - start_time)/step,})
+    logger.summary({"train_time_hr": (time.time() - start_time)/3600,
+                    "step_time_s": (time.time() - start_time)/step,})
     logger.finish()
