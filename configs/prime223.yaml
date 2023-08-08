@@ -14,7 +14,7 @@ batch_size: 512
 # training
 learning_rate: 1.0E-3
 weight_decay: 0.1     # weight_decay=1 makes convergence much faster and original graph is not reproducible
-num_steps: 8000    # 1e5 is not enough when weight_decay=0.0
+num_steps: 10000    # 1e5 is not enough when weight_decay=0.0
 device: ''            # auto select or cpu, cuda
 eval_every: 100
 seed: 42
