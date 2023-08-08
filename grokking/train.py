@@ -88,7 +88,8 @@ def train(config:Mapping):
                     'val_loader_len': len(val_loader),
                     'epochs': ceil(num_steps / len(train_loader)),
                     'model_params': model.get_num_params(True),
-                    'model_params_all': model.get_num_params(False),})
+                    'model_params_all': model.get_num_params(False),
+                    'vocab_size': len(tokenizer),})
 
     # optimizer
     optimizer = torch.optim.AdamW(

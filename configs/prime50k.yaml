@@ -8,7 +8,7 @@ num_heads: 4
 # data
 operation: 'x/y'
 training_fraction: 0.5
-prime: 223
+prime: 50021
 batch_size: 512
 
 # training
