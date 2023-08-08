@@ -1,0 +1,21 @@
+# transformer
+num_layers: 2
+dim_model: 128
+num_heads: 4
+
+# general
+device: ''            # auto select or cpu, cuda
+seed: 42
+
+
+# data
+operation: 'x/y'
+training_fraction: 0.5
+batch_size: 512
+
+# training
+learning_rate: 1.0E-3
+
+# eval
+eval_every: 100
+eval_batch_size: 32768 # 2^15

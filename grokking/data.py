@@ -1,3 +1,4 @@
+import random
 from typing import Tuple
 from math import ceil
 import torch
@@ -27,7 +28,6 @@ ALL_OPERATIONS = {
     **ALL_MODULO_OPERATIONS,
 }
 
-
 def operation_mod_p_data(operation: str, p: int, tokenizer: ArithmaticTokenizer):
     """
     a◦b (mod p) for 0 <= a < p, 1 <= b < p if operation in DIVISION_MODULO_OPERATIONS
@@ -39,8 +39,15 @@ def operation_mod_p_data(operation: str, p: int, tokenizer: ArithmaticTokenizer)
     eq = tokenizer[tokenizer.eq_token]
     op = tokenizer[operation]
 
-    equations = torch.cartesian_prod(torch.arange(p, dtype=torch.int32),
-                                     torch.arange(0 if not operation in DIVISION_MODULO_OPERATIONS else 1, p, dtype=torch.int32))
+    equations = torch.cartesian_prod(torch.arange(p),
+                                     torch.arange(0 if not operation in DIVISION_MODULO_OPERATIONS else 1, p))
+
+    # shuffle combinations
+    # # Generate a permutation of row indices
+    # permuted_indices = torch.randperm(equations.size(0))
+    # # Shuffle the rows using the permuted indices
+    # equations = equations[permuted_indices]
+
     equations = ALL_OPERATIONS[operation](equations[:,0], equations[:,1], p) # tuple of 3 tensors
     equations = torch.stack((equations[0], equations[1], equations[2] % p), dim=1) # turn result column into modulo p
 
@@ -64,10 +71,11 @@ def operation_mod_p_data(operation: str, p: int, tokenizer: ArithmaticTokenizer)
     return equations, results
 
 def get_data(operation: str, prime: int, training_fraction: float,
-             batch_size: int)->Tuple[DataLoader,DataLoader, ArithmaticTokenizer]:
+             batch_size: int, eval_batch_size:int)->Tuple[DataLoader,DataLoader, ArithmaticTokenizer]:
     tokenizer = ArithmaticTokenizer(prime, list(ALL_OPERATIONS.keys()))
 
     inputs, labels = operation_mod_p_data(operation, prime, tokenizer)
+
     dataset = torch.utils.data.TensorDataset(inputs, labels)
 
     train_size = int(training_fraction * len(dataset))
@@ -77,7 +85,7 @@ def get_data(operation: str, prime: int, training_fraction: float,
 
     batch_size = min(batch_size, ceil(len(dataset) / 2))
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=min(batch_size, len(train_dataset)) , shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=min(eval_batch_size, len(val_dataset)) , shuffle=False)
 
     return train_loader, val_loader, tokenizer

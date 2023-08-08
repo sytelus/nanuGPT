@@ -9,7 +9,7 @@ from grokking.logger import Logger, DEFAULT_WANDB_METRICS
 from grokking import utils
 from grokking.utils import ExponentialMovingAverage, SmoothedDyDx
 
-@torch.no_grad()
+
 def evaluate(model, val_loader, device, criterion)->Tuple[float, float]:
     # Set model to evaluation mode
     model.eval()
@@ -17,13 +17,14 @@ def evaluate(model, val_loader, device, criterion)->Tuple[float, float]:
     correct = 0
     loss_sum = 0.
 
-    # Loop over each batch from the validation set
-    for batch in val_loader:
-        inputs, labels = tuple(t.to(device) for t in batch)
+    with torch.no_grad():
+        # Loop over each batch from the validation set
+        for batch in val_loader:
+            inputs, labels = tuple(t.to(device) for t in batch)
 
-        output = model(inputs)[-1,:,:]
-        correct += (torch.argmax(output, dim=1) == labels).sum().item()
-        loss_sum += criterion(output, labels).item() * len(labels)
+            output = model(inputs)[-1,:,:]
+            correct += (torch.argmax(output, dim=1) == labels).sum().item()
+            loss_sum += criterion(output, labels).item() * len(labels)
 
     loss = loss_sum / len(val_loader.dataset)
     acc = correct / len(val_loader.dataset)
@@ -71,6 +72,7 @@ def train(config:Mapping):
         config['prime'],
         config['training_fraction'],
         config['batch_size'],
+        config['eval_batch_size'],
     )
     data_gen_time = time.time() - start_time
 

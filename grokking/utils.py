@@ -85,7 +85,7 @@ class SmoothedDyDx:
         self.dydx = ExponentialMovingAverage(dydx_ema_weight)
 
 
-    def add(self, x: float, y: float) -> float:
+    def add(self, y: float, x: float) -> float:
         last_x, last_y = self.x.value, self.y.value
 
         self.y.add(y)
