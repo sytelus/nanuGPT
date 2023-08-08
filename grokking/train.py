@@ -102,8 +102,11 @@ def train(config:dict):
     )
 
     step, start_time = 0, time.time()
-    ewa_train_loss, ewa_val_loss = ExponentialMovingAverage(), ExponentialMovingAverage()
-    d_train_loss, d_val_loss = SmoothedDyDx(), SmoothedDyDx()
+    ewa_train_loss, ewa_val_loss = ExponentialMovingAverage(weight=0.3), ExponentialMovingAverage(weight=0.3)
+    d_train_loss = SmoothedDyDx(y_ema_weight=0.3, x_ema_weight=0.3, dx_ema_weight=0.2,
+                                 dy_ema_weight=0.2, dydx_ema_weight=0.1)
+    d_val_loss = SmoothedDyDx(y_ema_weight=0.3, x_ema_weight=0.3, dx_ema_weight=0.2,
+                                 dy_ema_weight=0.2, dydx_ema_weight=0.1)
     criterion = torch.nn.CrossEntropyLoss()
     model.train()
     while step < num_steps:
