@@ -70,7 +70,7 @@ def _fmt(val:Any)->str:
 
 class Logger:
     def __init__(self, enable_wandb:bool, master_process:bool,
-                 wandb_project:str, wandb_run_name:Optional[str], config:dict,
+                 wandb_project:str, wandb_run_name:Optional[str], config:Mapping,
                  wandb_metrics=DEFAULT_WANDB_METRICS) -> None:
         self._logger = None
         self._run = None

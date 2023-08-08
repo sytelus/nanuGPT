@@ -1,5 +1,6 @@
 from math import ceil
 import time
+from typing import Mapping
 import torch
 
 from grokking.data import get_data
@@ -32,7 +33,7 @@ def evaluate(model, val_loader, device, criterion):
     return loss, acc
 
 
-def train(config:dict):
+def train(config:Mapping):
     if not config['device']:
         device_name = 'cuda' if torch.cuda.is_available() else 'cpu'
     else:
@@ -42,7 +43,7 @@ def train(config:dict):
     utils.setup_seed(config['seed'])
 
     logger = Logger(config['use_wandb'], master_process=True,
-                    wandb_project='grokking', wandb_run_name=None,
+                    wandb_project=config['wandb_project'], wandb_run_name=config['wandb_run'],
                     config=config,
                     wandb_metrics=DEFAULT_WANDB_METRICS + [
                         {"name": "train/acc", "step_metric":"train/step", "summary":"max", "goal":"max"},
@@ -76,7 +77,7 @@ def train(config:dict):
         dim_model=config['dim_model'],
         num_heads=config['num_heads'],
         num_tokens=len(tokenizer),
-        seq_len=5
+        seq_len=5, # currently each input eq has [eos a op b =] which is 5 tokens
         ).to(device)
 
     logger.summary({"device_name": device_name,
