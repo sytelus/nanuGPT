@@ -63,7 +63,7 @@ def train(config:dict):
     eval_every = config['eval_every']
 
     # get dataset
-    train_loader, val_loader = get_data(
+    train_loader, val_loader, tokenizer = get_data(
         config['operation'],
         config['prime'],
         config['training_fraction'],
@@ -75,7 +75,7 @@ def train(config:dict):
         num_layers=config['num_layers'],
         dim_model=config['dim_model'],
         num_heads=config['num_heads'],
-        num_tokens=config['prime'] + 2,
+        num_tokens=len(tokenizer),
         seq_len=5
         ).to(device)
 
@@ -116,7 +116,10 @@ def train(config:dict):
 
             optimizer.zero_grad()
 
-            # model output is tensor [4,batch_size,prime+2]
+            # model output is tensor [5,batch_size,prime+2]
+            # [EOS a op b =] is input to model which is 5 tokens
+            # output is [a op b = c] which is 5 tokens
+            # we only take the last token of the output for loss
             output = model(inputs)[-1,:,:]
             loss = criterion(output, labels)
             acc = (torch.argmax(output, dim=1) == labels).sum() / len(labels)

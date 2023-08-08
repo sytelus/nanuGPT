@@ -3,6 +3,9 @@ from math import ceil
 import torch
 from torch.utils.data import DataLoader
 
+from grokking.arithmatic_tokenizer import ArithmaticTokenizer
+
+
 DIVISION_MODULO_OPERATIONS = {
     "x/y": lambda x, y, p: (x*y % p, y, x), # out = a,b,c such that a/b (mod p) = c (mod p)
     "(x//y)if(y%2==1)else(x-y)": lambda x, y, _: torch.where(y % 2 == 1, x // y, x - y)
@@ -23,7 +26,7 @@ ALL_OPERATIONS = {
     **ALL_MODULO_OPERATIONS,
 }
 
-def operation_mod_p_data(operation: str, p: int, eq_token: int, op_token: int):
+def operation_mod_p_data(operation: str, p: int, tokenizer: ArithmaticTokenizer):
     """
     x◦y (mod p) for 0 <= x < p, 1 <= y < p if operation in DIVISION_MODULO_OPERATIONS
     x◦y (mod p) for 0 <= x, y < p otherwise
@@ -33,19 +36,23 @@ def operation_mod_p_data(operation: str, p: int, eq_token: int, op_token: int):
     y = torch.arange(0 if not operation in DIVISION_MODULO_OPERATIONS else 1, p)
     x, y = torch.cartesian_prod(x, y).T
 
-    eq = torch.ones_like(x) * eq_token
-    op = torch.ones_like(x) * op_token
+    eos = torch.ones_like(x) * tokenizer[tokenizer.eos_token]
+    eq = torch.ones_like(x) * tokenizer[tokenizer.eq_token]
+    op = torch.ones_like(x) * tokenizer[operation]
 
     x, y, z = ALL_OPERATIONS[operation](x, y, p)
     results = z.remainder(p)
 
-    inputs = torch.stack([x, op, y, eq], dim=1)
-    labels = results
+    inputs = torch.stack([eos, tokenizer.encode_tensor(x), op, tokenizer.encode_tensor(y), eq], dim=1)
+    labels = tokenizer.encode_tensor(results)
 
     return inputs, labels
 
-def get_data(operation: str, prime: int, training_fraction: float, batch_size: int)->Tuple[DataLoader,DataLoader]:
-    inputs, labels = operation_mod_p_data(operation, prime, prime, prime+1)
+def get_data(operation: str, prime: int, training_fraction: float,
+             batch_size: int)->Tuple[DataLoader,DataLoader, ArithmaticTokenizer]:
+    tokenizer = ArithmaticTokenizer(prime, list(ALL_OPERATIONS.keys()))
+
+    inputs, labels = operation_mod_p_data(operation, prime, tokenizer)
     dataset = torch.utils.data.TensorDataset(inputs, labels)
 
     train_size = int(training_fraction * len(dataset))
@@ -58,4 +65,4 @@ def get_data(operation: str, prime: int, training_fraction: float, batch_size: i
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
 
-    return train_loader, val_loader
+    return train_loader, val_loader, tokenizer
