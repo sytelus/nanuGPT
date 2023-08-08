@@ -39,7 +39,7 @@ def train(config:dict):
         device_name = config['device']
 
     utils.setup_torch()
-    utils.setup_seed(42)
+    utils.setup_seed(config['seed'])
 
     logger = Logger(config['use_wandb'], master_process=True,
                     wandb_project='grokking', wandb_run_name=None,
