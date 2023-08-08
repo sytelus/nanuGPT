@@ -15,7 +15,7 @@ batch_size: 512
 
 # training
 learning_rate: 1.0E-3
-weight_decay: 0.01     # weight_decay=1 makes things unstable with lots of loss spikes
+weight_decay: 0.05     # weight_decay=1 makes things unstable with lots of loss spikes
 num_steps: 50000
 device: ''            # auto select or cpu, cuda
 eval_every: 100
