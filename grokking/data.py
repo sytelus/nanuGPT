@@ -4,7 +4,7 @@ import torch
 from torch.utils.data import DataLoader
 
 DIVISION_MODULO_OPERATIONS = {
-    "x/y": lambda x, y, p: (x*y % p, y, x),
+    "x/y": lambda x, y, p: (x*y % p, y, x), # out = a,b,c such that a/b (mod p) = c (mod p)
     "(x//y)if(y%2==1)else(x-y)": lambda x, y, _: torch.where(y % 2 == 1, x // y, x - y)
 }
 
@@ -29,6 +29,7 @@ def operation_mod_p_data(operation: str, p: int, eq_token: int, op_token: int):
     x◦y (mod p) for 0 <= x, y < p otherwise
     """
     x = torch.arange(0, p)
+    # for division operations, y starts at 1 to avoid divide by 0
     y = torch.arange(0 if not operation in DIVISION_MODULO_OPERATIONS else 1, p)
     x, y = torch.cartesian_prod(x, y).T
 
