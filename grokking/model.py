@@ -54,16 +54,21 @@ class Transformer(torch.nn.Module):
 
     return self.model(embedding)
 
-  def get_num_params(self, non_embedding=True):
+  def get_num_params(self, non_embedding=True)->int:
       """
       Return the number of parameters in the model.
       For non-embedding count (default), the position embeddings get subtracted.
       The token embeddings would too, except due to the parameter sharing these
       params are actually used as weights in the final layer, so we include them.
       """
-      n_params = sum(p.numel() for p in self.parameters())
-      if non_embedding:
-          n_params -= self.token_embeddings.weight.numel()
-          n_params -= self.position_embeddings.weight.numel()
-
+      n_params = sum(p.numel() for p in self.get_params(non_embedding))
       return n_params
+
+  def get_params(self, non_embedding=True):
+    for p in self.parameters():
+      if not non_embedding or \
+        (p is not self.token_embeddings.weight and p is not self.position_embeddings.weight):
+          yield p
+
+  def weight_norm(self, non_embedding=True)->float:
+    return torch.linalg.norm(torch.cat([p.view(-1) for p in self.get_params(non_embedding)])).item()

@@ -6,6 +6,7 @@ from grokking.data import get_data
 from grokking.model import Transformer
 from grokking.logger import Logger, DEFAULT_WANDB_METRICS
 from grokking import utils
+from grokking.utils import ExponentialMovingAverage, SmoothedDyDx
 
 @torch.no_grad()
 def evaluate(model, val_loader, device, criterion):
@@ -48,6 +49,11 @@ def train(config:dict):
                         {"name": "val/acc", "step_metric":"train/step", "summary":"max", "goal":"max"},
                         {"name": "lr", "step_metric":"train/step", "summary":"max", "goal":"max"},
                         {"name": "ETA_hr", "step_metric":"train/step", "summary":"max", "goal":"max"},
+                        {"name": "w_norm", "step_metric":"train/step", "summary":"min", "goal":"min"},
+                        {"name": "train/d_loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
+                        {"name": "val/d_loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
+                        {"name": "train/ewa_loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
+                        {"name": "val/ewa_loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
                     ])
 
     logger.summary(config)
@@ -96,6 +102,8 @@ def train(config:dict):
     )
 
     step, start_time = 0, time.time()
+    ewa_train_loss, ewa_val_loss = ExponentialMovingAverage(), ExponentialMovingAverage()
+    d_train_loss, d_val_loss = SmoothedDyDx(), SmoothedDyDx()
     criterion = torch.nn.CrossEntropyLoss()
     model.train()
     while step < num_steps:
@@ -117,22 +125,34 @@ def train(config:dict):
             optimizer.step()
             scheduler.step()
 
+            ewa_train_loss.add(loss.item())
+            d_train_loss.add(loss.item(), step)
+
             if step % 20 == 0 or step+1 >= num_steps:
                 metrics = {
                     "train/step": step,
-                    "train/acc": acc,
-                    "train/loss": loss,
+                    "train/acc": acc.item(),
+                    "train/loss": loss.item(),
+                    "train/ewa_loss": ewa_train_loss.value,
+                    "train/d_loss": d_train_loss.value,
                 }
                 logger.info(metrics)
 
             if step % eval_every == 0 or step+1 >= num_steps:
                 val_loss, val_acc = evaluate(model, val_loader, device, criterion)
+
+                ewa_val_loss.add(loss.item())
+                d_val_loss.add(loss.item(), step)
+
                 val_metrics = {
                     "train/step": step,
-                    "val/acc": val_acc,
-                    "val/loss": val_loss,
+                    "val/acc": val_acc.item(),
+                    "val/loss": val_loss.item(),
+                    "w_norm": model.weight_norm(),
                     "ETA_hr": (time.time() - start_time) / (step+1) * (num_steps - step) / 3600,
                     "lr": optimizer.param_groups[0]['lr'],
+                    "val/ewa_loss": ewa_val_loss.value,
+                    "val/d_loss": d_val_loss.value,
                 }
                 logger.info(val_metrics)
 

@@ -41,3 +41,64 @@ def setup_seed(seed):
     torch.cuda.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
+
+def median(values):
+    values = sorted(values)
+    size = len(values)
+    if size % 2 == 1:
+        return values[int((size - 1) / 2)]
+    return (values[int(size / 2 - 1)] + values[int(size / 2)]) / 2
+
+
+class ExponentialMovingAverage:
+    def __init__(self, weight=0.9, initial_value=0.):
+        self.value: float = initial_value
+        self.n: int = 0
+        self.weight = weight
+        self.last_good_value, self.last_good_n = self.value, self.n
+
+    def add(self, x: float) -> float:
+        if not math.isnan(self.value):
+            self.last_good_value, self.last_good_n = self.value, self.n
+        self.n += 1
+        self.value = x * self.weight + self.last_good_value * (1 - self.weight)
+        return self.value
+
+class SmoothedDyDx:
+    def __init__(self, y_ema_weight=0.8, x_ema_weight=0.8,
+                 dy_ema_weight=0.9, dx_ema_weight=0.9,
+                 dydx_ema_weight=0.95):
+
+
+        self.value = 0.
+        self.n = 0
+
+        # smooth x and y
+        self.y = ExponentialMovingAverage(y_ema_weight)
+        self.x = ExponentialMovingAverage(x_ema_weight)
+
+        # smooth deltas
+        self.dy = ExponentialMovingAverage(dy_ema_weight)
+        self.dx = ExponentialMovingAverage(dx_ema_weight)
+
+        # smooth dy/dx
+        self.dydx = ExponentialMovingAverage(dydx_ema_weight)
+
+
+    def add(self, x: float, y: float) -> float:
+        last_x, last_y = self.x.value, self.y.value
+
+        self.y.add(y)
+        self.x.add(x)
+
+        dydx = 0.
+        if self.x.n > 1:
+            self.dy.add(self.y.value - last_y)
+            self.dx.add(self.x.value - last_x)
+
+            dydx = self.dydx.add(self.dy.value / self.dx.value)
+
+        self.value = dydx
+        self.n += 1
+
+        return dydx
