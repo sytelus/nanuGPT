@@ -8,6 +8,7 @@ from collections import defaultdict
 import math
 import psutil
 import random
+import hashlib
 
 import torch
 
@@ -102,3 +103,15 @@ class SmoothedDyDx:
         self.n += 1
 
         return dydx
+
+def tensor_hash(tensor, sort=False):
+    flattened = tensor.flatten()
+    if sort:
+        # Flatten and sort the tensor
+        flattened, _ = torch.sort(flattened)
+
+    # Convert to byte representation
+    tensor_bytes = flattened.cpu().numpy().tobytes()
+
+    # Compute the hash
+    return hashlib.sha256(tensor_bytes).hexdigest()
