@@ -16,13 +16,19 @@ class DecoderBlock(torch.nn.Module):
     self.ffn_norm = nn.LayerNorm(dim_model)
 
   def forward(self, x: Tensor):
-    attn_mask = torch.full(
-        (len(x), len(x)), -float("Inf"), device=x.device, dtype=x.dtype
-    )
-    attn_mask = torch.triu(attn_mask, diagonal=1)
+    # x: (context_len, batch_size, dim_model)
+    # attn_mask: (context_len, context_len)
+    # attn_mask = torch.full(
+    #     (len(x), len(x)), -float("Inf"), device=x.device, dtype=x.dtype
+    # )
+    # attn_mask = torch.triu(attn_mask, diagonal=1)
 
+    attn_mask = nn.Transformer.generate_square_subsequent_mask(x.shape[0], device=x.device)
+
+    # a1: (context_len, batch_size, dim_model)
     a1, _ = self.self_attn(x, x, x, attn_mask=attn_mask)
     a1 = self.self_attn_norm (x + a1)
+    # a1: (context_len, batch_size, dim_model)
     a2 = self.ffn(a1)
     a2 = self.ffn_norm(a1 + a2)
 
@@ -36,22 +42,28 @@ class Transformer(torch.nn.Module):
     self.position_embeddings = nn.Embedding(seq_len, dim_model)
     self.model = nn.Sequential(
         *[DecoderBlock(dim_model, num_heads) for _ in range(num_layers)],
+        # decoder: (context_len, batch_size, dim_model)
         nn.LayerNorm(dim_model),
+        # logits: (context_len, batch_size, num_tokens)
         nn.Linear(dim_model, num_tokens)
     )
 
   def forward(self, inputs: Tensor):
+    # inputs: (batch_size, context_len)
+
     batch_size, context_len = inputs.shape
-
+    # token_embedding: (batch_size, context_len, dim_model)
     token_embedding = self.token_embeddings(inputs)
-
+    # positions: (batch_size, context_len)
     positions = repeat(torch.arange(context_len, device=inputs.device), "p -> b p", b = batch_size)
+    # position_embedding: (batch_size, context_len, dim_model)
     position_embedding = self.position_embeddings(positions)
-
+    # embedding: (batch_size, context_len, dim_model)
     embedding = token_embedding + position_embedding
-
+    # embedding: (context_len, batch_size, dim_model)
     embedding = rearrange(embedding, 'b s d -> s b d')
-
+    #embedding = embedding.permute(1, 0, 2)
+    # output: (context_len, batch_size, num_tokens)
     return self.model(embedding)
 
   def get_num_params(self, non_embedding=True)->int:

@@ -1,4 +1,4 @@
-from typing import Tuple, Dict, List
+from typing import Tuple, Dict, List, Sequence
 import os
 import sys
 import torch
@@ -31,6 +31,10 @@ def full_path(path:str, create=False)->str:
     return path
 
 def setup_torch():
+    # show Tensor shape first for tensor's rpresentation
+    normal_repr = torch.Tensor.__repr__
+    torch.Tensor.__repr__ = lambda self: f"{tuple(self.shape)}:{normal_repr(self)}" # type: ignore
+
     torch.backends.cudnn.enabled = True
     torch.set_printoptions(precision=10)
     torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
@@ -104,8 +108,18 @@ class SmoothedDyDx:
 
         return dydx
 
+def save_list(l, filename):
+    with open(filename, 'w') as f:
+        for item in l:
+            if isinstance(item, Sequence):
+                for i in item:
+                    f.write(f"{i}\t")
+            else:
+                f.write(f"{item}")
+            f.write("\n")
+
 def tensor_hash(tensor, sort=False):
-    flattened = tensor.flatten()
+    flattened = tensor.clone().detach().flatten()
     if sort:
         # Flatten and sort the tensor
         flattened, _ = torch.sort(flattened)
@@ -115,3 +129,26 @@ def tensor_hash(tensor, sort=False):
 
     # Compute the hash
     return hashlib.sha256(tensor_bytes).hexdigest()
+
+def shuffle_tuple_of_lists(t:Tuple[List, ...])->Tuple[List, ...]:
+    # Length of any member
+    length = len(t[0])
+
+    # Generate a permutation of indices
+    permuted_indices = list(range(length))
+    random.shuffle(permuted_indices)
+
+    # Reorder each member of the tuple using the permuted indices
+    shuffled = tuple([member[permuted_indices] for member in t])
+
+    return shuffled
+
+def save_dataloader(dl, filename: str):
+    with open(filename, 'w') as f:
+        for b in dl:
+            inputs, labels = tuple(t for t in b)
+            assert(len(inputs)==len(labels))
+            for i,l in zip(inputs.tolist(), labels.tolist()):
+                for num in i+[l]:
+                    f.write(f"{num}\t")
+                f.write("\n")

@@ -9,7 +9,7 @@ from grokking.arithmatic_tokenizer import ArithmaticTokenizer
 
 
 DIVISION_MODULO_OPERATIONS = {
-    "x/y": lambda x, y, p: (x*y % p, y, x), # out = a,b,c such that a/b (mod p) = c (mod p)
+    "x/y": lambda x, y, p: (x*y % p, y, x), # out = a,b,c such that b*c (mod p) = a (remember to detokenize!)
     "(x//y)if(y%2==1)else(x-y)": lambda x, y, _: torch.where(y % 2 == 1, x // y, x - y)
 }
 
@@ -82,8 +82,6 @@ def get_data(operation: str, prime: int, training_fraction: float,
     val_size = len(dataset) - train_size
 
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
-
-    batch_size = min(batch_size, ceil(len(dataset) / 2))
 
     train_loader = DataLoader(train_dataset, batch_size=min(batch_size, len(train_dataset)) , shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=min(eval_batch_size, len(val_dataset)) , shuffle=False)
