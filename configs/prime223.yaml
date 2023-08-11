@@ -5,4 +5,4 @@ prime: 223
 
 # training
 weight_decay: 0.1     # weight_decay=1 makes convergence much faster and original graph is not reproducible
-num_steps: 5000    # 1e5 is not enough when weight_decay=0.0
+num_steps: 3000    # 1e5 is not enough when weight_decay=0.0

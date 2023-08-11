@@ -11,22 +11,11 @@ from grokking.logger import Logger, DEFAULT_WANDB_METRICS
 from grokking import utils
 from grokking.utils import ExponentialMovingAverage, SmoothedDyDx
 
-s1=0
-pass1, pass2 = 99, 500 # phase change at pass1 from 98 to 99
-exp_name = f'log_{pass1}-{pass2}_e1'
 
 def evaluate(model, val_loader, device, criterion)->Tuple[float, float]:
     correct = 0
     loss_sum = 0.
     loss, acc = 0., 0.
-
-    global s1
-    s1+=1
-
-    if s1 < pass1:
-        return -1, -1
-    elif s1 != pass1 and (s1+pass1) % pass2 != 0:
-        return -1, -1
 
     # Set model to evaluation mode
     model.eval()
@@ -47,35 +36,14 @@ def evaluate(model, val_loader, device, criterion)->Tuple[float, float]:
     return loss, acc
 
 
-def train(config:Mapping):
+def train(config:Mapping, logger):
     if not config['device']:
         device_name = 'cuda' if torch.cuda.is_available() else 'cpu'
     else:
         device_name = config['device']
 
-    out_dir = utils.full_path(config['out_dir'], create=True)
-
     utils.setup_torch()
     utils.setup_seed(config['seed'])
-
-    logger = Logger(log_filepath=os.path.join(out_dir, exp_name+'.txt'),
-                    enable_wandb=config['use_wandb'], master_process=True,
-                    wandb_project=config['wandb_project'], wandb_run_name=config['wandb_run'],
-                    config=config,
-                    wandb_metrics=DEFAULT_WANDB_METRICS + [
-                        {"name": "train/acc", "step_metric":"train/step", "summary":"max", "goal":"max"},
-                        {"name": "val/acc", "step_metric":"train/step", "summary":"max", "goal":"max"},
-                        {"name": "lr", "step_metric":"train/step", "summary":"max", "goal":"max"},
-                        {"name": "ETA_hr", "step_metric":"train/step", "summary":"max", "goal":"max"},
-                        {"name": "w_norm", "step_metric":"train/step", "summary":"min", "goal":"min"},
-                        {"name": "train/d_loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
-                        {"name": "val/d_loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
-                        {"name": "train/ewa_loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
-                        {"name": "val/ewa_loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
-                        {"name": "w_norm_ewa", "step_metric":"train/step", "summary":"min", "goal":"min"},
-                    ])
-
-    logger.summary(config)
 
     device = torch.device(device_name)
     num_steps = config['num_steps']
@@ -100,17 +68,6 @@ def train(config:Mapping):
         num_tokens=len(tokenizer),
         seq_len=5, # currently each input eq has [eos a op b =] which is 5 tokens
         ).to(device)
-
-    logger.summary({"device_name": device_name,
-                    'train_data_len': len(train_loader.dataset),
-                    'val_data_len': len(val_loader.dataset),
-                    'train_loader_len': len(train_loader),
-                    'val_loader_len': len(val_loader),
-                    'epochs': ceil(num_steps / len(train_loader)),
-                    'model_params': model.get_num_params(True),
-                    'model_params_all': model.get_num_params(False),
-                    'vocab_size': len(tokenizer),
-                    'data_gen_time_s': data_gen_time,})
 
     # optimizer
     optimizer = torch.optim.AdamW(
@@ -171,24 +128,18 @@ def train(config:Mapping):
             #     }
                 #logger.info(metrics)
 
-            val_loss, val_acc = evaluate(model, val_loader, device, criterion)
-
-            val_metrics = {
-                "train/step": step,
-                "val/acc": val_acc,
-                "epoch": epoch,
-                "epoch_step": epoch_step,
-            }
-            if val_acc >= 0:
-                logger.info(val_metrics)
-
             step += 1
             epoch_step += 1
             if step >= num_steps:
                 break
         epoch += 1
-    logger.info({"random": torch.randint(0, 1000, (1,))})
 
-    logger.summary({"train_time_hr": (time.time() - start_time)/3600,
-                    "step_time_s": (time.time() - start_time)/step,})
-    logger.finish()
+    val_loss, val_acc = evaluate(model, val_loader, device, criterion)
+    val_metrics = {
+        "seed": config['seed'],
+        "train/step": step,
+        "val/acc": val_acc,
+        "epoch": epoch,
+        "epoch_step": epoch_step,
+    }
+    logger.info(val_metrics)
