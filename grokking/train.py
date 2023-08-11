@@ -13,7 +13,7 @@ from grokking.utils import ExponentialMovingAverage, SmoothedDyDx
 
 s1=0
 exp_name = 'log_p2-1_e500'
-pass1, pass2 = 2*500, 1*500
+pass1, pass2 = 2*500, 2*500
 
 def evaluate(model, val_loader, device, criterion)->Tuple[float, float]:
     correct = 0
@@ -181,6 +181,8 @@ def train(config:Mapping):
             step += 1
             if step >= num_steps:
                 break
+
+    logger.info({"random": torch.randint(0, 1000, (1,))})
 
     logger.summary({"train_time_hr": (time.time() - start_time)/3600,
                     "step_time_s": (time.time() - start_time)/step,})
