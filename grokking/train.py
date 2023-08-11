@@ -23,24 +23,26 @@ def evaluate(model, val_loader, device, criterion)->Tuple[float, float]:
 
     pass1, pass2 = 2, 1 # 1, 2 is low score, 2, 2 # high score
 
+    if s1<pass1:
+        return -1, -1
+
     # Set model to evaluation mode
     model.eval()
 
     with torch.no_grad():
-        if s1>=pass1:
-            # Loop over each batch from the validation set
-            for batch in val_loader:
-                if s1>=pass2:
-                    inputs, labels = tuple(t.to(device) for t in batch)
-                    #inputs, labels = torch.unsqueeze(inputs,0), torch.unsqueeze(labels,0)
+        # Loop over each batch from the validation set
+        for batch in val_loader:
+            if s1>=pass2:
+                inputs, labels = tuple(t.to(device) for t in batch)
+                #inputs, labels = torch.unsqueeze(inputs,0), torch.unsqueeze(labels,0)
 
-                    # a=inputs[:,1]
-                    # b=inputs[:,3]
-                    # assert(sum(((labels-11)*(b-11) % 223)==(a-11))==(len(labels)))
+                # a=inputs[:,1]
+                # b=inputs[:,3]
+                # assert(sum(((labels-11)*(b-11) % 223)==(a-11))==(len(labels)))
 
-                    output = model(inputs)[-1,:,:]
-                    correct += (torch.argmax(output, dim=1) == labels).sum().item()
-                    loss_sum += criterion(output, labels).item() * len(labels)
+                output = model(inputs)[-1,:,:]
+                correct += (torch.argmax(output, dim=1) == labels).sum().item()
+                loss_sum += criterion(output, labels).item() * len(labels)
             #assert count == len(val_loader.dataset)
 
     loss = loss_sum / len(val_loader.dataset)
