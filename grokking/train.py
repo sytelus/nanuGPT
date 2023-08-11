@@ -12,7 +12,7 @@ from grokking import utils
 from grokking.utils import ExponentialMovingAverage, SmoothedDyDx
 
 s1=0
-pass1, pass2 = 2*500, 137 # 2*500
+pass1, pass2 = 1, 2*500
 exp_name = f'log_{pass1}-{pass2}_e1'
 
 def evaluate(model, val_loader, device, criterion)->Tuple[float, float]:
