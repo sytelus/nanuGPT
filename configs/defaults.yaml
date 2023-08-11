@@ -11,7 +11,7 @@ out_dir: '~/out_dir/grokking'
 # data
 operation: 'x/y'
 training_fraction: 0.5
-batch_size: 512
+batch_size: 669
 
 # training
 learning_rate: 1.0E-3
