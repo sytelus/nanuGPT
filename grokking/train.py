@@ -1,6 +1,8 @@
 from math import ceil
 import time
 from typing import Mapping, Tuple
+import os
+
 import torch
 
 from grokking.data import get_data
@@ -10,7 +12,7 @@ from grokking import utils
 from grokking.utils import ExponentialMovingAverage, SmoothedDyDx
 
 s1=0
-
+exp_name = 'log_p50-1_e500'
 def evaluate(model, val_loader, device, criterion)->Tuple[float, float]:
     correct = 0
     loss_sum = 0.
@@ -19,7 +21,7 @@ def evaluate(model, val_loader, device, criterion)->Tuple[float, float]:
     global s1
     s1+=1
 
-    pass1, pass2 = 2, 2 # 1, 2 is low score, 2, 2 # high score
+    pass1, pass2 = 50, 1 # 1, 2 is low score, 2, 2 # high score
 
     # Set model to evaluation mode
     model.eval()
@@ -54,10 +56,13 @@ def train(config:Mapping):
     else:
         device_name = config['device']
 
+    out_dir = utils.full_path(config['out_dir'], create=True)
+
     utils.setup_torch()
     utils.setup_seed(config['seed'])
 
-    logger = Logger(config['use_wandb'], master_process=True,
+    logger = Logger(log_filepath=os.path.join(out_dir, exp_name+'.txt'),
+                    enable_wandb=config['use_wandb'], master_process=True,
                     wandb_project=config['wandb_project'], wandb_run_name=config['wandb_run'],
                     config=config,
                     wandb_metrics=DEFAULT_WANDB_METRICS + [
@@ -165,27 +170,27 @@ def train(config:Mapping):
                     "train/ewa_loss": ewa_train_loss.value,
                     "train/d_loss": d_train_loss.value,
                 }
-                logger.info(metrics)
+                #logger.info(metrics)
 
             if step % eval_every == 0 or step+1 >= num_steps:
                 val_loss, val_acc = evaluate(model, val_loader, device, criterion)
 
-                ewa_val_loss.add(val_loss)
-                d_val_loss.add(val_loss, step)
+                # ewa_val_loss.add(val_loss)
+                # d_val_loss.add(val_loss, step)
 
-                w_norm = model.weight_norm()
-                w_norm_ewa.add(w_norm)
+                # w_norm = model.weight_norm()
+                # w_norm_ewa.add(w_norm)
 
                 val_metrics = {
                     "train/step": step,
                     "val/acc": val_acc,
-                    "val/loss": val_loss,
-                    "w_norm": w_norm,
-                    "w_norm_ewa": w_norm_ewa.value,
-                    "ETA_hr": (time.time() - start_time) / (step+1) * (num_steps - step) / 3600,
-                    "lr": optimizer.param_groups[0]['lr'],
-                    "val/ewa_loss": ewa_val_loss.value,
-                    "val/d_loss": d_val_loss.value,
+                    # "val/loss": val_loss,
+                    # "w_norm": w_norm,
+                    # "w_norm_ewa": w_norm_ewa.value,
+                    # "ETA_hr": (time.time() - start_time) / (step+1) * (num_steps - step) / 3600,
+                    # "lr": optimizer.param_groups[0]['lr'],
+                    # "val/ewa_loss": ewa_val_loss.value,
+                    # "val/d_loss": d_val_loss.value,
                 }
                 logger.info(val_metrics)
 

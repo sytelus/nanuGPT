@@ -6,7 +6,7 @@ num_heads: 4
 # general
 device: ''            # auto select or cpu, cuda
 seed: 42
-
+out_dir: '~/out_dir/grokking'
 
 # data
 operation: 'x/y'
@@ -17,5 +17,5 @@ batch_size: 512
 learning_rate: 1.0E-3
 
 # eval
-eval_every: 3000
+eval_every: 1
 eval_batch_size: 32768 # 2^15=32768

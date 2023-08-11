@@ -36,7 +36,8 @@ def create_py_logger(filepath:Optional[str]=None,
         filepath = full_path(filepath)
         # log files gets appeneded if already exist
         # zero_file(filepath)
-        fh = logging.FileHandler(filename=full_path(filepath))
+        # use mode='a' to append
+        fh = logging.FileHandler(filename=full_path(filepath), mode='w', encoding='utf-8')
         fh.setLevel(level)
         fh.setFormatter(logging.Formatter('[%(asctime)s][%(levelname)s] %(message)s'))
         logger.addHandler(fh)
@@ -71,14 +72,15 @@ def _fmt(val:Any)->str:
 class Logger:
     def __init__(self, enable_wandb:bool, master_process:bool,
                  wandb_project:str, wandb_run_name:Optional[str], config:Mapping,
-                 wandb_metrics=DEFAULT_WANDB_METRICS) -> None:
+                 wandb_metrics=DEFAULT_WANDB_METRICS,
+                 log_filepath:Optional[str]=None) -> None:
         self._logger = None
         self._run = None
         self.enable_wandb = enable_wandb
         self.master_process = master_process
 
         if master_process:
-            self._logger = create_py_logger()
+            self._logger = create_py_logger(filepath=log_filepath)
         if enable_wandb and master_process and not is_debugging():
             self._run = create_wandb_logger(wandb_project, wandb_run_name, config, wandb_metrics)
         # else leave things to None
