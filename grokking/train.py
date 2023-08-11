@@ -13,6 +13,8 @@ from grokking.utils import ExponentialMovingAverage, SmoothedDyDx
 
 s1=0
 exp_name = 'log_p2-1_e500'
+pass1, pass2 = 2*500, 1*500
+
 def evaluate(model, val_loader, device, criterion)->Tuple[float, float]:
     correct = 0
     loss_sum = 0.
@@ -21,9 +23,9 @@ def evaluate(model, val_loader, device, criterion)->Tuple[float, float]:
     global s1
     s1+=1
 
-    pass1, pass2 = 2, 1 # 1, 2 is low score, 2, 2 # high score
-
-    if s1<pass1:
+    if s1 < pass1:
+        return -1, -1
+    elif s1 != pass1 and (s1+pass1) % pass2 != 0:
         return -1, -1
 
     # Set model to evaluation mode
@@ -32,18 +34,11 @@ def evaluate(model, val_loader, device, criterion)->Tuple[float, float]:
     with torch.no_grad():
         # Loop over each batch from the validation set
         for batch in val_loader:
-            if s1>=pass2:
-                inputs, labels = tuple(t.to(device) for t in batch)
-                #inputs, labels = torch.unsqueeze(inputs,0), torch.unsqueeze(labels,0)
+            inputs, labels = tuple(t.to(device) for t in batch)
 
-                # a=inputs[:,1]
-                # b=inputs[:,3]
-                # assert(sum(((labels-11)*(b-11) % 223)==(a-11))==(len(labels)))
-
-                output = model(inputs)[-1,:,:]
-                correct += (torch.argmax(output, dim=1) == labels).sum().item()
-                loss_sum += criterion(output, labels).item() * len(labels)
-            #assert count == len(val_loader.dataset)
+            output = model(inputs)[-1,:,:]
+            correct += (torch.argmax(output, dim=1) == labels).sum().item()
+            loss_sum += criterion(output, labels).item() * len(labels)
 
     loss = loss_sum / len(val_loader.dataset)
     acc = correct / len(val_loader.dataset)
@@ -152,7 +147,7 @@ def train(config:Mapping):
             # we only take the last token of the output for loss
             output = model(inputs)[-1,:,:]
             loss = criterion(output, labels)
-            acc = (torch.argmax(output, dim=1) == labels).sum() / len(labels)
+            #acc = (torch.argmax(output, dim=1) == labels).sum() / len(labels)
 
             # Backward pass
             loss.backward()
@@ -161,39 +156,26 @@ def train(config:Mapping):
             optimizer.step()
             scheduler.step()
 
-            ewa_train_loss.add(loss.item())
-            d_train_loss.add(loss.item(), step)
+            # ewa_train_loss.add(loss.item())
+            # d_train_loss.add(loss.item(), step)
 
-            if step % 20 == 0 or step+1 >= num_steps:
-                metrics = {
-                    "train/step": step,
-                    "train/acc": acc.item(),
-                    "train/loss": loss.item(),
-                    "train/ewa_loss": ewa_train_loss.value,
-                    "train/d_loss": d_train_loss.value,
-                }
+            # if step % 20 == 0 or step+1 >= num_steps:
+            #     metrics = {
+            #         "train/step": step,
+            #         "train/acc": acc.item(),
+            #         "train/loss": loss.item(),
+            #         "train/ewa_loss": ewa_train_loss.value,
+            #         "train/d_loss": d_train_loss.value,
+            #     }
                 #logger.info(metrics)
 
-            if step % eval_every == 0 or step+1 >= num_steps:
-                val_loss, val_acc = evaluate(model, val_loader, device, criterion)
+            val_loss, val_acc = evaluate(model, val_loader, device, criterion)
 
-                # ewa_val_loss.add(val_loss)
-                # d_val_loss.add(val_loss, step)
-
-                # w_norm = model.weight_norm()
-                # w_norm_ewa.add(w_norm)
-
-                val_metrics = {
-                    "train/step": step,
-                    "val/acc": val_acc,
-                    # "val/loss": val_loss,
-                    # "w_norm": w_norm,
-                    # "w_norm_ewa": w_norm_ewa.value,
-                    # "ETA_hr": (time.time() - start_time) / (step+1) * (num_steps - step) / 3600,
-                    # "lr": optimizer.param_groups[0]['lr'],
-                    # "val/ewa_loss": ewa_val_loss.value,
-                    # "val/d_loss": d_val_loss.value,
-                }
+            val_metrics = {
+                "train/step": step,
+                "val/acc": val_acc,
+            }
+            if val_acc >= 0:
                 logger.info(val_metrics)
 
             step += 1
