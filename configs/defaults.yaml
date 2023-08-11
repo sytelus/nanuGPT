@@ -17,5 +17,5 @@ batch_size: 512
 learning_rate: 1.0E-3
 
 # eval
-eval_every: 1
+eval_every: 500
 eval_batch_size: 32768 # 2^15=32768

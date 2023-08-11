@@ -12,7 +12,7 @@ from grokking import utils
 from grokking.utils import ExponentialMovingAverage, SmoothedDyDx
 
 s1=0
-exp_name = 'log_p50-1_e500'
+exp_name = 'log_p2-1_e500'
 def evaluate(model, val_loader, device, criterion)->Tuple[float, float]:
     correct = 0
     loss_sum = 0.
@@ -21,7 +21,7 @@ def evaluate(model, val_loader, device, criterion)->Tuple[float, float]:
     global s1
     s1+=1
 
-    pass1, pass2 = 50, 1 # 1, 2 is low score, 2, 2 # high score
+    pass1, pass2 = 2, 1 # 1, 2 is low score, 2, 2 # high score
 
     # Set model to evaluation mode
     model.eval()
