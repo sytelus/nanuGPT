@@ -12,7 +12,7 @@ from grokking import utils
 from grokking.utils import ExponentialMovingAverage, SmoothedDyDx
 
 s1=0
-pass1, pass2 = 1, 2*500
+pass1, pass2 = 99, 500 # phase change at pass1 from 98 to 99
 exp_name = f'log_{pass1}-{pass2}_e1'
 
 def evaluate(model, val_loader, device, criterion)->Tuple[float, float]:
@@ -126,6 +126,7 @@ def train(config:Mapping):
     )
 
     step, start_time = 0, time.time()
+    epoch, epoch_step = 0, 0
     ewa_train_loss, ewa_val_loss = ExponentialMovingAverage(weight=0.1), ExponentialMovingAverage(weight=0.1)
     w_norm_ewa = ExponentialMovingAverage(weight=0.3)
     d_train_loss = SmoothedDyDx(y_ema_weight=1.0, x_ema_weight=0.5, dx_ema_weight=0.9,
@@ -135,6 +136,7 @@ def train(config:Mapping):
     criterion = torch.nn.CrossEntropyLoss()
     model.train()
     while step < num_steps:
+        epoch_step = 0
         # Loop over each batch from the training set
         for batch in train_loader:
             inputs, labels = tuple(t.to(device) for t in batch)
@@ -174,14 +176,17 @@ def train(config:Mapping):
             val_metrics = {
                 "train/step": step,
                 "val/acc": val_acc,
+                "epoch": epoch,
+                "epoch_step": epoch_step,
             }
             if val_acc >= 0:
                 logger.info(val_metrics)
 
             step += 1
+            epoch_step += 1
             if step >= num_steps:
                 break
-
+        epoch += 1
     logger.info({"random": torch.randint(0, 1000, (1,))})
 
     logger.summary({"train_time_hr": (time.time() - start_time)/3600,
