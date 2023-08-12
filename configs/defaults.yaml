@@ -12,6 +12,7 @@ out_dir: '~/out_dir/grokking'
 # data
 operation: 'x/y'
 training_fraction: 0.5
+val_fraction: null # if null, use 1 - training_fraction
 batch_size: 512
 
 # training

@@ -1,5 +1,5 @@
 import random
-from typing import Tuple
+from typing import Optional, Tuple
 from math import ceil
 import torch
 
@@ -70,8 +70,8 @@ def operation_mod_p_data(operation: str, p: int, tokenizer: ArithmaticTokenizer)
 
     return equations, results
 
-def get_data(operation: str, prime: int, training_fraction: float,
-             batch_size: int, eval_batch_size:int, data_loader_seed:int)->Tuple[DataLoader,DataLoader, ArithmaticTokenizer]:
+def get_data(operation: str, prime: int, training_fraction: float, val_fraction:Optional[float],
+             batch_size: int, eval_batch_size:int, data_loader_seed:int)->Tuple[DataLoader,DataLoader, Optional[DataLoader], ArithmaticTokenizer]:
     tokenizer = ArithmaticTokenizer(prime, list(ALL_OPERATIONS.keys()))
 
     inputs, labels = operation_mod_p_data(operation, prime, tokenizer)
@@ -79,15 +79,28 @@ def get_data(operation: str, prime: int, training_fraction: float,
     dataset = torch.utils.data.TensorDataset(inputs, labels)
 
     train_size = int(training_fraction * len(dataset))
-    val_size = len(dataset) - train_size
+    if val_fraction:
+        val_size = int(val_fraction * len(dataset))
+        test_size = len(dataset) - train_size - val_size
+    else:
+        val_size = len(dataset) - train_size
+        test_size = 0
 
-    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
+    train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(dataset,
+                                                               [train_size, val_size, test_size])
 
-    train_loader_seed, val_loader_seed = data_loader_seed, data_loader_seed + 1
+    train_loader_seed, val_loader_seed, test_loader_seed = data_loader_seed, data_loader_seed + 1, data_loader_seed + 2
+
     train_loader_gen = torch.Generator().manual_seed(train_loader_seed)
     val_loader_gen = torch.Generator().manual_seed(val_loader_seed)
+    test_loader_gen = torch.Generator().manual_seed(test_loader_seed)
 
     train_loader = DataLoader(train_dataset, batch_size=min(batch_size, len(train_dataset)) , shuffle=True, generator=train_loader_gen)
     val_loader = DataLoader(val_dataset, batch_size=min(eval_batch_size, len(val_dataset)) , shuffle=False, generator=val_loader_gen)
 
-    return train_loader, val_loader, tokenizer
+    if len(test_dataset):
+        test_loader = DataLoader(test_dataset, batch_size=min(eval_batch_size, len(test_dataset)) , shuffle=False, generator=test_loader_gen)
+    else:
+        test_loader = None
+
+    return train_loader, val_loader, test_loader, tokenizer

@@ -51,10 +51,11 @@ def train(config:Mapping, logger):
 
     # get dataset
     start_time = time.time()
-    train_loader, val_loader, tokenizer = get_data(
+    train_loader, val_loader, test_loader, tokenizer = get_data(
         config['operation'],
         config['prime'],
         config['training_fraction'],
+        config['val_fraction'],
         config['batch_size'],
         config['eval_batch_size'],
         config['data_loader_seed'],
@@ -136,10 +137,16 @@ def train(config:Mapping, logger):
         epoch += 1
 
     val_loss, val_acc = evaluate(model, val_loader, device, criterion)
+    if test_loader:
+        test_loss, test_acc = evaluate(model, test_loader, device, criterion)
+    else:
+        test_loss, test_acc = -1, -1
+
     val_metrics = {
         "data_loader_seed": config['data_loader_seed'],
         "train/step": step,
         "val/acc": val_acc,
+        "test/acc": test_acc,
         "epoch": epoch,
         "epoch_step": epoch_step,
     }
