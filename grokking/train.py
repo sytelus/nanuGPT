@@ -137,6 +137,8 @@ def train(config:Mapping, logger):
                 else:
                     test_loss, test_acc = -1, -1
 
+                w_norm = model.weight_norm()
+
                 val_metrics = {
                     "data_loader_seed": config['data_loader_seed'],
                     "train/step": step,
@@ -144,6 +146,8 @@ def train(config:Mapping, logger):
                     "val/loss": val_loss,
                     "train/acc": acc.item(),
                     "train/loss": loss.item(),
+                    "w_norm": w_norm,
+                    "lr": optimizer.param_groups[0]['lr'],
                 }
                 logger.info(val_metrics)
 
