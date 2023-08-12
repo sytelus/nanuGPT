@@ -57,6 +57,7 @@ def train(config:Mapping, logger):
         config['training_fraction'],
         config['batch_size'],
         config['eval_batch_size'],
+        config['data_loader_seed'],
     )
     data_gen_time = time.time() - start_time
 
@@ -136,7 +137,7 @@ def train(config:Mapping, logger):
 
     val_loss, val_acc = evaluate(model, val_loader, device, criterion)
     val_metrics = {
-        "seed": config['seed'],
+        "data_loader_seed": config['data_loader_seed'],
         "train/step": step,
         "val/acc": val_acc,
         "epoch": epoch,

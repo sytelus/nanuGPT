@@ -71,7 +71,7 @@ def operation_mod_p_data(operation: str, p: int, tokenizer: ArithmaticTokenizer)
     return equations, results
 
 def get_data(operation: str, prime: int, training_fraction: float,
-             batch_size: int, eval_batch_size:int)->Tuple[DataLoader,DataLoader, ArithmaticTokenizer]:
+             batch_size: int, eval_batch_size:int, data_loader_seed:int)->Tuple[DataLoader,DataLoader, ArithmaticTokenizer]:
     tokenizer = ArithmaticTokenizer(prime, list(ALL_OPERATIONS.keys()))
 
     inputs, labels = operation_mod_p_data(operation, prime, tokenizer)
@@ -83,7 +83,11 @@ def get_data(operation: str, prime: int, training_fraction: float,
 
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
 
-    train_loader = DataLoader(train_dataset, batch_size=min(batch_size, len(train_dataset)) , shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=min(eval_batch_size, len(val_dataset)) , shuffle=False)
+    train_loader_seed, val_loader_seed = data_loader_seed, data_loader_seed + 1
+    train_loader_gen = torch.Generator().manual_seed(train_loader_seed)
+    val_loader_gen = torch.Generator().manual_seed(val_loader_seed)
+
+    train_loader = DataLoader(train_dataset, batch_size=min(batch_size, len(train_dataset)) , shuffle=True, generator=train_loader_gen)
+    val_loader = DataLoader(val_dataset, batch_size=min(eval_batch_size, len(val_dataset)) , shuffle=False, generator=val_loader_gen)
 
     return train_loader, val_loader, tokenizer
