@@ -108,7 +108,7 @@ def train(config:Mapping, logger):
             # we only take the last token of the output for loss
             output = model(inputs)[-1,:,:]
             loss = criterion(output, labels)
-            #acc = (torch.argmax(output, dim=1) == labels).sum() / len(labels)
+            acc = (torch.argmax(output, dim=1) == labels).sum() / len(labels)
 
             # Backward pass
             loss.backward()
@@ -130,24 +130,27 @@ def train(config:Mapping, logger):
             #     }
                 #logger.info(metrics)
 
+            if step % eval_every == 0 or step+1 >= num_steps:
+                val_loss, val_acc = evaluate(model, val_loader, device, criterion)
+                if test_loader:
+                    test_loss, test_acc = evaluate(model, test_loader, device, criterion)
+                else:
+                    test_loss, test_acc = -1, -1
+
+                val_metrics = {
+                    "data_loader_seed": config['data_loader_seed'],
+                    "train/step": step,
+                    "val/acc": val_acc,
+                    "val/loss": val_loss,
+                    "train/acc": acc.item(),
+                    "train/loss": loss.item(),
+                }
+                logger.info(val_metrics)
+
+
             step += 1
             epoch_step += 1
             if step >= num_steps:
                 break
         epoch += 1
 
-    val_loss, val_acc = evaluate(model, val_loader, device, criterion)
-    if test_loader:
-        test_loss, test_acc = evaluate(model, test_loader, device, criterion)
-    else:
-        test_loss, test_acc = -1, -1
-
-    val_metrics = {
-        "data_loader_seed": config['data_loader_seed'],
-        "train/step": step,
-        "val/acc": val_acc,
-        "test/acc": test_acc,
-        "epoch": epoch,
-        "epoch_step": epoch_step,
-    }
-    logger.info(val_metrics)
