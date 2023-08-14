@@ -24,7 +24,8 @@ def _dict2msg(d:Mapping[str,Any])->str:
 def create_py_logger(filepath:Optional[str]=None,
                   project:Optional[str]=None, run_name:Optional[str]=None,
                   run_description:Optional[str]=None,
-                  name:Optional[str]=None,
+                  project_config:Optional[Mapping]=None,
+                  py_logger_name:Optional[str]=None,    # default is root
                   level=logging.INFO,
                   enable_stdout=True)->logging.Logger:
     logging.basicConfig(level=level) # this sets level for standard logging.info calls
@@ -58,7 +59,8 @@ def create_py_logger(filepath:Optional[str]=None,
     logger.info(_dict2msg({'project': project, 'run_name': run_name}))
     logger.info(_dict2msg({'run_description': run_description}))
     logger.info(_dict2msg({'filepath': filepath}))
-
+    if project_config:
+        logger.info(_dict2msg({'project_config': project_config}))
 
     return logger
 
@@ -69,12 +71,12 @@ DEFAULT_WANDB_METRICS = [
                             {"name": "val/loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
                         ]
 
-def create_wandb_logger(wandb_project, wandb_run_name, config,
+def create_wandb_logger(wandb_project, wandb_run_name, project_config,
                         metrics:List[Dict[str, Any]], description:Optional[str]=None):
 
     wandb.login() # use API key from WANDB_API_KEY env variable
 
-    run = wandb.init(project=wandb_project, name=wandb_run_name, config=config,
+    run = wandb.init(project=wandb_project, name=wandb_run_name, config=project_config,
                      save_code=True, notes=description)
     for metric in metrics:
         wandb.define_metric(**metric)
@@ -84,7 +86,7 @@ class Logger:
     def __init__(self, master_process:bool,
                  project:Optional[str]=None, run_name:Optional[str]=None,
                  run_description:Optional[str]=None,
-                 config:Optional[Mapping]=None,
+                 project_config:Optional[Mapping]=None,
                  enable_wandb=False,
                  wandb_metrics=DEFAULT_WANDB_METRICS,
                  log_filepath:Optional[str]=None) -> None:
@@ -95,9 +97,10 @@ class Logger:
 
         if master_process:
             self._logger = create_py_logger(filepath=log_filepath,
-                                            project=project, run_name=run_name, run_description=run_description)
+                                            project=project, run_name=run_name, run_description=run_description,
+                                            project_config=project_config)
         if enable_wandb and master_process and not is_debugging():
-            self._run = create_wandb_logger(project, run_name, config, wandb_metrics, run_description)
+            self._run = create_wandb_logger(project, run_name, project_config, wandb_metrics, run_description)
         # else leave things to None
 
     def info(self, d:Union[str, Mapping[str,Any]], py_logger_only:bool=False):
