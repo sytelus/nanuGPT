@@ -10,7 +10,20 @@ import torch
 from grokking.utils import full_path, is_debugging
 
 
+def _fmt(val:Any)->str:
+    if isinstance(val, torch.Tensor):
+        if val.numel() == 1:
+            val = val.item()
+    if isinstance(val, float):
+        return f'{val:.4g}'
+    return str(val)
+
+def _dict2msg(d:Mapping[str,Any])->str:
+    return ', '.join(f'{k}={_fmt(v)}' for k, v in d.items())
+
 def create_py_logger(filepath:Optional[str]=None,
+                  project:Optional[str]=None, run_name:Optional[str]=None,
+                  run_description:Optional[str]=None,
                   name:Optional[str]=None,
                   level=logging.INFO,
                   enable_stdout=True)->logging.Logger:
@@ -41,6 +54,11 @@ def create_py_logger(filepath:Optional[str]=None,
         fh.setLevel(level)
         fh.setFormatter(logging.Formatter('[%(asctime)s][%(levelname)s] %(message)s'))
         logger.addHandler(fh)
+
+    logger.info(_dict2msg({'project': project, 'run_name': run_name, 'run_description': run_description}))
+    logger.info(_dict2msg({'run_description': run_description}))
+    logger.info(_dict2msg({'filepath': filepath}))
+
     return logger
 
 
@@ -51,27 +69,22 @@ DEFAULT_WANDB_METRICS = [
                         ]
 
 def create_wandb_logger(wandb_project, wandb_run_name, config,
-                        metrics:List[Dict[str, Any]]):
+                        metrics:List[Dict[str, Any]], description:Optional[str]=None):
 
     wandb.login() # use API key from WANDB_API_KEY env variable
 
     run = wandb.init(project=wandb_project, name=wandb_run_name, config=config,
-                     save_code=True)
+                     save_code=True, notes=description)
     for metric in metrics:
         wandb.define_metric(**metric)
     return run
 
-def _fmt(val:Any)->str:
-    if isinstance(val, torch.Tensor):
-        if val.numel() == 1:
-            val = val.item()
-    if isinstance(val, float):
-        return f'{val:.4g}'
-    return str(val)
-
 class Logger:
-    def __init__(self, enable_wandb:bool, master_process:bool,
-                 wandb_project:str, wandb_run_name:Optional[str], config:Mapping,
+    def __init__(self, master_process:bool,
+                 project:Optional[str]=None, run_name:Optional[str]=None,
+                 run_description:Optional[str]=None,
+                 config:Optional[Mapping]=None,
+                 enable_wandb=False,
                  wandb_metrics=DEFAULT_WANDB_METRICS,
                  log_filepath:Optional[str]=None) -> None:
         self._logger = None
@@ -80,9 +93,10 @@ class Logger:
         self.master_process = master_process
 
         if master_process:
-            self._logger = create_py_logger(filepath=log_filepath)
+            self._logger = create_py_logger(filepath=log_filepath,
+                                            project=project, run_name=run_name, run_description=run_description)
         if enable_wandb and master_process and not is_debugging():
-            self._run = create_wandb_logger(wandb_project, wandb_run_name, config, wandb_metrics)
+            self._run = create_wandb_logger(project, run_name, config, wandb_metrics, run_description)
         # else leave things to None
 
     def info(self, d:Union[str, Mapping[str,Any]], py_logger_only:bool=False):
@@ -90,8 +104,7 @@ class Logger:
             if isinstance(d, str):
                 self._logger.info(d)
             else:
-                msg = ', '.join(f'{k}={_fmt(v)}' for k, v in d.items())
-                self._logger.info(msg)
+                self._logger.info(_dict2msg(d))
 
         if not py_logger_only and self.enable_wandb and self._run is not None:
             if isinstance(d, str):

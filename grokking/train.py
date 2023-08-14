@@ -130,7 +130,7 @@ def train(config:Mapping, logger):
             #     }
                 #logger.info(metrics)
 
-            if step % eval_every == 0 or step+1 >= num_steps:
+            if (step+1) % eval_every == 0 or step+1 >= num_steps:
                 val_loss, val_acc = evaluate(model, val_loader, device, criterion)
                 if test_loader:
                     test_loss, test_acc = evaluate(model, test_loader, device, criterion)
@@ -140,6 +140,7 @@ def train(config:Mapping, logger):
                 w_norm = model.weight_norm()
 
                 val_metrics = {
+                    "seed": config['seed'],
                     "data_loader_seed": config['data_loader_seed'],
                     "train/step": step,
                     "val/acc": val_acc,
