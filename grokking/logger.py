@@ -55,9 +55,10 @@ def create_py_logger(filepath:Optional[str]=None,
         fh.setFormatter(logging.Formatter('[%(asctime)s][%(levelname)s] %(message)s'))
         logger.addHandler(fh)
 
-    logger.info(_dict2msg({'project': project, 'run_name': run_name, 'run_description': run_description}))
+    logger.info(_dict2msg({'project': project, 'run_name': run_name}))
     logger.info(_dict2msg({'run_description': run_description}))
     logger.info(_dict2msg({'filepath': filepath}))
+
 
     return logger
 

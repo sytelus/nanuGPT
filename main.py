@@ -11,9 +11,9 @@ if __name__ == "__main__":
 
     out_dir = utils.full_path(config['out_dir'], create=True)
 
-    logger = Logger(log_filepath=os.path.join(out_dir, 'magic8_seed_search.txt'),
-                    project=config['wandb_project'], run_name="magic8_seed_search",
-                    run_description="Find the distribution of seed that works well with data loader seed 8",
+    logger = Logger(log_filepath=os.path.join(out_dir, 'seed_search_wd0_magic8.txt'),
+                    project=config['wandb_project'], run_name="magic8_seed_search_wd0",
+                    run_description="Find the distribution of seed that works well with data loader seed 8 but with weight decay = 0",
                     enable_wandb=config['use_wandb'], master_process=True,
                     config=config,
                     wandb_metrics=DEFAULT_WANDB_METRICS + [
