@@ -3,6 +3,8 @@ import time
 from typing import Mapping, Tuple
 import os
 
+import numpy as np
+
 import torch
 
 from grokking.data import get_data
@@ -70,6 +72,9 @@ def train(config:Mapping, logger):
         num_tokens=len(tokenizer),
         seq_len=5, # currently each input eq has [eos a op b =] which is 5 tokens
         ).to(device)
+
+    weights = np.concatenate([p.cpu().flatten().numpy() for p in model.get_params(non_embedding=True)])
+    np.save(os.path.join(logger.out_dir, 'params.txt'), weights)
 
     # optimizer
     optimizer = torch.optim.AdamW(

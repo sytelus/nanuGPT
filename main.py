@@ -29,8 +29,8 @@ if __name__ == "__main__":
                         {"name": "w_norm_ewa", "step_metric":"train/step", "summary":"min", "goal":"min"},
                     ])
 
-    for i in range(20000):
-        config['seed'] = i
-        train(config, logger)
+    # for i in range(20000):
+    #     config['seed'] = i
+    train(config, logger)
 
     logger.finish()
