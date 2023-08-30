@@ -29,7 +29,7 @@ def create_py_logger(filepath:Optional[str]=None,
                   level=logging.INFO,
                   enable_stdout=True)->logging.Logger:
     logging.basicConfig(level=level) # this sets level for standard logging.info calls
-    logger = logging.getLogger(name=name)
+    logger = logging.getLogger(name=py_logger_name)
 
     # close current handlers
     for handler in logger.handlers[:]:

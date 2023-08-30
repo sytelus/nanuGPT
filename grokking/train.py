@@ -50,6 +50,7 @@ def train(config:Mapping, logger):
     device = torch.device(device_name)
     num_steps = config['num_steps']
     eval_every = config['eval_every']
+    out_dir = utils.full_path(config['out_dir'], create=True)
 
     # get dataset
     start_time = time.time()
@@ -73,8 +74,8 @@ def train(config:Mapping, logger):
         seq_len=5, # currently each input eq has [eos a op b =] which is 5 tokens
         ).to(device)
 
-    weights = np.concatenate([p.cpu().flatten().numpy() for p in model.get_params(non_embedding=True)])
-    np.save(os.path.join(logger.out_dir, 'params.txt'), weights)
+    # weights = np.concatenate([p.detach().cpu().flatten().numpy() for p in model.get_params(non_embedding=True)])
+    # np.save(os.path.join(out_dir, 'seed56_7_weights.npy'), weights)
 
     # optimizer
     optimizer = torch.optim.AdamW(

@@ -15,7 +15,7 @@ if __name__ == "__main__":
                     project=config['wandb_project'], run_name="magic8_seed_search_wd0",
                     run_description="Find the distribution of seed that works well with data loader seed 8 but with weight decay = 0",
                     enable_wandb=config['use_wandb'], master_process=True,
-                    config=config,
+                    project_config=config,
                     wandb_metrics=DEFAULT_WANDB_METRICS + [
                         {"name": "train/acc", "step_metric":"train/step", "summary":"max", "goal":"max"},
                         {"name": "val/acc", "step_metric":"train/step", "summary":"max", "goal":"max"},

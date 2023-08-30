@@ -5,8 +5,8 @@ num_heads: 4
 
 # general
 device: ''            # auto select or cpu, cuda
-seed: 42
-data_loader_seed: 8
+seed: 56
+data_loader_seed: 7
 out_dir: '~/out_dir/grokking'
 
 # data
