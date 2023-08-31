@@ -21,7 +21,7 @@ def _fmt(val:Any)->str:
 def _dict2msg(d:Mapping[str,Any])->str:
     return ', '.join(f'{k}={_fmt(v)}' for k, v in d.items())
 
-def create_py_logger(filepath:Optional[str]=None,
+def create_py_logger(filepath:Optional[str]=None, allow_overwrite_log:bool=False,
                   project:Optional[str]=None, run_name:Optional[str]=None,
                   run_description:Optional[str]=None,
                   project_config:Optional[Mapping]=None,
@@ -48,6 +48,10 @@ def create_py_logger(filepath:Optional[str]=None,
 
     if filepath:
         filepath = full_path(filepath)
+
+        if os.path.exists(filepath) and not allow_overwrite_log:
+            raise FileExistsError(f'Log file {filepath} already exists. Specify different file or passt allow_overwrite_log=True.')
+
         # log files gets appeneded if already exist
         # zero_file(filepath)
         # use mode='a' to append
@@ -89,14 +93,14 @@ class Logger:
                  project_config:Optional[Mapping]=None,
                  enable_wandb=False,
                  wandb_metrics=DEFAULT_WANDB_METRICS,
-                 log_filepath:Optional[str]=None) -> None:
+                 log_filepath:Optional[str]=None, allow_overwrite_log=False) -> None:
         self._logger = None
         self._run = None
         self.enable_wandb = enable_wandb
         self.master_process = master_process
 
         if master_process:
-            self._logger = create_py_logger(filepath=log_filepath,
+            self._logger = create_py_logger(filepath=log_filepath, allow_overwrite_log=allow_overwrite_log,
                                             project=project, run_name=run_name, run_description=run_description,
                                             project_config=project_config)
         if enable_wandb and master_process and not is_debugging():

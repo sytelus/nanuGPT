@@ -11,7 +11,7 @@ if __name__ == "__main__":
 
     out_dir = utils.full_path(config['out_dir'], create=True)
 
-    logger = Logger(log_filepath=os.path.join(out_dir, 'seed_search_wd0_magic8.txt'),
+    logger = Logger(log_filepath=os.path.join(out_dir, 'loader_seed_Search.txt'),
                     project=config['wandb_project'], run_name="magic8_seed_search_wd0",
                     run_description="Find the distribution of seed that works well with data loader seed 8 but with weight decay = 0",
                     enable_wandb=config['use_wandb'], master_process=True,
@@ -29,8 +29,8 @@ if __name__ == "__main__":
                         {"name": "w_norm_ewa", "step_metric":"train/step", "summary":"min", "goal":"min"},
                     ])
 
-    # for i in range(20000):
-    #     config['seed'] = i
-    train(config, logger)
+    for i in range(20000):
+        config['data_loader_seed'] = i
+        train(config, logger)
 
     logger.finish()
