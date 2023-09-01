@@ -11,10 +11,10 @@ install_requires=[
 ]
 
 setuptools.setup(
-    name="grokking",
+    name="gptplay",
     version="0.1.0",
-    author="Daniel May, Shital Shah",
-    description="Grokking replication code",
+    author="Shital Shah",
+    description="Playground for autoregresive models",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/sytelus/grokking",

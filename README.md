@@ -1,5 +1,7 @@
 # Grokking
 
+Code seeded from grokking by Daniel May.
+
 An implementation of the OpenAI 'Grokking: Generalization Beyond Overfitting on Small Algorithmic Datasets' paper in PyTorch.
 
 <img src="figures/Figure_1_left_accuracy.png" height="300"> <img src="figures/Figure_1_left_loss.png" height="300">
