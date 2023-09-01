@@ -38,7 +38,7 @@ def evaluate(model, val_loader, device, criterion)->Tuple[float, float]:
     return loss, acc
 
 
-def train(config:Mapping, logger):
+def train(config:Mapping, logger, module_id):
     if not config['device']:
         device_name = 'cuda' if torch.cuda.is_available() else 'cpu'
     else:
@@ -73,6 +73,19 @@ def train(config:Mapping, logger):
         num_tokens=len(tokenizer),
         seq_len=5, # currently each input eq has [eos a op b =] which is 5 tokens
         ).to(device)
+
+    #torch.save(model.state_dict(), os.path.join(out_dir, 'model42_8.pt'))
+
+    model42_8 = Transformer(
+        num_layers=config['num_layers'],
+        dim_model=config['dim_model'],
+        num_heads=config['num_heads'],
+        num_tokens=len(tokenizer),
+        seq_len=5, # currently each input eq has [eos a op b =] which is 5 tokens
+        ).to(device)
+    model42_8.load_state_dict(torch.load(os.path.join(out_dir, 'model42_8.pt')))
+
+    list(model.modules())[module_id].load_state_dict(list(model42_8.modules())[module_id].state_dict())
 
     # weights = np.concatenate([p.detach().cpu().flatten().numpy() for p in model.get_params(non_embedding=True)])
     # np.save(os.path.join(out_dir, 'seed56_7_weights.npy'), weights)
@@ -146,6 +159,7 @@ def train(config:Mapping, logger):
                 w_norm = model.weight_norm()
 
                 val_metrics = {
+                    "module_id": module_id,
                     "seed": config['seed'],
                     "data_loader_seed": config['data_loader_seed'],
                     "train/step": step,

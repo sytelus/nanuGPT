@@ -1,4 +1,5 @@
 import os
+import time
 
 from grokking.config import Config
 from grokking.train import train
@@ -7,11 +8,12 @@ from grokking.logger import Logger, DEFAULT_WANDB_METRICS
 from grokking import utils
 
 if __name__ == "__main__":
+    start_time = time.time()
     config = Config(default_config_filepath='../configs/grok_baseline.yaml')
 
     out_dir = utils.full_path(config['out_dir'], create=True)
 
-    logger = Logger(log_filepath=os.path.join(out_dir, 'loader_seed_Search.txt'),
+    logger = Logger(log_filepath=os.path.join(out_dir, 'modules_by_module_seed.txt'), allow_overwrite_log=False,
                     project=config['wandb_project'], run_name="magic8_seed_search_wd0",
                     run_description="Find the distribution of seed that works well with data loader seed 8 but with weight decay = 0",
                     enable_wandb=config['use_wandb'], master_process=True,
@@ -29,8 +31,10 @@ if __name__ == "__main__":
                         {"name": "w_norm_ewa", "step_metric":"train/step", "summary":"min", "goal":"min"},
                     ])
 
-    for i in range(20000):
-        config['data_loader_seed'] = i
-        train(config, logger)
+    for i in range(24):
+        #config['data_loader_seed'] = i
+        train(config, logger, i)
+
+    logger.info({'start_time': start_time, 'total_time': time.time() - start_time})
 
     logger.finish()
