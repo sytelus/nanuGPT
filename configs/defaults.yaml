@@ -5,7 +5,7 @@ num_heads: 4
 
 # general
 device: ''            # auto select or cpu, cuda
-seed: 56 # 42 is good seed, 56 is bad seed
+seed: 42 # 42 is good seed, 56 is bad seed
 data_loader_seed: 8 # 8 is good seed, 7 is bad seed
 out_dir: '~/out_dir/grokking'
 log_filename: 'log.txt'
@@ -21,5 +21,5 @@ batch_size: 512
 learning_rate: 1.0E-3
 
 # eval
-eval_every: 500000
+eval_every: 500
 eval_batch_size: 32768 # 2^15=32768
