@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.cm as cm
 import json
+from dataclasses import dataclass
 
 import torch
 
@@ -37,20 +38,6 @@ def full_path(path:str, create=False)->str:
     if create:
         os.makedirs(path, exist_ok=True)
     return path
-
-def setup_torch(seed, enable_cuda, print_precision=10):
-    # show Tensor shape first for tensor's rpresentation
-    normal_repr = torch.Tensor.__repr__
-    torch.Tensor.__repr__ = lambda self: f"{tuple(self.shape)}:{normal_repr(self)}" # type: ignore
-    torch.set_printoptions(precision=print_precision)
-
-    torch.backends.cudnn.enabled = enable_cuda
-    if enable_cuda:
-        torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
-        torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
-        torch.cuda.manual_seed(seed)
-
-    torch.manual_seed(seed)
 
 
 def setup_sys(seed, max_threads=None):
@@ -214,3 +201,83 @@ def draw_histogram(data, xlabel='Values', ylabel='Frequency', title='Histogram',
 
     plt.show()
 
+def setup_torch(seed:int,
+    device_name:bool,
+    dtype:str,
+    enable_distributed:bool=False,
+    print_precision:int=10,
+    gradient_accumulation_steps_1gpu:int=1)->TorchSetupInfo:
+
+    @dataclass
+    class TorchSetupInfo:
+        is_cuda:bool,
+        is_distributed: bool
+        rank: int
+        local_rank: int
+        world_size: int
+        device_name:str
+        is_master: bool
+        seed_offset: int
+        gradient_accumulation_steps: int
+
+    # show Tensor shape first for tensor's rpresentation
+    normal_repr = torch.Tensor.__repr__
+    torch.Tensor.__repr__ = lambda self: f"{tuple(self.shape)}:{normal_repr(self)}" # type: ignore
+    torch.set_printoptions(precision=print_precision)
+
+    assert device_name == 'cuda' and torch.cuda.is_available(), 'cuda not available. Set device_name=cpu.'
+    assert dtype != 'bfloat16' and (torch.cuda.is_available() and torch.cuda.is_bf16_supported()), 'bfloat16 not supported. Use float16 or float32.'
+    assert enable_distributed and torch.distributed.is_available(), 'Distributed training not available. Set enable_distributed=False.'
+
+    is_cuda = False
+    is_distributed = False
+    rank = 0
+    local_rank = 0
+    world_size = 1
+    device_name = 'cpu'
+    is_master = True
+    seed_offset = 0
+    gradient_accumulation_steps = gradient_accumulation_steps_1gpu
+
+    if device_name == 'cuda' and torch.cuda.is_available():
+        torch.backends.cudnn.enabled = enable_cuda
+        torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
+        torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
+        is_cuda = True
+        device_name = 'cuda'
+
+    if enable_distributed and torch.distributed.is_available():
+        if torch.distributed.is_initialized():
+            is_distributed = True
+            rank = torch.distributed.get_rank()
+            local_rank = torch.distributed.get_rank()
+            world_size = torch.distributed.get_world_size()
+            is_master = rank == 0
+            seed_offset = rank
+
+            assert gradient_accumulation_steps % world_size == 0, f'gradient_accumulation_steps ({gradient_accumulation_steps}) must be divisible by ddp_world_size ({ddp_world_size})'
+            gradient_accumulation_steps = gradient_accumulation_steps_1gpu // world_size
+
+            if device_name == 'cuda':
+                torch.cuda.set_device(local_rank)
+                device_name = f'cuda:{local_rank}'
+
+    if enable_cuda:
+        torch.cuda.manual_seed(seed+seed_offset)
+    torch.manual_seed(seed+seed_offset)
+
+    return DistibutedInfo(is_cuda=is_cuda, is_distributed=is_distributed, rank=rank, local_rank=local_rank,
+                          world_size=world_size, device_name=device_name, is_master=is_master,
+                          seed_offset=seed_offset, gradient_accumulation_steps=gradient_accumulation_steps)
+
+def save_checkpoint(out_dir:str, name:str, model:nn.Module, optimizer, scheduler,
+                    step:int, best_val_loss:float):
+    checkpoint = {'model': model.state_dict(),
+                  'optimizer': optimizer.state_dict(),
+                  'scheduler': scheduler.state_dict(),
+                  'step': step,
+                  'best_val_loss': best_val_loss}
+
+    out_dir = full_path(out_dir, create=True)
+    checkpoint_filepath = os.path.join(out_dir, f'{name}_{step}.pt')
+    torch.save(checkpoint, os.path.join(out_dir, checkpoint_filepath))

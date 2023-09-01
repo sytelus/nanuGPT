@@ -72,10 +72,18 @@ std_metrics = {}
 std_metrics['default'] = [
                             {"name": "train/step"},
                             {"name": "train/loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
+                            {"name": "train/ppl", "step_metric":"train/step", "summary":"min", "goal":"min"},
                             {"name": "val/loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
+                            {"name": "val/ppl", "step_metric":"train/step", "summary":"min", "goal":"min"},
+                            {"name": "test/loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
+                            {"name": "test/ppl", "step_metric":"train/step", "summary":"min", "goal":"min"},
+                            # below are obtained after each step
+                            {"name": "train/step_loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
+                            {"name": "train/step_ppl", "step_metric":"train/step", "summary":"min", "goal":"min"},
                     ]
 std_metrics['classification'] = std_metrics['default'] +[
                         {"name": "train/acc", "step_metric":"train/step", "summary":"max", "goal":"max"},
+                        {"name": "train/step_acc", "step_metric":"train/step", "summary":"max", "goal":"max"},
                         {"name": "test/acc", "step_metric":"train/step", "summary":"max", "goal":"max"},
                         {"name": "val/acc", "step_metric":"train/step", "summary":"max", "goal":"max"},
                         {"name": "lr", "step_metric":"train/step", "summary":"max", "goal":"max"},

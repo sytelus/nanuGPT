@@ -7,12 +7,12 @@ with open("README.md", "r", encoding='utf_8') as fh:
     long_description = fh.read()
 
 install_requires=[
-    'einops'
+    'einops', 'tiktoken', 'datasets'
 ]
 
 setuptools.setup(
     name="gptplay",
-    version="0.1.0",
+    version="0.2.5",
     author="Shital Shah",
     description="Playground for autoregresive models",
     long_description=long_description,
