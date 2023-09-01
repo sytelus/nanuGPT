@@ -7,11 +7,11 @@ import numpy as np
 
 import torch
 
-from grokking.data import get_data
-from grokking.model import Transformer
-from grokking.logger import Logger, DEFAULT_WANDB_METRICS
-from grokking import utils
-from grokking.utils import ExponentialMovingAverage, SmoothedDyDx
+from gptplay.data import get_data
+from gptplay.model import Transformer
+from gptplay.logger import Logger, DEFAULT_WANDB_METRICS
+from gptplay import utils
+from gptplay.utils import ExponentialMovingAverage, SmoothedDyDx
 
 
 def evaluate(model, val_loader, device, criterion)->Tuple[float, float]:

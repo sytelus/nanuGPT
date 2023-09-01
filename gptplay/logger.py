@@ -7,7 +7,7 @@ import os
 import wandb
 import torch
 
-from grokking.utils import full_path, is_debugging
+from gptplay.utils import full_path, is_debugging
 
 
 def _fmt(val:Any)->str:

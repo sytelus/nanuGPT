@@ -1,6 +1,6 @@
 # Grokking
 
-Code seeded from grokking by Daniel May.
+Code seeded from gptplay by Daniel May.
 
 An implementation of the OpenAI 'Grokking: Generalization Beyond Overfitting on Small Algorithmic Datasets' paper in PyTorch.
 
@@ -10,7 +10,7 @@ An implementation of the OpenAI 'Grokking: Generalization Beyond Overfitting on 
 
 * Clone the repo and cd into it:
     ```bash
-    git clone https://github.com/danielmamay/grokking.git
+    git clone https://github.com/danielmamay/gptplay.git
     cd grokking
     ```
 * Use Python 3.9 or later:

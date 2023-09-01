@@ -5,7 +5,7 @@ import torch
 
 from torch.utils.data import DataLoader
 
-from grokking.arithmatic_tokenizer import ArithmaticTokenizer
+from gptplay.arithmatic_tokenizer import ArithmaticTokenizer
 
 
 DIVISION_MODULO_OPERATIONS = {

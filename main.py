@@ -1,11 +1,11 @@
 import os
 import time
 
-from grokking.config import Config
-from grokking.train import train
+from gptplay.config import Config
+from gptplay.train import train
 
-from grokking.logger import Logger, DEFAULT_WANDB_METRICS
-from grokking import utils
+from gptplay.logger import Logger, DEFAULT_WANDB_METRICS
+from gptplay import utils
 
 if __name__ == "__main__":
     start_time = time.time()
