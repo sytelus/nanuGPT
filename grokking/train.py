@@ -38,7 +38,7 @@ def evaluate(model, val_loader, device, criterion)->Tuple[float, float]:
     return loss, acc
 
 
-def train(config:Mapping, logger, module_id):
+def train(config:Mapping, logger):
     if not config['device']:
         device_name = 'cuda' if torch.cuda.is_available() else 'cpu'
     else:
@@ -85,7 +85,43 @@ def train(config:Mapping, logger, module_id):
         ).to(device)
     model42_8.load_state_dict(torch.load(os.path.join(out_dir, 'model42_8.pt')))
 
-    list(model.modules())[module_id].load_state_dict(list(model42_8.modules())[module_id].state_dict())
+    #model.load_state_dict(torch.load(os.path.join(out_dir, 'model42_8.pt')))
+
+    modules = list(model.modules())
+    modules42_8 = list(model42_8.modules())
+
+    # modules[5].load_state_dict(modules42_8[5].state_dict())
+    # modules[7].load_state_dict(modules42_8[7].state_dict())
+    # modules[8].load_state_dict(modules42_8[8].state_dict())
+    # modules[12].load_state_dict(modules42_8[12].state_dict())
+    modules[14].load_state_dict(modules42_8[14].state_dict())
+    #modules[16].load_state_dict(modules42_8[16].state_dict())
+    modules[17].load_state_dict(modules42_8[17].state_dict())
+    # modules[21].load_state_dict(modules42_8[21].state_dict())
+    modules[1].load_state_dict(modules42_8[1].state_dict())
+    #modules[2].load_state_dict(modules42_8[2].state_dict())
+    #modules[4].load_state_dict(modules42_8[4].state_dict())
+    #modules[13].load_state_dict(modules42_8[13].state_dict())
+    #modules[22].load_state_dict(modules42_8[22].state_dict())
+    modules[23].load_state_dict(modules42_8[23].state_dict())
+
+
+
+    # for i in range(len(modules)):
+    #     module_str = str(modules[i]).replace('\n', '->')
+    #     patam_count = sum(p.numel() for p in modules[i].parameters())
+    #     param_norm = sum(p.norm().item() for p in modules[i].parameters())
+    #     param_mean = sum(p.mean().item() for p in modules[i].parameters())
+    #     param_norm42_8 = sum(p.norm().item() for p in modules42_8[i].parameters())
+    #     param_mean42_8 = sum(p.mean().item() for p in modules42_8[i].parameters())
+    #     logger.info({'module_index': i,
+    #                  'patam_count': patam_count,
+    #                  'param_norm': param_norm,
+    #                  'param_mean': param_mean,
+    #                  'param_norm42_8': param_norm42_8,
+    #                  'param_mean42_8': param_mean42_8,
+    #                  'module_str': module_str})
+    # logger.flush()
 
     # weights = np.concatenate([p.detach().cpu().flatten().numpy() for p in model.get_params(non_embedding=True)])
     # np.save(os.path.join(out_dir, 'seed56_7_weights.npy'), weights)
@@ -159,7 +195,6 @@ def train(config:Mapping, logger, module_id):
                 w_norm = model.weight_norm()
 
                 val_metrics = {
-                    "module_id": module_id,
                     "seed": config['seed'],
                     "data_loader_seed": config['data_loader_seed'],
                     "train/step": step,

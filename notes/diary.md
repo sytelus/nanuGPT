@@ -1,5 +1,6 @@
 # Diary
 
+## 2023-08-30
 When we try default setup, a peculiar bug happens: The shuffle for val loader causes significant change in val accuracy! This obviously should not happen and it now tracked down to the speculation that val loader shuffle actually impact random generator state which in turn causes different shuffled data for train. The difference is too big: val accuracy with shuffle reaches ~1 within 3k steps if val shuffle is on while it doesn't do so otherwise well beyond 10k steps. Just random number generation should not be causing more than 3X speedup in generalization.
 
 So, as next step, we just scan different random seeds and see if such 3X speedup is causes by some of the seeds. It turns out 18 out of 2073 seeds causes 3X speedup. That's about 0.86% of all seeds. More curiously, 93% of the seeds shows normal behaviour while other 7% causes noticeable speedup in generalization.
@@ -26,5 +27,20 @@ The #2 above might suggest that slow generalization indeed follows memorization 
 
 One speculaton is that weight decay tries redistribute weights but then sgd immidiately rushes to fill the void. So, weights gets redistributed but memorization stays constant. This keeps going on until weight decay has no more space to restribute and must fight with sgd to force is to generalize.
 
+## 2023-08-31
+
 For a given data loaer seed, there is 0.4% chance that model seed will be good.
 For a given model seed, there is 0.6% chance that data loader seed will be good.
+
+## 2023-09-01T05:25:54Z
+
+After various trials, I found that embedding layer, the last linear layer and the 2nd DecoderLayer initialization is what caused faster generalization. However this accounts for val acc of around 0.5 to 0.7 even with data loader seed set to 8. This means there is something else random somewhere but it's hard to tell why.
+
+I have decided to abandon going after figuring out why some seeds work best. My current speculation is that the current model is too small, it's context length
+even smaller and data is super small. This means there is only small number of coincidences needed for various randomness in the system to suddenly perform really good. Currently, it seems upto 0.8% of seeds are those super seeds. This would translates to about 7-8 coin tosses where all tosses comes heads. Also, this is very data dependent. So, for certain order of data, there is certain permutation that causes super convergence. However, if data grows, model grows then the number of coins grows and super seeds will be very hard to come by. So, these super seeds are likely the artifacts of small model/small data regimes and they almost never appear otherwise.
+
+As super seeds are data dependent, I wonder if super seeds simply sets up things so that weight decay's redistribution is more efficient and in the right direction. That is, the struggle phase between step 40 to 3k is significantly reduced.
+
+I have also came to decision that this entire synthetic data is bad for testing because (1) it it really just 3 token input, other 2 are redundent, (2) it's not autoregressive. So, I have decided to leave this regim and go back to TinyStories.
+
+A lot of refactoring needs to be done (again!). My precious days seems to be such a waste chasing after this randomness.

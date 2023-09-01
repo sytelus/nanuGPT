@@ -8,6 +8,8 @@ device: ''            # auto select or cpu, cuda
 seed: 56 # 42 is good seed, 56 is bad seed
 data_loader_seed: 8 # 8 is good seed, 7 is bad seed
 out_dir: '~/out_dir/grokking'
+log_filename: 'log.txt'
+allow_overwrite_log: true
 
 # data
 operation: 'x/y'

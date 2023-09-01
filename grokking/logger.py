@@ -156,3 +156,10 @@ class Logger:
     def finish(self):
         if self._run is not None:
             self._run.finish()
+        if self._logger is not None:
+            logging.shutdown()
+
+    def flush(self):
+        if self._logger is not None:
+            for handler in self._logger.handlers:
+                handler.flush()
