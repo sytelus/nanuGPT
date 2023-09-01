@@ -25,3 +25,6 @@ Two differences between fast and slow generalization are:
 The #2 above might suggest that slow generalization indeed follows memorization (overfitting) followed by prunning cycle. However, fast generalization doesn't follow that cycle. Another thing is that training loss goes to zero in <40 steps so all memorization happens in rather small window but slow mode still faces val loss keep going up until 3k steps. It's like model has already achieved its goal but then it is heading exact opposite direction of generalization despite of weight decay keep working at it! As loss is 0, LR shouldn't be causing model to memorize even more strongly. Curiously, weight norm keeps going up even after train loss is 0. So what's going on?
 
 One speculaton is that weight decay tries redistribute weights but then sgd immidiately rushes to fill the void. So, weights gets redistributed but memorization stays constant. This keeps going on until weight decay has no more space to restribute and must fight with sgd to force is to generalize.
+
+For a given data loaer seed, there is 0.4% chance that model seed will be good.
+For a given model seed, there is 0.6% chance that data loader seed will be good.
