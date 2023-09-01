@@ -38,20 +38,23 @@ def full_path(path:str, create=False)->str:
         os.makedirs(path, exist_ok=True)
     return path
 
-def setup_torch():
+def setup_torch(seed, enable_cuda, print_precision=10):
     # show Tensor shape first for tensor's rpresentation
     normal_repr = torch.Tensor.__repr__
     torch.Tensor.__repr__ = lambda self: f"{tuple(self.shape)}:{normal_repr(self)}" # type: ignore
+    torch.set_printoptions(precision=print_precision)
 
-    torch.backends.cudnn.enabled = True
-    torch.set_printoptions(precision=10)
-    torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
-    torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
-    os.environ['NUMEXPR_MAX_THREADS'] = str(psutil.cpu_count(logical=False) // 2)
+    torch.backends.cudnn.enabled = enable_cuda
+    if enable_cuda:
+        torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
+        torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
+        torch.cuda.manual_seed(seed)
 
-def setup_seed(seed):
     torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
+
+
+def setup_sys(seed, max_threads=None):
+    os.environ['NUMEXPR_MAX_THREADS'] = str(psutil.cpu_count(logical=False) // 2) if max_threads is None else str(max_threads)
     np.random.seed(seed)
     random.seed(seed)
 

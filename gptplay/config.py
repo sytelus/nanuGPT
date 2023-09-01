@@ -169,7 +169,7 @@ def deep_update(d:MutableMapping, u:Mapping, create_map:Callable[[],MutableMappi
 class Config(UserDict):
     def __init__(self, config_filepath:Optional[str]=None,
                  default_config_filepath:Optional[str]=None,
-                 app_desc:Optional[str]=None, use_args=True,
+                 app_desc:Optional[str]=None, use_args=True, first_arg_filename=True,
                  param_args: Sequence = [], resolve_redirects=True) -> None:
         """Create config from specified yaml files and override args.
 
@@ -200,7 +200,9 @@ class Config(UserDict):
             # parser.add_argument("config_file", type=str, default=default_config_filepath,
             #     help='config filepath in yaml format, can be list separated by ;')
             self.args, self.extra_args = parser.parse_known_args()
-            if len(self.extra_args) > 0 and not self.extra_args[0].startswith('--'):
+
+            # expect first arg to be config filepath, if not supplied then use default
+            if first_arg_filename and len(self.extra_args) > 0 and not self.extra_args[0].startswith('--'):
                 config_filepath = self.extra_args.pop(0)
             else:
                 config_filepath = default_config_filepath
@@ -232,7 +234,7 @@ class Config(UserDict):
             with open(filepath, 'r') as f:
                 config_yaml = yaml.load(f, Loader=yaml.Loader)
             self._process_includes(config_yaml, filepath)
-            deep_update(self, config_yaml, lambda: Config(resolve_redirects=False))
+            deep_update(self, config_yaml, lambda: Config(resolve_redirects=False, first_arg_filename=False))
             print('config loaded from: ', filepath)
 
     def _process_includes(self, config_yaml, filepath:str):
@@ -266,7 +268,7 @@ class Config(UserDict):
             if sub_path in resolved_section:
                 resolved_section = resolved_section[sub_path]
                 if not sub_path in section:
-                    section[sub_path] = Config(resolve_redirects=False)
+                    section[sub_path] = Config(resolve_redirects=False, first_arg_filename=False)
                 section = section[sub_path]
             else:
                 return 1 # path not found, ignore this

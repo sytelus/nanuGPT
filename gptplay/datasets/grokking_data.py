@@ -5,7 +5,7 @@ import torch
 
 from torch.utils.data import DataLoader
 
-from gptplay.arithmatic_tokenizer import ArithmaticTokenizer
+from gptplay.tokenizers.grokking_tokenizer import GrokkingTokenizer
 
 
 DIVISION_MODULO_OPERATIONS = {
@@ -28,7 +28,7 @@ ALL_OPERATIONS = {
     **ALL_MODULO_OPERATIONS,
 }
 
-def operation_mod_p_data(operation: str, p: int, tokenizer: ArithmaticTokenizer):
+def operation_mod_p_data(operation: str, p: int, tokenizer: GrokkingTokenizer):
     """
     a◦b (mod p) for 0 <= a < p, 1 <= b < p if operation in DIVISION_MODULO_OPERATIONS
     a◦b (mod p) for 0 <= a, b < p otherwise
@@ -71,8 +71,8 @@ def operation_mod_p_data(operation: str, p: int, tokenizer: ArithmaticTokenizer)
     return equations, results
 
 def get_data(operation: str, prime: int, training_fraction: float, val_fraction:Optional[float],
-             batch_size: int, eval_batch_size:int, data_loader_seed:int)->Tuple[DataLoader,DataLoader, Optional[DataLoader], ArithmaticTokenizer]:
-    tokenizer = ArithmaticTokenizer(prime, list(ALL_OPERATIONS.keys()))
+             batch_size: int, eval_batch_size:int, data_loader_seed:int)->Tuple[DataLoader,DataLoader, Optional[DataLoader], GrokkingTokenizer]:
+    tokenizer = GrokkingTokenizer(prime, list(ALL_OPERATIONS.keys()))
 
     inputs, labels = operation_mod_p_data(operation, prime, tokenizer)
 

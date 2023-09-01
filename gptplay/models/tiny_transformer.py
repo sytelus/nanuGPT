@@ -34,7 +34,7 @@ class DecoderBlock(torch.nn.Module):
 
     return a2
 
-class Transformer(torch.nn.Module):
+class TinyTransformer(torch.nn.Module):
   def __init__(self, num_layers: int, dim_model: int, num_heads: int, num_tokens: int, seq_len: int):
     super().__init__()
 

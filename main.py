@@ -4,32 +4,16 @@ import time
 from gptplay.config import Config
 from gptplay.train import train
 
-from gptplay.logger import Logger, DEFAULT_WANDB_METRICS
+from gptplay import logging
 from gptplay import utils
 
 if __name__ == "__main__":
-    start_time = time.time()
-    config = Config(default_config_filepath='../configs/grok_baseline.yaml')
+    config = Config(default_config_filepath='configs/grokking/baseline.yaml')
 
-    out_dir = utils.full_path(config['out_dir'], create=True)
-
-    logger = Logger(log_filepath=os.path.join(out_dir, config['log_filename']), allow_overwrite_log=config['allow_overwrite_log'],
-                    project=config['wandb_project'], run_name="magic8_seed_search_wd0",
-                    run_description="Find the distribution of seed that works well with data loader seed 8 but with weight decay = 0",
-                    enable_wandb=config['use_wandb'], master_process=True,
-                    project_config=config,
-                    wandb_metrics=DEFAULT_WANDB_METRICS + [
-                        {"name": "train/acc", "step_metric":"train/step", "summary":"max", "goal":"max"},
-                        {"name": "test/acc", "step_metric":"train/step", "summary":"max", "goal":"max"},
-                        {"name": "val/acc", "step_metric":"train/step", "summary":"max", "goal":"max"},
-                        {"name": "lr", "step_metric":"train/step", "summary":"max", "goal":"max"},
-                        {"name": "ETA_hr", "step_metric":"train/step", "summary":"max", "goal":"max"},
-                        {"name": "w_norm", "step_metric":"train/step", "summary":"min", "goal":"min"},
-                    ])
+    logger = logging.Logger(master_process=True, **config['logging'])
+    logger.log_sys_info()
+    logger.log_config(config)
 
     train(config, logger)
 
-    logger.info({'start_time': start_time, 'total_time': time.time() - start_time})
-
-    logger.finish()
-    exit(0)
+    logger.all_done()

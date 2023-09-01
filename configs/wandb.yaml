@@ -1,3 +1,0 @@
-use_wandb: false
-wandb_project: grokking
-wandb_run: nil  # select random name

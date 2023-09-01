@@ -1,0 +1,8 @@
+__include__: ['defaults.yaml']
+
+data:
+  prime: 97
+
+training:
+  weight_decay: 0.0     # weight_decay=1 makes convergence much faster and original graph is not reproducible
+  num_steps: 1000000    # 1e5 is not enough when weight_decay=0.0

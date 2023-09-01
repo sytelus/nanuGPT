@@ -4,7 +4,7 @@ import torch
 
 TokenType = Union[int, str]
 
-class ArithmaticTokenizer:
+class GrokkingTokenizer:
     def __init__(self, prime: int, operations: list[str],
                  eos_token="<|eos|>", eq_token="="):
         self.prime = prime

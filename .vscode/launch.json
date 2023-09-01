@@ -5,28 +5,28 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Train-Fast",
+            "name": "Grokking-Prime223",
             "type": "python",
             "request": "launch",
             "program": "${cwd}/main.py",
             "console": "integratedTerminal",
-            "args": ["configs/prime223.yaml"]
+            "args": ["configs/grokking/prime223.yaml"]
         },
         {
-            "name": "Train-Baseline",
+            "name": "Grokking-baseline",
             "type": "python",
             "request": "launch",
             "program": "${cwd}/main.py",
             "console": "integratedTerminal",
-            "args": ["configs/baseline.yaml"]
+            "args": ["configs/grokking/baseline.yaml"]
         },
         {
-            "name": "Train-50k",
+            "name": "Grokking-50k",
             "type": "python",
             "request": "launch",
             "program": "${cwd}/main.py",
             "console": "integratedTerminal",
-            "args": ["configs/prime50k.yaml"]
+            "args": ["configs/grokking/prime50k.yaml"]
         },
         {
             "name": "Python: Current File",

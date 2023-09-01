@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Mapping, Optional, Union
 import logging
 import psutil
 import os
+import time
 
 import wandb
 import torch
@@ -21,13 +22,14 @@ def _fmt(val:Any)->str:
 def _dict2msg(d:Mapping[str,Any])->str:
     return ', '.join(f'{k}={_fmt(v)}' for k, v in d.items())
 
-def create_py_logger(filepath:Optional[str]=None, allow_overwrite_log:bool=False,
-                  project:Optional[str]=None, run_name:Optional[str]=None,
-                  run_description:Optional[str]=None,
-                  project_config:Optional[Mapping]=None,
-                  py_logger_name:Optional[str]=None,    # default is root
-                  level=logging.INFO,
-                  enable_stdout=True)->logging.Logger:
+def create_py_logger(filepath:Optional[str]=None,
+                    allow_overwrite_log:bool=False,
+                    project_name:Optional[str]=None,
+                    run_name:Optional[str]=None,
+                    run_description:Optional[str]=None,
+                    py_logger_name:Optional[str]=None,    # default is root
+                    level=logging.INFO,
+                    enable_stdout=True)->logging.Logger:
     logging.basicConfig(level=level) # this sets level for standard logging.info calls
     logger = logging.getLogger(name=py_logger_name)
 
@@ -60,27 +62,34 @@ def create_py_logger(filepath:Optional[str]=None, allow_overwrite_log:bool=False
         fh.setFormatter(logging.Formatter('[%(asctime)s][%(levelname)s] %(message)s'))
         logger.addHandler(fh)
 
-    logger.info(_dict2msg({'project': project, 'run_name': run_name}))
+    logger.info(_dict2msg({'project_name': project_name, 'run_name': run_name}))
     logger.info(_dict2msg({'run_description': run_description}))
     logger.info(_dict2msg({'filepath': filepath}))
-    if project_config:
-        logger.info(_dict2msg({'project_config': project_config}))
 
     return logger
 
-
-DEFAULT_WANDB_METRICS = [
+std_metrics = {}
+std_metrics['default'] = [
                             {"name": "train/step"},
                             {"name": "train/loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
                             {"name": "val/loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
-                        ]
+                    ]
+std_metrics['classification'] = std_metrics['default'] +[
+                        {"name": "train/acc", "step_metric":"train/step", "summary":"max", "goal":"max"},
+                        {"name": "test/acc", "step_metric":"train/step", "summary":"max", "goal":"max"},
+                        {"name": "val/acc", "step_metric":"train/step", "summary":"max", "goal":"max"},
+                        {"name": "lr", "step_metric":"train/step", "summary":"max", "goal":"max"},
+                        {"name": "ETA_hr", "step_metric":"train/step", "summary":"max", "goal":"max"},
+                        {"name": "w_norm", "step_metric":"train/step", "summary":"min", "goal":"min"},
+                    ]
 
-def create_wandb_logger(wandb_project, wandb_run_name, project_config,
-                        metrics:List[Dict[str, Any]], description:Optional[str]=None):
+def create_wandb_logger(project_name, run_name,
+                        metrics:List[Dict[str, Any]],
+                        description:Optional[str]=None):
 
     wandb.login() # use API key from WANDB_API_KEY env variable
 
-    run = wandb.init(project=wandb_project, name=wandb_run_name, config=project_config,
+    run = wandb.init(project=project_name, name=run_name,
                      save_code=True, notes=description)
     for metric in metrics:
         wandb.define_metric(**metric)
@@ -88,24 +97,42 @@ def create_wandb_logger(wandb_project, wandb_run_name, project_config,
 
 class Logger:
     def __init__(self, master_process:bool,
-                 project:Optional[str]=None, run_name:Optional[str]=None,
+                 project_name:Optional[str]=None,
+                 run_name:Optional[str]=None,
                  run_description:Optional[str]=None,
-                 project_config:Optional[Mapping]=None,
                  enable_wandb=False,
-                 wandb_metrics=DEFAULT_WANDB_METRICS,
-                 log_filepath:Optional[str]=None, allow_overwrite_log=False) -> None:
+                 metrics_type='default',
+                 log_dir:Optional[str]=None,
+                 log_filename:Optional[str]=None,
+                 allow_overwrite_log=False) -> None:
+        self.start_time = time.time()
         self._logger = None
         self._run = None
         self.enable_wandb = enable_wandb
         self.master_process = master_process
 
         if master_process:
-            self._logger = create_py_logger(filepath=log_filepath, allow_overwrite_log=allow_overwrite_log,
-                                            project=project, run_name=run_name, run_description=run_description,
-                                            project_config=project_config)
+            if log_dir or log_filename:
+                log_filepath = full_path(os.path.join(str(log_dir), str(log_filename)))
+            else:
+                log_filepath = None
+            self._logger = create_py_logger(filepath=log_filepath,
+                                            allow_overwrite_log=allow_overwrite_log,
+                                            project_name=project_name,
+                                            run_name=run_name,
+                                            run_description=run_description)
+
         if enable_wandb and master_process and not is_debugging():
-            self._run = create_wandb_logger(project, run_name, project_config, wandb_metrics, run_description)
+            self._run = create_wandb_logger(project_name, run_name,
+                                            std_metrics[metrics_type],
+                                            run_description)
         # else leave things to None
+
+    def log_config(self, config):
+        if self._logger is not None:
+            self._logger.info(_dict2msg({'project_config': config}))
+        if self.enable_wandb and self._run is not None:
+            self._run.config.update(config)
 
     def info(self, d:Union[str, Mapping[str,Any]], py_logger_only:bool=False):
         if self._logger is not None:
@@ -158,6 +185,13 @@ class Logger:
             self._run.finish()
         if self._logger is not None:
             logging.shutdown()
+
+    def all_done(self, exit_code:int=0, write_total_time:bool=True):
+        if write_total_time:
+            self.info({'start_time': self.start_time, 'total_time': time.time() - self.start_time})
+
+        self.finish()
+        exit(exit_code)
 
     def flush(self):
         if self._logger is not None:

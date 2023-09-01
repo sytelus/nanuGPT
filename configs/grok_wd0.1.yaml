@@ -1,9 +1,0 @@
-__include__: ['defaults.yaml', 'wandb.yaml']
-
-# This config uses weight decay to speed up things
-
-prime: 97
-
-# training
-weight_decay: 0.05     # weight_decay=1 makes things unstable with lots of loss spikes
-num_steps: 50000
