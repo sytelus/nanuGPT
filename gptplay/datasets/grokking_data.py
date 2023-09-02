@@ -51,7 +51,7 @@ def operation_mod_p_data(operation: str, p: int, tokenizer: GrokkingTokenizer):
 
 def get_data(operation: str, prime: int, training_fraction: float, val_fraction:Optional[float],
              train_batch_size: int, eval_batch_size:int, data_loader_seed:int,
-             local_rank:int, context_length:int)->Tuple[DataLoader,DataLoader, Optional[DataLoader], GrokkingTokenizer]:
+             local_rank:int, context_length:int)->Tuple[DataLoader,DataLoader, Optional[DataLoader]]:
     tokenizer = get_tokenizer(prime)
 
     inputs, labels = operation_mod_p_data(operation, prime, tokenizer)

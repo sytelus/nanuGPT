@@ -1,7 +1,7 @@
 general:
   device_type: 'cuda'            # auto select if blank or cpu, cuda
   backend: 'nccl'       # nccl, gloo, mpi, horovod)
-  dtype: 'bfloat16'         # float32, float16, bfloat16
+  dtype: 'float32'         # float32, float16, bfloat16
   torch_compile: True
   seed: 42
   enable_distributed: false
@@ -49,7 +49,7 @@ tokenizer:
 
 training:
   num_steps: 20000    # 1e5 is not enough when weight_decay=0.0
-  log_every: 100
+  log_every: 4000000
   grad_clip: 0.0 # disabled if 0.0
   gradient_accumulation_steps: 1 # will be automatically divided by GPU count
 
@@ -67,7 +67,7 @@ scheduler:
   total_iters: 10
 
 eval:
-  eval_every: 50
+  eval_every: 20
   eval_iters: null # number of samples to evaluate for dataset
-  checkoint_after: 50 # starts saving checkpoint after these steps
-  checkpoint_every: 1000 # multiple of eval_iters, save checkpoint after these steps from last checkpoint when val loss is better
+  checkoint_after: 2000 # starts saving checkpoint after these steps
+  checkpoint_every: 400 # multiple of eval_iters, save checkpoint after these steps from last checkpoint when val loss is better
