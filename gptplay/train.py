@@ -82,6 +82,7 @@ def train(config:Mapping, logger):
     train_log_every = config['training']['log_every']
     eval_every = config['eval']['eval_every']
     eval_iters = config['eval']['eval_iters']
+    save_checkpoint = config['eval']['save_checkpoint']
     checkpoint_every = config['eval']['checkpoint_every']
     checkoint_after = config['eval']['checkoint_after']
     out_dir = config['general']['out_dir']
@@ -238,9 +239,10 @@ def train(config:Mapping, logger):
                     amp_ctx, torch_info.is_cuda, device, train_loader, val_loader,
                     test_loader if step+1 >= num_steps else None)
 
-                if val_loss < best_val_loss and \
+                if save_checkpoint and val_loss < best_val_loss and \
                         ((step+1 >= num_steps) or \
-                            (step > checkoint_after and eval_count % checkpoint_every == 0)):
+                            (step > checkoint_after and eval_count % checkpoint_every == 0)
+                        ):
                     best_val_loss = val_loss
                     utils.save_checkpoint(out_dir, f'{project_name}_{run_name}' ,
                                           model.module if torch_info.is_distributed else model,
