@@ -18,6 +18,8 @@ import matplotlib.colors as mcolors
 import matplotlib.cm as cm
 import json
 from dataclasses import dataclass
+import importlib
+
 
 import torch
 
@@ -229,10 +231,10 @@ def setup_torch(seed:int,
     torch.Tensor.__repr__ = lambda self: f"{tuple(self.shape)}:{normal_repr(self)}" # type: ignore
     torch.set_printoptions(precision=print_precision)
 
-    assert device_type == 'cuda' and torch.cuda.is_available(), 'cuda not available. Set device_type=cpu.'
-    assert device_type == 'cuda' and dtype == 'bfloat16' and torch.cuda.is_bf16_supported(), 'bfloat16 not supported on your cuda device. Use float16 or float32.'
-    assert enable_distributed and torch.distributed.is_available(), 'Distributed training not available. Set enable_distributed=False.'
-    assert enable_distributed and torch.distributed.is_initialized(), 'Distributed training not initialized. Call torch.distributed.init_process_group() first.'
+    assert device_type != 'cuda' or (device_type == 'cuda' and torch.cuda.is_available()), 'cuda not available. Set device_type=cpu.'
+    assert (device_type != 'cuda' or dtype != 'bfloat16') or (device_type == 'cuda' and dtype == 'bfloat16' and torch.cuda.is_bf16_supported()), 'bfloat16 not supported on your cuda device. Use float16 or float32.'
+    assert (not enable_distributed) or (enable_distributed and torch.distributed.is_available()), 'Distributed training not available. Set enable_distributed=False.'
+    assert (not enable_distributed) or (enable_distributed and torch.distributed.is_initialized()), 'Distributed training not initialized. Call torch.distributed.init_process_group() first.'
 
     is_cuda = device_type == 'cuda'
     is_distributed = enable_distributed # we already asserted above so good to go
@@ -240,7 +242,7 @@ def setup_torch(seed:int,
     pt_dtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
 
     if is_cuda: # setup cuda
-        torch.backends.cudnn.enabled = enable_cuda
+        torch.backends.cudnn.enabled = True
         torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
         torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
 
@@ -289,3 +291,10 @@ def save_checkpoint(out_dir:str, name:str, model, optimizer, scheduler,
     out_dir = full_path(out_dir, create=True)
     checkpoint_filepath = os.path.join(out_dir, f'{name}_{step}.pt')
     torch.save(checkpoint, os.path.join(out_dir, checkpoint_filepath))
+
+def import_fn(spec:str)->Callable:
+    """Import a function from a module. The spec is in the form of module.submodule.function"""
+    module_name, fn_name = spec.rsplit('.', 1)
+    module = importlib.import_module(module_name)
+    fn = getattr(module, fn_name)
+    return fn

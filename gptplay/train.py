@@ -6,12 +6,8 @@ import math
 import torch
 from torch.nn.parallel import DistributedDataParallel
 
-from gptplay.datasets.tokenized_data import get_data
-from gptplay.tokenizers.tiktoken import get_tokenizer
-from gptplay.optimizers.adam_w import get_optim
-from gptplay.schedulers.nanogpt_cosine import get_scheduler
-from gptplay.models.tiny_transformer import get_model
 from gptplay import utils
+
 
 @torch.no_grad()
 def estimate_loss(model, criterion, data_loader, eval_iters, amp_ctx, is_cuda, device)->Tuple[float, float]:
@@ -67,11 +63,11 @@ def log_metrics(logger, step, model, criterion, eval_iters, lr,
     return val_loss
 
 def train(config:Mapping, logger):
-    project_name = config['general']['project_name']
-    run_name = config['general']['run_name']
+    project_name = config['logging']['project_name']
+    run_name = config['logging']['run_name']
     device_type = config['general']['device_type']
     dtype = config['general']['dtype']
-    enable_distributed = config['training']['enable_distributed']
+    enable_distributed = config['general']['enable_distributed']
     gradient_accumulation_steps = config['training']['gradient_accumulation_steps']
     train_batch_size = config['data']['train_batch_size']
     seed = config['general']['seed']
@@ -91,6 +87,12 @@ def train(config:Mapping, logger):
     scheduler_config = config['scheduler']
     tokenizer_config = config['tokenizer']
 
+    get_data = utils.import_fn(config['data']['module'])
+    get_tokenizer = utils.import_fn(config['tokenizer']['module'])
+    get_optim = utils.import_fn(config['optimizer']['module'])
+    get_scheduler = utils.import_fn(config['scheduler']['module'])
+    get_model = utils.import_fn(config['model']['module'])
+
     torch_info = utils.setup_torch(seed=seed,
                 device_type=device_type, dtype=dtype,
                 enable_distributed=enable_distributed,
@@ -109,8 +111,8 @@ def train(config:Mapping, logger):
 
     # get dataset
     train_loader, val_loader, test_loader = get_data(local_rank=torch_info.local_rank,
-                                                     **data_config)
-    tokenizer = get_tokenizer(**tokenizer_config)
+                                                     **data_config.copy().pop('module'))
+    tokenizer = get_tokenizer(**tokenizer_config.copy().pop('module'))
 
     logger.summary({'vocab_size': len(tokenizer),
                     'train_len': len(train_loader.dataset),
@@ -122,12 +124,13 @@ def train(config:Mapping, logger):
                     })
 
     # create model
-    model = get_model(vocab_size=len(tokenizer), **model_config).to(device)
+    model = get_model(vocab_size=len(tokenizer),
+                      **model_config.copy().pop('module')).to(device)
 
     # optimizer
     optimizer = get_optim(model.parameters(),
                           enable_fused=torch_info.is_cuda,
-                          **optimizer_config)
+                          **optimizer_config.copy().pop('module'))
 
     if torch_compile:
         logger.info("Compiling model...")
@@ -139,7 +142,7 @@ def train(config:Mapping, logger):
                                         device_ids=[torch_info.local_rank])
 
     # scheduler provides warmup and then constant lr
-    scheduler = get_scheduler(optimizer, **scheduler_config)
+    scheduler = get_scheduler(optimizer, **scheduler_config.copy().pop('module'))
 
     # initialize a GradScaler. If enabled=False scaler is a no-op
     scaler = torch.cuda.amp.GradScaler(enabled=(torch_info.pt_dtype == torch.float16))

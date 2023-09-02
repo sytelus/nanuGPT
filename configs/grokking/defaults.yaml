@@ -1,7 +1,7 @@
 general:
   device_type: 'cuda'            # auto select if blank or cpu, cuda
   backend: 'nccl'       # nccl, gloo, mpi, horovod)
-  dtype: 'bgloat16'         # float32, float16, bfloat16
+  dtype: 'bfloat16'         # float32, float16, bfloat16
   torch_compile: True
   seed: 42
   enable_distributed: false
@@ -18,10 +18,11 @@ logging:
   metrics_type: 'classification'
 
 model:
+  module: 'gptplay.models.tiny_transformer.get_model'
   n_layer: 2
   n_embd: 128
   n_head: 4
-  context_len: &context_len 5 # currently each input eq has [eos a op b =] which is 5 tokens
+  context_length: &context_length 5 # currently each input eq has [eos a op b =] which is 5 tokens
   # set bias to 0.0 for pre-training, 0.1+ for finetuning
   # PyTorch default for bias is true
   ffn_bias: true
@@ -31,16 +32,17 @@ model:
   ffn_dropout: 0.0 # dropout for feedforward layer
 
 data:
+  module: 'gptplay.datasets.tokenized_data.get_data'
   operation: 'x/y'
   training_fraction: 0.5
   val_fraction: null # if null, use 1 - training_fraction, test fraction is 0
   train_batch_size: 512
   eval_batch_size: 32768 # 2^15=32768
   data_loader_seed: 8
-  context_len: *context_len
+  context_length: *context_length
 
 tokenizer:
-  name: 'grokking_tokenizer'
+  module: 'gptplay.tokenizers.grokking_tokenizer.get_tokenizer'
 
 training:
   num_steps: 20000    # 1e5 is not enough when weight_decay=0.0
@@ -49,6 +51,7 @@ training:
   gradient_accumulation_steps: 1 # will be automatically divided by GPU count
 
 optimizer:
+  module: 'gptplay.optimizers.adam_w.get_optim'
   learning_rate: 1.0E-3
   weight_decay: 0.1     # weight_decay=1 makes convergence much faster and original graph is not reproducible
   beta1: 0.9
@@ -56,6 +59,7 @@ optimizer:
   eps: 1.0E-8 # pytorch default
 
 scheduler:
+  module: 'gptplay.schedulers.linear.get_scheduler'
   start_factor: 1.0E-8
   total_iters: 10
 
