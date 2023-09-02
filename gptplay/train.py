@@ -1,42 +1,38 @@
-from math import ceil
-import time
+from contextlib import nullcontext
 from typing import Mapping, Tuple
-import os
 import dataclasses
-
-import numpy as np
+import math
 
 import torch
 from torch.nn.parallel import DistributedDataParallel
 
 from gptplay.datasets.tokenized_data import get_data
-from gptplay.tokenizers.tiktoken import get_tokenzier
+from gptplay.tokenizers.tiktoken import get_tokenizer
 from gptplay.optimizers.adam_w import get_optim
 from gptplay.schedulers.nanogpt_cosine import get_scheduler
 from gptplay.models.tiny_transformer import get_model
 from gptplay import utils
 
 @torch.no_grad()
-def estimate_loss(model, criterion, data_loader, eval_iters, amp_ctx, is_cuda, device):
+def estimate_loss(model, criterion, data_loader, eval_iters, amp_ctx, is_cuda, device)->Tuple[float, float]:
     model.eval()
     loss_sum = 0.
-    count = 0
-    for i, x, y in enumerate(data_loader)):
+    correct, count = 0, 0
+    for i, (x, y) in enumerate(data_loader):
         if i >= eval_iters:
             break
         x, y = x.pin_memory().to(device, non_blocking=True) if is_cuda else x.to(device), \
                y.pin_memory().to(device, non_blocking=True) if is_cuda else y.to(device)
-
         with amp_ctx:
             logits = model(x, y)
-            loss_sum += criterion(logits.view(-1, logits.size(-1)), targets.view(-1),
+            loss_sum += criterion(logits.view(-1, logits.size(-1)), y.view(-1),
                                   ignore_index=-1).item() * len(x)
             correct += (torch.argmax(logits[-1,:,:], dim=1) == y).sum().item()
             count += len(x)
     model.train()
     return loss_sum / count, correct / count
 
-def log_metrics(logger, step, model, criterion, eval_iters,
+def log_metrics(logger, step, model, criterion, eval_iters, lr,
                 amp_ctx, is_cuda, device, train_loader, val_loader, test_loader):
 
     train_loss, train_acc = estimate_loss(model, criterion, train_loader, eval_iters,
@@ -49,22 +45,22 @@ def log_metrics(logger, step, model, criterion, eval_iters,
 
     metrics = {
         "train/step": step,
-        "train/loss": train_loss.item(),
-        "train/ppl": math.exp(train_loss.item()),
-        "train/acc": train_acc.item(),
-        "val/loss": val_loss.item(),
-        "val/ppl": math.exp(val_loss.item()),
-        "val/acc": val_acc.item(),
+        "train/loss": train_loss,
+        "train/ppl": math.exp(train_loss),
+        "train/acc": train_acc,
+        "val/loss": val_loss,
+        "val/ppl": math.exp(val_loss),
+        "val/acc": val_acc,
         "w_norm": w_norm,
-        "lr": optimizer.param_groups[0]['lr'],
+        "lr": lr,
     }
 
     if test_loader:
         test_loss, test_acc = estimate_loss(model, criterion, test_loader, eval_iters,
                                     amp_ctx, is_cuda, device)
-        metrics["test/loss"] = test_loss.item(),
-        metrics["test/ppl"] = math.exp(test_loss.item()),
-        metrics["test/acc"] = test_acc.item(),
+        metrics["test/loss"] = test_loss,
+        metrics["test/ppl"] = math.exp(test_loss),
+        metrics["test/acc"] = test_acc,
 
     logger.info(metrics)
 
@@ -73,10 +69,10 @@ def log_metrics(logger, step, model, criterion, eval_iters,
 def train(config:Mapping, logger):
     project_name = config['general']['project_name']
     run_name = config['general']['run_name']
-    device_name = config['general']['device']
+    device_type = config['general']['device_type']
     dtype = config['general']['dtype']
-    enable_distributed = training_config['enable_distributed']
-    gradient_accumulation_steps = training_config['gradient_accumulation_steps']
+    enable_distributed = config['training']['enable_distributed']
+    gradient_accumulation_steps = config['training']['gradient_accumulation_steps']
     train_batch_size = config['data']['train_batch_size']
     seed = config['general']['seed']
     torch_compile = config['general']['torch_compile']
@@ -96,7 +92,7 @@ def train(config:Mapping, logger):
     tokenizer_config = config['tokenizer']
 
     torch_info = utils.setup_torch(seed=seed,
-                device_name=device_name,
+                device_type=device_type, dtype=dtype,
                 enable_distributed=enable_distributed,
                 gradient_accumulation_steps_1gpu=gradient_accumulation_steps)
 
@@ -109,13 +105,12 @@ def train(config:Mapping, logger):
                     })
 
     device = torch.device(torch_info.device_name)
-    ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
-    amp_ctx = nullcontext() if torch_info.device_name == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
+    amp_ctx = nullcontext() if torch_info.device_type == 'cpu' else torch.amp.autocast(device_type=torch_info.device_type, dtype=torch_info.pt_dtype)
 
     # get dataset
     train_loader, val_loader, test_loader = get_data(local_rank=torch_info.local_rank,
                                                      **data_config)
-    tokenizer = get_tokenzier(**tokenizer_config)
+    tokenizer = get_tokenizer(**tokenizer_config)
 
     logger.summary({'vocab_size': len(tokenizer),
                     'train_len': len(train_loader.dataset),
@@ -141,13 +136,15 @@ def train(config:Mapping, logger):
 
     if torch_info.is_distributed:
         model = DistributedDataParallel(model,
-                                        device_ids=[torch_info.local_rank],
-                                        output_device=torch_info.local_rank)
+                                        device_ids=[torch_info.local_rank])
 
     # scheduler provides warmup and then constant lr
     scheduler = get_scheduler(optimizer, **scheduler_config)
 
-    step = 0
+    # initialize a GradScaler. If enabled=False scaler is a no-op
+    scaler = torch.cuda.amp.GradScaler(enabled=(torch_info.pt_dtype == torch.float16))
+
+    step, eval_count = 0, 0
     epoch, epoch_step = 0, 0 # epoch steps is useful to know how many epochs we did
     best_val_loss, evel_count = float('inf'), 0
 
@@ -160,11 +157,10 @@ def train(config:Mapping, logger):
 
     batch_iter = iter(train_loader)
     try:
-        batch = next(batch_iter)
+        x, y = next(batch_iter)
         batch_iter_done = False
     except StopIteration:
-        batch_iter_done = True
-        batch_iter = iter(train_loader)
+        raise ValueError("Train loader does not have any batches.")
 
     # run steps
     while step < num_steps:
@@ -172,12 +168,12 @@ def train(config:Mapping, logger):
         # Loop over the training set
         while not batch_iter_done:
             model.train()
-            x, y = tuple(t.pin_memory().to(device, non_blocking=True) \
-                        if torch_info.is_cuda else t.to(device) for t in batch)
+            x, y = x.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else x.to(device), \
+                   y.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else y.to(device)
 
             loss_sum, acc_sum, data_count = 0., 0, 0
             for micro_step in range(gradient_accumulation_steps):
-                if ddp:
+                if torch_info.is_distributed:
                     # Instead of model.no_sync(), we do Karpathy's hack
                     # On last step, flag model to require backward grad sync
                     model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
@@ -223,7 +219,9 @@ def train(config:Mapping, logger):
                 logger.info(metrics)
 
             if torch_info.is_master and (step+1) % eval_every == 0 or step+1 >= num_steps:
+                eval_count += 1
                 val_loss = log_metrics(logger, step, model, criterion, eval_iters,
+                    optimizer.param_groups[0]['lr'],
                     amp_ctx, torch_info.is_cuda, device, train_loader, val_loader,
                     test_loader if step+1 >= num_steps else None)
 

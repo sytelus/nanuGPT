@@ -201,74 +201,82 @@ def draw_histogram(data, xlabel='Values', ylabel='Frequency', title='Histogram',
 
     plt.show()
 
+
+@dataclass
+class TorchInfo:
+    is_cuda:bool # same as device_type=='cuda'
+    is_distributed: bool
+    device_type:str
+    dtype:str # floating point type
+    device_name:str # this can include GPU ID
+    rank: int
+    local_rank: int
+    world_size: int
+    is_master: bool
+    seed_offset: int
+    gradient_accumulation_steps: int
+    pt_dtype: torch.dtype
+
 def setup_torch(seed:int,
-    device_name:bool,
+    device_type:str,
     dtype:str,
     enable_distributed:bool=False,
     print_precision:int=10,
-    gradient_accumulation_steps_1gpu:int=1)->TorchSetupInfo:
-
-    @dataclass
-    class TorchSetupInfo:
-        is_cuda:bool,
-        is_distributed: bool
-        rank: int
-        local_rank: int
-        world_size: int
-        device_name:str
-        is_master: bool
-        seed_offset: int
-        gradient_accumulation_steps: int
+    gradient_accumulation_steps_1gpu:int=1)->TorchInfo:
 
     # show Tensor shape first for tensor's rpresentation
     normal_repr = torch.Tensor.__repr__
     torch.Tensor.__repr__ = lambda self: f"{tuple(self.shape)}:{normal_repr(self)}" # type: ignore
     torch.set_printoptions(precision=print_precision)
 
-    assert device_name == 'cuda' and torch.cuda.is_available(), 'cuda not available. Set device_name=cpu.'
-    assert dtype != 'bfloat16' and (torch.cuda.is_available() and torch.cuda.is_bf16_supported()), 'bfloat16 not supported. Use float16 or float32.'
+    assert device_type == 'cuda' and torch.cuda.is_available(), 'cuda not available. Set device_type=cpu.'
+    assert device_type == 'cuda' and dtype == 'bfloat16' and torch.cuda.is_bf16_supported(), 'bfloat16 not supported on your cuda device. Use float16 or float32.'
     assert enable_distributed and torch.distributed.is_available(), 'Distributed training not available. Set enable_distributed=False.'
+    assert enable_distributed and torch.distributed.is_initialized(), 'Distributed training not initialized. Call torch.distributed.init_process_group() first.'
 
-    is_cuda = False
-    is_distributed = False
-    rank = 0
-    local_rank = 0
-    world_size = 1
-    device_name = 'cpu'
-    is_master = True
-    seed_offset = 0
-    gradient_accumulation_steps = gradient_accumulation_steps_1gpu
+    is_cuda = device_type == 'cuda'
+    is_distributed = enable_distributed # we already asserted above so good to go
+    device_name = device_type # we will add GPU ID later
+    pt_dtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
 
-    if device_name == 'cuda' and torch.cuda.is_available():
+    if is_cuda: # setup cuda
         torch.backends.cudnn.enabled = enable_cuda
         torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
         torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
-        is_cuda = True
-        device_name = 'cuda'
 
-    if enable_distributed and torch.distributed.is_available():
-        if torch.distributed.is_initialized():
-            is_distributed = True
-            rank = torch.distributed.get_rank()
-            local_rank = torch.distributed.get_rank()
-            world_size = torch.distributed.get_world_size()
-            is_master = rank == 0
-            seed_offset = rank
+    if enable_distributed:
+        is_distributed = True
+        rank = torch.distributed.get_rank()
+        local_rank = torch.distributed.get_rank()
+        world_size = torch.distributed.get_world_size()
+        is_master = rank == 0
+        seed_offset = rank
 
-            assert gradient_accumulation_steps % world_size == 0, f'gradient_accumulation_steps ({gradient_accumulation_steps}) must be divisible by ddp_world_size ({ddp_world_size})'
-            gradient_accumulation_steps = gradient_accumulation_steps_1gpu // world_size
+        assert gradient_accumulation_steps % world_size == 0, f'gradient_accumulation_steps ({gradient_accumulation_steps}) must be divisible by ddp_world_size ({ddp_world_size})'
+        gradient_accumulation_steps = gradient_accumulation_steps_1gpu // world_size
 
-            if device_name == 'cuda':
-                torch.cuda.set_device(local_rank)
-                device_name = f'cuda:{local_rank}'
+        if is_cuda:
+            torch.cuda.set_device(local_rank)
+            device_name = f'cuda:{local_rank}'
+    else:
+        rank = 0
+        local_rank = 0
+        world_size = 1
+        is_master = True
+        seed_offset = 0
+        gradient_accumulation_steps = gradient_accumulation_steps_1gpu
 
-    if enable_cuda:
+
+    if is_cuda:
         torch.cuda.manual_seed(seed+seed_offset)
     torch.manual_seed(seed+seed_offset)
 
-    return DistibutedInfo(is_cuda=is_cuda, is_distributed=is_distributed, rank=rank, local_rank=local_rank,
-                          world_size=world_size, device_name=device_name, is_master=is_master,
-                          seed_offset=seed_offset, gradient_accumulation_steps=gradient_accumulation_steps)
+    return TorchInfo(is_cuda=is_cuda, is_distributed=is_distributed,
+                     device_type=device_type, dtype=dtype, device_name=device_name,
+                     rank=rank, local_rank=local_rank, world_size=world_size,
+                     is_master=is_master, seed_offset=seed_offset,
+                     gradient_accumulation_steps=gradient_accumulation_steps,
+                     pt_dtype=pt_dtype)
 
 def save_checkpoint(out_dir:str, name:str, model:nn.Module, optimizer, scheduler,
                     step:int, best_val_loss:float):

@@ -86,7 +86,7 @@ class TinyTransformer(torch.nn.Module):
   def weight_norm(self, non_embedding=True)->float:
     return torch.linalg.norm(torch.cat([p.view(-1) for p in self.get_params(non_embedding)])).item()
 
-  def get_model(n_layer: int, n_embd: int, n_head: int,
-               vocab_size: int, context_len: int, bias: bool, dropout: float):
-    return TinyTransformer(n_layer, n_embd, n_head,
-               vocab_size, context_len, bias, dropout)
+def get_model(n_layer: int, n_embd: int, n_head: int,
+              vocab_size: int, context_len: int, bias: bool, dropout: float):
+  return TinyTransformer(n_layer, n_embd, n_head,
+              vocab_size, context_len, bias, dropout)
