@@ -19,7 +19,7 @@ def estimate_loss(model, criterion, data_loader, eval_iters, amp_ctx, is_cuda, d
     loss_sum = 0.
     correct, count = 0, 0
     for i, (x, y) in enumerate(data_loader):
-        if i >= eval_iters:
+        if i >= eval_iters: # eval_iters is None means eval the whole dataset
             break
         x, y = x.pin_memory().to(device, non_blocking=True) if is_cuda else x.to(device), \
                y.pin_memory().to(device, non_blocking=True) if is_cuda else y.to(device)
@@ -228,8 +228,8 @@ def train(config:Mapping, logger):
                 if val_loss < best_val_loss and step > checkoint_after and eval_count % checkpoint_every == 0:
                     best_val_loss = val_loss
                     utils.save_checkpoint(out_dir, f'{project_name}_{run_name}' ,
-                                          model, optimizer, scheduler,
-                                          step, best_val_loss)
+                                          model.module if torch_info.is_distributed else model,
+                                          optimizer, scheduler, step, best_val_loss)
 
             step += 1
             epoch_step += 1

@@ -5,28 +5,7 @@ import torch
 
 from torch.utils.data import DataLoader
 
-from gptplay.tokenizers.grokking_tokenizer import GrokkingTokenizer
-
-
-DIVISION_MODULO_OPERATIONS = {
-    "x/y": lambda x, y, p: (x*y % p, y, x), # out = a,b,c such that b*c (mod p) = a (remember to detokenize!)
-    "(x//y)if(y%2==1)else(x-y)": lambda x, y, _: torch.where(y % 2 == 1, x // y, x - y)
-}
-
-ALL_MODULO_OPERATIONS = {
-    "x+y": lambda x, y, _: (x, y, x + y),
-    "x-y": lambda x, y, _: (x, y, x - y),
-    **DIVISION_MODULO_OPERATIONS,
-    "x^2+y^2": lambda x, y, _: (x, y, x**2 + y**2),
-    "x^2+xy+y^2": lambda x, y, _: (x, y, x**2 + x*y + y**2),
-    "x^2+xy+y^2+x": lambda x, y, _: (x, y, x**2 + x*y + y**2 + x),
-    "x^3+xy": lambda x, y, _: (x, y, x**3 + x*y),
-    "x^3+xy^2+x": lambda x, y, _: (x, y, x**3 + x*y**2 + y)
-}
-
-ALL_OPERATIONS = {
-    **ALL_MODULO_OPERATIONS,
-}
+from gptplay.tokenizers.grokking_tokenizer import get_tokenizer, DIVISION_MODULO_OPERATIONS, ALL_OPERATIONS
 
 def operation_mod_p_data(operation: str, p: int, tokenizer: GrokkingTokenizer):
     """
@@ -72,7 +51,7 @@ def operation_mod_p_data(operation: str, p: int, tokenizer: GrokkingTokenizer):
 
 def get_data(operation: str, prime: int, training_fraction: float, val_fraction:Optional[float],
              batch_size: int, eval_batch_size:int, data_loader_seed:int)->Tuple[DataLoader,DataLoader, Optional[DataLoader], GrokkingTokenizer]:
-    tokenizer = GrokkingTokenizer(prime, list(ALL_OPERATIONS.keys()))
+    tokenizer = get_tokenizer(prime)
 
     inputs, labels = operation_mod_p_data(operation, prime, tokenizer)
 

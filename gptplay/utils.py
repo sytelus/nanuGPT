@@ -252,7 +252,7 @@ def setup_torch(seed:int,
         is_master = rank == 0
         seed_offset = rank
 
-        assert gradient_accumulation_steps % world_size == 0, f'gradient_accumulation_steps ({gradient_accumulation_steps}) must be divisible by ddp_world_size ({ddp_world_size})'
+        assert gradient_accumulation_steps_1gpu % world_size == 0, f'gradient_accumulation_steps ({gradient_accumulation_steps}) must be divisible by ddp_world_size ({ddp_world_size})'
         gradient_accumulation_steps = gradient_accumulation_steps_1gpu // world_size
 
         if is_cuda:
@@ -278,7 +278,7 @@ def setup_torch(seed:int,
                      gradient_accumulation_steps=gradient_accumulation_steps,
                      pt_dtype=pt_dtype)
 
-def save_checkpoint(out_dir:str, name:str, model:nn.Module, optimizer, scheduler,
+def save_checkpoint(out_dir:str, name:str, model, optimizer, scheduler,
                     step:int, best_val_loss:float):
     checkpoint = {'model': model.state_dict(),
                   'optimizer': optimizer.state_dict(),

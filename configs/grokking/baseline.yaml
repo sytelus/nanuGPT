@@ -1,7 +1,10 @@
 __include__: ['defaults.yaml']
 
 data:
-  prime: 97
+  prime: &prime 97
+
+tokenizer:
+  prime: *prime
 
 training:
   weight_decay: 0.0     # weight_decay=1 makes convergence much faster and original graph is not reproducible

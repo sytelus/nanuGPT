@@ -4,6 +4,26 @@ import torch
 
 TokenType = Union[int, str]
 
+DIVISION_MODULO_OPERATIONS = {
+    "x/y": lambda x, y, p: (x*y % p, y, x), # out = a,b,c such that b*c (mod p) = a (remember to detokenize!)
+    "(x//y)if(y%2==1)else(x-y)": lambda x, y, _: torch.where(y % 2 == 1, x // y, x - y)
+}
+
+ALL_MODULO_OPERATIONS = {
+    "x+y": lambda x, y, _: (x, y, x + y),
+    "x-y": lambda x, y, _: (x, y, x - y),
+    **DIVISION_MODULO_OPERATIONS,
+    "x^2+y^2": lambda x, y, _: (x, y, x**2 + y**2),
+    "x^2+xy+y^2": lambda x, y, _: (x, y, x**2 + x*y + y**2),
+    "x^2+xy+y^2+x": lambda x, y, _: (x, y, x**2 + x*y + y**2 + x),
+    "x^3+xy": lambda x, y, _: (x, y, x**3 + x*y),
+    "x^3+xy^2+x": lambda x, y, _: (x, y, x**3 + x*y**2 + y)
+}
+
+ALL_OPERATIONS = {
+    **ALL_MODULO_OPERATIONS,
+}
+
 class GrokkingTokenizer:
     def __init__(self, prime: int, operations: list[str],
                  eos_token="<|eos|>", eq_token="="):
@@ -47,3 +67,7 @@ class GrokkingTokenizer:
     # this method can only be used to decode tensor of numbers
     def decode_tensor(self, idxs: torch.Tensor)->torch.Tensor:
         return torch.tensor(self.decode_batch(idxs.tolist()))
+
+def get_tokenizer(prime:int):
+    tokenizer = GrokkingTokenizer(prime, list(ALL_OPERATIONS.keys()))
+    return tokenizer
