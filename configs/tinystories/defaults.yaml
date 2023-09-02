@@ -1,11 +1,11 @@
 general:
-  device: 'cuda'            # auto select or cpu, cuda
+  device: 'cuda'            # auto select if blank or cpu, cuda
   backend: 'nccl'       # nccl, gloo, mpi, horovod)
   dtype: 'bgloat16'         # float32, float16, bfloat16
   torch_compile: True
   seed: 42
-  out_dir: '~/out_dir/gpyplay/tinystories'
   enable_distributed: false
+  out_dir: '~/out_dir/gpyplay/tinystories'
 
 logging:
   enable_wandb: false

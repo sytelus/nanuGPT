@@ -1,6 +1,10 @@
 general:
-  device: ''            # auto select or cpu, cuda
+  device: 'cuda'            # auto select if blank or cpu, cuda
+  backend: 'nccl'       # nccl, gloo, mpi, horovod)
+  dtype: 'bgloat16'         # float32, float16, bfloat16
+  torch_compile: True
   seed: 42
+  enable_distributed: false
   out_dir: '~/out_dir/grokking'
 
 logging:
@@ -14,22 +18,30 @@ logging:
   metrics_type: 'classification'
 
 model:
-  num_layers: 2
-  dim_model: 128
-  num_heads: 4
-  seq_len: 5 # currently each input eq has [eos a op b =] which is 5 tokens
+  n_layer: 2
+  n_embd: 128
+  n_head: 4
+  bias: false
+  context_len: &context_len 5 # currently each input eq has [eos a op b =] which is 5 tokens
+  dropout: 0.0 # 0.0 for pre-training, 0.1+ for finetuning
 
 data:
   operation: 'x/y'
   training_fraction: 0.5
   val_fraction: null # if null, use 1 - training_fraction, test fraction is 0
-  batch_size: 512
+  train_batch_size: 512
   eval_batch_size: 32768 # 2^15=32768
   data_loader_seed: 8
+  context_len: *context_len
+
+tokenizer:
+  name: 'grokking_tokenizer'
 
 training:
   num_steps: 20000    # 1e5 is not enough when weight_decay=0.0
   log_every: 100
+  grad_clip: 0.0 # disabled if 0.0
+  gradient_accumulation_steps: 1 # will be automatically divided by GPU count
 
 optimizer:
   learning_rate: 1.0E-3
@@ -43,4 +55,7 @@ scheduler:
   total_iters: 10
 
 eval:
-  eval_every: 500
+  eval_every: 50
+  eval_iters: nill # number of samples to evaluate for dataset
+  checkoint_after: 50 # starts saving checkpoint after these steps
+  checkpoint_every: 1000 # multiple of eval_iters, save checkpoint after these steps from last checkpoint when val loss is better
