@@ -21,9 +21,14 @@ model:
   n_layer: 12
   n_embd: 768
   n_head: 12
-  bias: false
   context_len: &context_len 1024
-  dropout: 0.0 # 0.0 for pre-training, 0.1+ for finetuning
+  # set bias to 0.0 for pre-training, 0.1+ for finetuning
+  # PyTorch default for bias is true
+  ffn_bias: true
+  attn_proj_bias: true # for projection layers in attention
+  attn_kv_bias: true # for kv in attention
+  attn_dropout: 0.0 # dropout for attention layer
+  ffn_dropout: 0.0 # dropout for feedforward layer
 
 data:
   tokenized_train_path: $DATA_DIR/tokenized/tinystories_v2/tiktoken/train.bin

@@ -21,9 +21,14 @@ model:
   n_layer: 2
   n_embd: 128
   n_head: 4
-  bias: false
   context_len: &context_len 5 # currently each input eq has [eos a op b =] which is 5 tokens
-  dropout: 0.0 # 0.0 for pre-training, 0.1+ for finetuning
+  # set bias to 0.0 for pre-training, 0.1+ for finetuning
+  # PyTorch default for bias is true
+  ffn_bias: true
+  attn_proj_bias: true # for projection layers in attention
+  attn_kv_bias: true # for kv in attention
+  attn_dropout: 0.0 # dropout for attention layer
+  ffn_dropout: 0.0 # dropout for feedforward layer
 
 data:
   operation: 'x/y'

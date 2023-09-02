@@ -3,15 +3,19 @@ import torch
 from torch import nn, Tensor
 
 class DecoderBlock(torch.nn.Module):
-  def __init__(self, n_embd: int, n_heads: int):
+  def __init__(self, n_embd: int, n_heads: int,
+               ffn_bias, attn_proj_bias, attn_kv_bias,
+               attn_dropout, ffn_dropout):
     super().__init__()
 
-    self.self_attn = nn.MultiheadAttention(n_embd, n_heads)
+    self.self_attn = nn.MultiheadAttention(n_embd, n_heads, dropout=attn_dropout,
+                                           bias=attn_proj_bias, add_bias_kv=attn_kv_bias)
     self.self_attn_norm = nn.LayerNorm(n_embd)
     self.ffn = nn.Sequential(
-        nn.Linear(n_embd, n_embd * 4),
+        nn.Linear(n_embd, n_embd * 4, bias=ffn_bias),
         nn.GELU(),
-        nn.Linear(n_embd * 4, n_embd)
+        nn.Linear(n_embd * 4, n_embd, bias=ffn_bias),
+        nn.Dropout(ffn_dropout)
     )
     self.ffn_norm = nn.LayerNorm(n_embd)
 
@@ -36,17 +40,20 @@ class DecoderBlock(torch.nn.Module):
 
 class TinyTransformer(torch.nn.Module):
   def __init__(self, n_layer: int, n_embd: int, n_head: int,
-               vocab_size: int, context_len: int, bias: bool, dropout: float):
+               vocab_size: int, context_len: int,
+               ffn_bias: bool, attn_proj_bias: float, attn_kv_bias: float,
+               attn_dropout: float, ffn_dropout: float):
     super().__init__()
 
     self.token_embeddings = nn.Embedding(vocab_size, n_embd)
     self.position_embeddings = nn.Embedding(context_len, n_embd)
     self.model = nn.Sequential(
-        *[DecoderBlock(n_embd, n_head) for _ in range(n_layer)],
+        *[DecoderBlock(n_embd, n_head, ffn_bias, attn_proj_bias, attn_kv_bias, attn_dropout, ffn_dropout) \
+          for _ in range(n_layer)],
         # decoder: (context_len, batch_size, n_embd)
         nn.LayerNorm(n_embd),
         # logits: (context_len, batch_size, vocab_size)
-        nn.Linear(n_embd, vocab_size)
+        nn.Linear(n_embd, vocab_size, bias=ffn_bias)
     )
 
   def forward(self, inputs: Tensor):
