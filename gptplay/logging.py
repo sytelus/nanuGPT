@@ -144,17 +144,43 @@ class Logger:
 
     def info(self, d:Union[str, Mapping[str,Any]], py_logger_only:bool=False):
         if self._logger is not None:
-            if isinstance(d, str):
-                self._logger.info(d)
-            else:
-                self._logger.info(_dict2msg(d))
+            if isinstance(d, Mapping):
+                msg = _dict2msg(d)
+                self._logger.info(msg)
 
         if not py_logger_only and self.enable_wandb and self._run is not None:
             if isinstance(d, str):
-                wandb.log({'msg': d})
+                wandb.alert(d, level=wandb.AlertLevel.INFO)
             else:
                 wandb.log(d)
+
+    def warn(self, d:Union[str, Mapping[str,Any]], py_logger_only:bool=False,
+             exception_instance:Optional[Exception]=None, stack_info:bool=False):
+        if isinstance(d, Mapping):
+            d = _dict2msg(d)
+
+        if self._logger is not None:
+            self._logger.warn(d, exc_info=exception_instance, stack_info=stack_info)
+
+        if not py_logger_only and self.enable_wandb and self._run is not None:
+            if exception_instance is not None:
+                ex_msg = f'{exception_instance}'
+            wandb.alert(d, ex_msg, level=wandb.AlertLevel.WARN)
         # else do nothing
+
+    def error(self, d:Union[str, Mapping[str,Any]], py_logger_only:bool=False,
+              exception_instance:Optional[Exception]=None, stack_info:bool=True):
+
+        if isinstance(d, Mapping):
+            d = _dict2msg(d)
+
+        if self._logger is not None:
+            self._logger.error(d, exc_info=exception_instance, stack_info=stack_info)
+
+        if not py_logger_only and self.enable_wandb and self._run is not None:
+            if exception_instance is not None:
+                ex_msg = f'{exception_instance}'
+            wandb.alert(d, ex_msg, level=wandb.AlertLevel.ERROR)
 
     def summary(self, d:Mapping[str,Any], py_logger_only:bool=False):
         if self._logger is not None:

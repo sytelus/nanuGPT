@@ -94,6 +94,12 @@ class TinyTransformer(torch.nn.Module):
     return torch.linalg.norm(torch.cat([p.view(-1) for p in self.get_params(non_embedding)])).item()
 
 def get_model(n_layer: int, n_embd: int, n_head: int,
-              vocab_size: int, context_len: int, bias: bool, dropout: float):
+              vocab_size: int, context_length: int,
+              ffn_bias: bool,
+              attn_proj_bias: bool, # for projection layers in attention
+              attn_kv_bias: bool, # for kv in attention
+              attn_dropout: float, # dropout for attention layer
+              ffn_dropout: float # dropout for feedforward layer
+              ):
   return TinyTransformer(n_layer, n_embd, n_head,
-              vocab_size, context_len, bias, dropout)
+              vocab_size, context_length, ffn_bias, attn_proj_bias, attn_kv_bias, attn_dropout, ffn_dropout)

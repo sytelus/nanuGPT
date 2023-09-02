@@ -31,8 +31,11 @@ model:
   attn_dropout: 0.0 # dropout for attention layer
   ffn_dropout: 0.0 # dropout for feedforward layer
 
+loss:
+  module: 'gptplay.losses.grokking_loss.get_loss'
+
 data:
-  module: 'gptplay.datasets.tokenized_data.get_data'
+  module: 'gptplay.datasets.grokking_data.get_data'
   operation: 'x/y'
   training_fraction: 0.5
   val_fraction: null # if null, use 1 - training_fraction, test fraction is 0

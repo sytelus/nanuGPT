@@ -5,7 +5,7 @@ import torch
 
 from torch.utils.data import DataLoader
 
-from gptplay.tokenizers.grokking_tokenizer import get_tokenizer, DIVISION_MODULO_OPERATIONS, ALL_OPERATIONS
+from gptplay.tokenizers.grokking_tokenizer import GrokkingTokenizer, get_tokenizer, DIVISION_MODULO_OPERATIONS, ALL_OPERATIONS
 
 def operation_mod_p_data(operation: str, p: int, tokenizer: GrokkingTokenizer):
     """
@@ -50,7 +50,8 @@ def operation_mod_p_data(operation: str, p: int, tokenizer: GrokkingTokenizer):
     return equations, results
 
 def get_data(operation: str, prime: int, training_fraction: float, val_fraction:Optional[float],
-             batch_size: int, eval_batch_size:int, data_loader_seed:int)->Tuple[DataLoader,DataLoader, Optional[DataLoader], GrokkingTokenizer]:
+             train_batch_size: int, eval_batch_size:int, data_loader_seed:int,
+             local_rank:int, context_length:int)->Tuple[DataLoader,DataLoader, Optional[DataLoader], GrokkingTokenizer]:
     tokenizer = get_tokenizer(prime)
 
     inputs, labels = operation_mod_p_data(operation, prime, tokenizer)
@@ -68,12 +69,12 @@ def get_data(operation: str, prime: int, training_fraction: float, val_fraction:
     train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(dataset,
                                                                [train_size, val_size, test_size])
 
-    train_loader_seed, val_loader_seed, test_loader_seed = data_loader_seed, data_loader_seed + 1, data_loader_seed + 2
+    train_loader_seed, val_loader_seed, test_loader_seed = data_loader_seed+local_rank, data_loader_seed+local_rank + 1, data_loader_seed+local_rank + 2
 
     train_loader_gen = torch.Generator().manual_seed(train_loader_seed)
     val_loader_gen = torch.Generator().manual_seed(val_loader_seed)
 
-    train_loader = DataLoader(train_dataset, batch_size=min(batch_size, len(train_dataset)) , shuffle=True, generator=train_loader_gen)
+    train_loader = DataLoader(train_dataset, batch_size=min(train_batch_size, len(train_dataset)) , shuffle=True, generator=train_loader_gen)
     val_loader = DataLoader(val_dataset, batch_size=min(eval_batch_size, len(val_dataset)) , shuffle=False, generator=val_loader_gen)
 
     if len(test_dataset):
@@ -82,4 +83,4 @@ def get_data(operation: str, prime: int, training_fraction: float, val_fraction:
     else:
         test_loader = None
 
-    return train_loader, val_loader, test_loader, tokenizer
+    return train_loader, val_loader, test_loader
