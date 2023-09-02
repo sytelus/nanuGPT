@@ -10,11 +10,11 @@ from gptplay import utils
 
 
 @torch.no_grad()
-def estimate_loss(model, criterion, data_loader, eval_iters, amp_ctx, is_cuda, device)->Tuple[float, float]:
+def estimate_loss(model, get_loss, data_loader, eval_iters, amp_ctx, is_cuda, device)->Tuple[float, float]:
     model.eval()
     loss_sum, correct_sum, data_count = 0., 0, 0
     for i, (x, y) in enumerate(data_loader):
-        if i >= eval_iters: # eval_iters is None means eval the whole dataset
+        if eval_iters is not None and i >= eval_iters: # eval_iters is None means eval the whole dataset
             break
         x, y = x.pin_memory().to(device, non_blocking=True) if is_cuda else x.to(device), \
                y.pin_memory().to(device, non_blocking=True) if is_cuda else y.to(device)
@@ -27,13 +27,13 @@ def estimate_loss(model, criterion, data_loader, eval_iters, amp_ctx, is_cuda, d
     model.train()
     return loss_sum / data_count, correct_sum / data_count
 
-def log_metrics(logger, step, model, criterion, eval_iters, lr,
+def log_metrics(logger, step, model, get_loss, eval_iters, lr,
                 amp_ctx, is_cuda, device, train_loader, val_loader, test_loader):
 
-    train_loss, train_acc = estimate_loss(model, criterion, train_loader, eval_iters,
+    train_loss, train_acc = estimate_loss(model, get_loss, train_loader, eval_iters,
                                     amp_ctx, is_cuda, device)
 
-    val_loss, val_acc = estimate_loss(model, criterion, val_loader, eval_iters,
+    val_loss, val_acc = estimate_loss(model, get_loss, val_loader, eval_iters,
                                     amp_ctx, is_cuda, device)
 
     w_norm = model.weight_norm()
@@ -51,7 +51,7 @@ def log_metrics(logger, step, model, criterion, eval_iters, lr,
     }
 
     if test_loader:
-        test_loss, test_acc = estimate_loss(model, criterion, test_loader, eval_iters,
+        test_loss, test_acc = estimate_loss(model, get_loss, test_loader, eval_iters,
                                     amp_ctx, is_cuda, device)
         metrics["test/loss"] = test_loss,
         metrics["test/ppl"] = math.exp(test_loss),
@@ -143,7 +143,7 @@ def train(config:Mapping, logger):
         try:
             model = torch.compile(model) # requires PyTorch 2.0
         except Exception as e:
-            logger.error(f"Failed to compile model", exception_instance=e)
+            logger.error(f"Failed to compile model: {str(e)}")
         logger.info("Compiling done.")
 
     if torch_info.is_distributed:
@@ -160,23 +160,23 @@ def train(config:Mapping, logger):
     epoch, epoch_step = 0, 0 # epoch steps is useful to know how many epochs we did
     best_val_loss, evel_count = float('inf'), 0
 
-    criterion = torch.nn.CrossEntropyLoss()
     model.train()
 
     if torch_info.is_master:
         out_dir = utils.full_path(out_dir, create=True)
         logger.info({'out_dir': out_dir})
 
-    batch_iter = iter(train_loader)
-    try:
-        x, y = next(batch_iter)
-        batch_iter_done = False
-    except StopIteration:
-        raise ValueError("Train loader does not have any batches.")
-
     # run steps
     while step < num_steps:
-        epoch_step = 0
+        epoch_step = 0 # step within the epoch
+
+        batch_iter = iter(train_loader) # restart iterator
+        try:
+            x, y = next(batch_iter)
+            batch_iter_done = False
+        except StopIteration:
+            break # empty dataset
+
         # Loop over the training set
         while not batch_iter_done:
             model.train()
@@ -206,11 +206,8 @@ def train(config:Mapping, logger):
                 # immediately async prefetch next batch while model is doing the forward pass on the GPU
                 try:
                     x, y = next(batch_iter)
-                    batch_iter_done = False
                 except StopIteration:
                     batch_iter_done = True
-                    batch_iter = iter(train_loader)
-                    x, y = next(batch_iter)
 
                 # backward pass, with gradient scaling if training in fp16
                 scaler.scale(loss).backward()
@@ -238,7 +235,7 @@ def train(config:Mapping, logger):
 
             if torch_info.is_master and (step+1) % eval_every == 0 or step+1 >= num_steps:
                 eval_count += 1
-                val_loss = log_metrics(logger, step, model, criterion, eval_iters,
+                val_loss = log_metrics(logger, step, model, get_loss, eval_iters,
                     optimizer.param_groups[0]['lr'],
                     amp_ctx, torch_info.is_cuda, device, train_loader, val_loader,
                     test_loader if step+1 >= num_steps else None)
@@ -253,6 +250,7 @@ def train(config:Mapping, logger):
             epoch_step += 1
             if step >= num_steps:
                 break
+
         epoch += 1
 
     if torch_info.is_distributed:
