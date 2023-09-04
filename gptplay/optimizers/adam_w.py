@@ -8,4 +8,5 @@ def get_optim(model_named_params, learning_rate, weight_decay,
         [p for pn, p in model_named_params],
         lr=learning_rate,
         betas=(beta1, beta2),
-        eps=eps)
+        eps=eps,
+        weight_decay=weight_decay,)
