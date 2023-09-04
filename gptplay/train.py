@@ -79,6 +79,7 @@ def train(config:Mapping, logger):
     torch_compile = config['general']['torch_compile']
     num_steps = config['training']['num_steps']
     grad_clip = config['training']['grad_clip']
+    enable_train_log = config['training']['enable_train_log']
     train_log_every = config['training']['log_every']
     eval_every = config['eval']['eval_every']
     eval_iters = config['eval']['eval_iters']
@@ -223,7 +224,7 @@ def train(config:Mapping, logger):
             # flush the gradients as soon as we can, no need for this memory anymore
             optimizer.zero_grad(set_to_none=True)
 
-            if torch_info.is_master and step % train_log_every == 0 or step+1 >= num_steps:
+            if enable_train_log and torch_info.is_master and step % train_log_every == 0 or step+1 >= num_steps:
                 metrics = {
                     "train/step": step,
                     "train/step_acc": correct_sum / data_count,
