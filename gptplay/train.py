@@ -2,6 +2,8 @@ from contextlib import nullcontext
 from typing import Mapping, Tuple
 import dataclasses
 import math
+import numpy as np
+import random
 
 import torch
 from torch.nn.parallel import DistributedDataParallel
@@ -14,8 +16,6 @@ def estimate_loss(model, get_loss, data_loader, eval_iters, is_cuda, device)->Tu
     model.eval()
     loss_sum, correct_sum, data_count = 0., 0, 0
     for i, (x, y) in enumerate(data_loader):
-        if eval_iters is not None and i >= eval_iters: # eval_iters is None means eval the whole dataset
-            break
         x, y = x.to(device) if is_cuda else x.to(device), \
                y.to(device) if is_cuda else y.to(device)
         logits = model(x)
@@ -101,13 +101,24 @@ def train(config:Mapping, logger):
     get_loss = utils.import_fn(config['loss']['module'])
 
 
-    utils.setup_sys(seed)
+    def setup_torch():
+        # show Tensor shape first for tensor's rpresentation
+        normal_repr = torch.Tensor.__repr__
+        torch.Tensor.__repr__ = lambda self: f"{tuple(self.shape)}:{normal_repr(self)}" # type: ignore
 
-    torch_info = utils.setup_torch(seed=seed,
-                device_type=device_type, dtype=dtype,
-                enable_distributed=enable_distributed,
-                gradient_accumulation_steps_1gpu=gradient_accumulation_steps)
+        torch.backends.cudnn.enabled = True
+        torch.set_printoptions(precision=10)
+        torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
+        torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
 
+    def setup_seed(seed):
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+        np.random.seed(seed)
+        random.seed(seed)
+
+    setup_torch()
+    setup_seed(seed)
 
     # logger.summary(dataclasses.asdict(torch_info))
     # logger.summary({"global_batch_size": gradient_accumulation_steps * train_batch_size * torch_info.world_size,
@@ -115,10 +126,10 @@ def train(config:Mapping, logger):
     #                 "tokens_per_iter": gradient_accumulation_steps * train_batch_size * torch_info.world_size * context_length
     #                 })
 
-    device = torch.device(torch_info.device_name)
+    device = torch.device('cuda')
 
     # get dataset
-    train_loader, val_loader, test_loader = get_data(local_rank=torch_info.local_rank,
+    train_loader, val_loader, test_loader = get_data(local_rank=0,
                                                      **clean(data_config))
     tokenizer = get_tokenizer(**clean(tokenizer_config))
 
@@ -136,9 +147,13 @@ def train(config:Mapping, logger):
                       **clean(model_config)).to(device)
 
     # optimizer
-    optimizer = get_optim(model,
-                          enable_fused=torch_info.is_cuda,
-                          **clean(optimizer_config))
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=config['optimizer']['learning_rate'],
+        betas=(0.9, 0.98),
+        weight_decay=config['optimizer']['weight_decay']
+        )
+
 
     if torch_compile:
         logger.info("Compiling model...")
@@ -150,17 +165,15 @@ def train(config:Mapping, logger):
 
 
     # scheduler provides warmup and then constant lr
-    scheduler = get_scheduler(optimizer, **clean(scheduler_config))
-
-    # initialize a GradScaler. If enabled=False scaler is a no-op
-    # scaler = torch.cuda.amp.GradScaler(enabled=(torch_info.pt_dtype == torch.float16))
+    scheduler = torch.optim.lr_scheduler.LinearLR(
+        optimizer, start_factor = 1.e-8, total_iters=10
+    )
 
     step, eval_count = 0, 0
     epoch, epoch_step = 0, 0 # epoch steps is useful to know how many epochs we did
     best_val_loss, evel_count = float('inf'), 0
 
-    if torch_info.is_master:
-        out_dir = utils.full_path(out_dir, create=True)
+    out_dir = utils.full_path(out_dir, create=True)
         #logger.info({'out_dir': out_dir})
 
     # run steps
@@ -173,8 +186,8 @@ def train(config:Mapping, logger):
             optimizer.zero_grad()
 
             x, y = tuple(t)
-            x, y = x.to(device) if torch_info.is_cuda else x.to(device), \
-                   y.to(device) if torch_info.is_cuda else y.to(device)
+            x, y = x.to(device), \
+                   y.to(device)
 
             loss_sum, correct_sum, data_count = 0., 0, 0
             logits = model(x)
@@ -209,10 +222,10 @@ def train(config:Mapping, logger):
             #     logger.info(metrics)
 
             # log eval metrics upto this step
-            if torch_info.is_master and (step+1) % eval_every == 0 or step+1 >= num_steps:
+            if (step+1) % eval_every == 0 or step+1 >= num_steps:
                 val_loss = log_metrics(logger, step, model, get_loss, eval_iters,
                     optimizer.param_groups[0]['lr'],
-                    torch_info.is_cuda, device, train_loader, val_loader,
+                    True, device, train_loader, val_loader,
                     test_loader if step+1 >= num_steps else None, seed)
 
             step += 1
@@ -222,5 +235,3 @@ def train(config:Mapping, logger):
 
         epoch += 1
 
-    if torch_info.is_distributed:
-        torch.distributed.distroy_process_group()
