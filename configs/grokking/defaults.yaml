@@ -13,7 +13,7 @@ logging:
   run_name: nil  # select random name
   run_description: nil
   log_dir: '~/out_dir/grokking'
-  log_filename: 'seed_search_v2_baseline.txt'
+  log_filename: 'log.txt'
   allow_overwrite_log: true
   metrics_type: 'classification'
 

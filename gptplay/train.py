@@ -101,12 +101,14 @@ def train(config:Mapping, logger):
     get_model = utils.import_fn(config['model']['module'])
     get_loss = utils.import_fn(config['loss']['module'])
 
+
+    utils.setup_sys(seed)
+
     torch_info = utils.setup_torch(seed=seed,
                 device_type=device_type, dtype=dtype,
                 enable_distributed=enable_distributed,
                 gradient_accumulation_steps_1gpu=gradient_accumulation_steps)
 
-    utils.setup_sys(seed + torch_info.seed_offset)
 
     # logger.summary(dataclasses.asdict(torch_info))
     # logger.summary({"global_batch_size": gradient_accumulation_steps * train_batch_size * torch_info.world_size,
@@ -115,7 +117,6 @@ def train(config:Mapping, logger):
     #                 })
 
     device = torch.device(torch_info.device_name)
-    amp_ctx = nullcontext() if torch_info.pt_dtype != torch.float16 else torch.amp.autocast(device_type=torch_info.device_type, dtype=torch_info.pt_dtype)
 
     # get dataset
     train_loader, val_loader, test_loader = get_data(local_rank=torch_info.local_rank,
@@ -148,9 +149,6 @@ def train(config:Mapping, logger):
             logger.error(f"Failed to compile model: {str(e)}")
         logger.info("Compiling done.")
 
-    if torch_info.is_distributed:
-        model = DistributedDataParallel(model,
-                                        device_ids=[torch_info.local_rank])
 
     # scheduler provides warmup and then constant lr
     scheduler = get_scheduler(optimizer, **clean(scheduler_config))
@@ -180,27 +178,11 @@ def train(config:Mapping, logger):
                    y.to(device) if torch_info.is_cuda else y.to(device)
 
             loss_sum, correct_sum, data_count = 0., 0, 0
-            for micro_step in range(gradient_accumulation_steps):
-                if torch_info.is_distributed:
-                    # Instead of model.no_sync(), we do Karpathy's hack
-                    # On last step, flag model to require backward grad sync
-                    model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
-                with amp_ctx:
-                    logits = model(x)
-                    loss, correct = get_loss(logits, y)
+            logits = model(x)
+            loss, correct = get_loss(logits, y)
 
-                    loss_sum += loss.item() * len(y)
-                    correct_sum += correct.item()
-                    data_count += len(y)
-
-                    # Scale the loss to account for gradient accumulation
-                    # During gradient accumulation, gradients are summed at each micro step.
-                    # When we divide the loss by the number of micro steps we average out the gradients
-                    # so that the net value of grads is same as if we had a larger batch size
-                    loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
-
-                # backward pass, with gradient scaling if training in fp16
-                loss.backward()
+            # backward pass, with gradient scaling if training in fp16
+            loss.backward()
 
             # clip the gradient
             # if grad_clip != 0.0:
@@ -212,6 +194,10 @@ def train(config:Mapping, logger):
             # scaler.update()
             scheduler.step()
             # flush the gradients as soon as we can, no need for this memory anymore
+
+            loss_sum += loss.item() * len(y)
+            correct_sum += correct.item()
+            data_count += len(y)
 
             # log train loss for this step
             # if torch_info.is_master and (step+1) % train_log_every == 0 or (step+1) >= num_steps:
@@ -225,20 +211,10 @@ def train(config:Mapping, logger):
 
             # log eval metrics upto this step
             if torch_info.is_master and (step+1) % eval_every == 0 or step+1 >= num_steps:
-                eval_count += 1
                 val_loss = log_metrics(logger, step, model, get_loss, eval_iters,
                     optimizer.param_groups[0]['lr'],
                     amp_ctx, torch_info.is_cuda, device, train_loader, val_loader,
                     test_loader if step+1 >= num_steps else None, seed)
-
-                if save_checkpoint and val_loss < best_val_loss and \
-                        ((step+1 >= num_steps) or \
-                            (step > checkoint_after and eval_count % checkpoint_every == 0)
-                        ):
-                    best_val_loss = val_loss
-                    utils.save_checkpoint(out_dir, f'{project_name}_{run_name}' ,
-                                          model.module if torch_info.is_distributed else model,
-                                          optimizer, scheduler, step, best_val_loss)
 
             step += 1
             epoch_step += 1
