@@ -31,9 +31,9 @@ if __name__ == "__main__":
                         {"name": "w_norm_ewa", "step_metric":"train/step", "summary":"min", "goal":"min"},
                     ])
 
-        #for i in range(24):
-        #config['data_loader_seed'] = i
-    train(config, logger)
+    for i in range(24):
+        config['seed'] = i
+        train(config, logger)
 
     logger.info({'start_time': start_time, 'total_time': time.time() - start_time})
 
