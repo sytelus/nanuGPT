@@ -17,7 +17,7 @@ from grokking.utils import ExponentialMovingAverage, SmoothedDyDx
 def evaluate(model, val_loader, device, criterion)->Tuple[float, float]:
     correct = 0
     loss_sum = 0.
-    loss, acc = 0., 0.
+    loss, acc, data_count = 0., 0., 0
 
     # Set model to evaluation mode
     model.eval()
@@ -30,9 +30,11 @@ def evaluate(model, val_loader, device, criterion)->Tuple[float, float]:
             output = model(inputs)[-1,:,:]
             correct += (torch.argmax(output, dim=1) == labels).sum().item()
             loss_sum += criterion(output, labels).item() * len(labels)
+            data_count += len(labels)
 
     loss = loss_sum / len(val_loader.dataset)
     acc = correct / len(val_loader.dataset)
+    assert data_count == len(val_loader.dataset)
 
     model.train()
     return loss, acc
