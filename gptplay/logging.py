@@ -112,12 +112,13 @@ class Logger:
                  metrics_type='default',
                  log_dir:Optional[str]=None,
                  log_filename:Optional[str]=None,
-                 allow_overwrite_log=False) -> None:
+                 allow_overwrite_log=False, enable_summaries=True) -> None:
         self.start_time = time.time()
         self._logger = None
         self._run = None
         self.enable_wandb = enable_wandb
         self.master_process = master_process
+        self.enable_summaries = enable_summaries
 
         if master_process:
             if log_dir or log_filename:
@@ -137,6 +138,8 @@ class Logger:
         # else leave things to None
 
     def log_config(self, config):
+        if not self.enable_summaries:
+            return
         if self._logger is not None:
             self._logger.info(_dict2msg({'project_config': config}))
         if self.enable_wandb and self._run is not None:
@@ -183,6 +186,8 @@ class Logger:
             wandb.alert(d, ex_msg, level=wandb.AlertLevel.ERROR)
 
     def summary(self, d:Mapping[str,Any], py_logger_only:bool=False):
+        if not self.enable_summaries:
+            return
         if self._logger is not None:
             self.info(d, py_logger_only=True)
 

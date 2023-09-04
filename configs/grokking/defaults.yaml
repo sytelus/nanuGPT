@@ -16,6 +16,7 @@ logging:
   log_filename: 'log.txt'
   allow_overwrite_log: true
   metrics_type: 'classification'
+  enable_summaries: true
 
 model:
   module: 'gptplay.models.tiny_transformer.get_model'

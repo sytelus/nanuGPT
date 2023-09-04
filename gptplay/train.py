@@ -7,6 +7,7 @@ import torch
 from torch.nn.parallel import DistributedDataParallel
 
 from gptplay import utils
+from gptplay import logging
 
 
 @torch.no_grad()
@@ -67,7 +68,7 @@ def clean(config:Mapping)->Mapping:
     c.pop('module')
     return c
 
-def train(config:Mapping, logger):
+def train(config:Mapping, logger=None):
     project_name = config['logging']['project_name']
     run_name = config['logging']['run_name']
     device_type = config['general']['device_type']
@@ -90,6 +91,7 @@ def train(config:Mapping, logger):
     data_config = config['data']
     model_config = config['model']
     context_length = config['model']['context_length']
+    logging_config = config['logging']
     optimizer_config = config['optimizer']
     scheduler_config = config['scheduler']
     tokenizer_config = config['tokenizer']
@@ -108,6 +110,11 @@ def train(config:Mapping, logger):
 
     utils.setup_sys(seed + torch_info.seed_offset)
 
+    if logger is None:
+        logger = logging.Logger(master_process=torch_info.is_master, **logging_config)
+
+    logger.log_sys_info()
+    logger.log_config(config)
     logger.summary(dataclasses.asdict(torch_info))
     logger.summary({"global_batch_size": gradient_accumulation_steps * train_batch_size * torch_info.world_size,
                     "local_batch_size": gradient_accumulation_steps * torch_info.world_size,
