@@ -214,14 +214,14 @@ def train(config:Mapping, logger):
             # flush the gradients as soon as we can, no need for this memory anymore
 
             # log train loss for this step
-            if torch_info.is_master and (step+1) % train_log_every == 0 or (step+1) >= num_steps:
-                metrics = {
-                    "train/step": step,
-                    "train/step_acc": correct_sum / data_count,
-                    "train/step_loss": loss_sum / data_count,
-                    "train/step_ppl": math.exp(loss_sum / data_count),
-                }
-                logger.info(metrics)
+            # if torch_info.is_master and (step+1) % train_log_every == 0 or (step+1) >= num_steps:
+            #     metrics = {
+            #         "train/step": step,
+            #         "train/step_acc": correct_sum / data_count,
+            #         "train/step_loss": loss_sum / data_count,
+            #         "train/step_ppl": math.exp(loss_sum / data_count),
+            #     }
+            #     logger.info(metrics)
 
             # log eval metrics upto this step
             if torch_info.is_master and (step+1) % eval_every == 0 or step+1 >= num_steps:

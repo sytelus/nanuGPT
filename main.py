@@ -1,5 +1,4 @@
-import os
-import time
+import random
 
 from gptplay.config import Config
 from gptplay.train import train
@@ -15,7 +14,8 @@ if __name__ == "__main__":
     logger.log_config(config)
 
     for i in range(20000):
-        config['general']['seed'] = i
+        config['general']['seed'] = random.randint(0, 32000)
+        config['general']['data_loader_seed'] = random.randint(0, 32000)
         train(config, logger)
 
     logger.all_done()
