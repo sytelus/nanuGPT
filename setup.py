@@ -12,12 +12,12 @@ install_requires=[
 
 setuptools.setup(
     name="gptplay",
-    version="0.2.5",
+    version="0.2.8",
     author="Shital Shah",
     description="Playground for autoregresive models",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/sytelus/grokking",
+    url="https://github.com/sytelus/gptplay",
     packages=setuptools.find_packages(),
 	license='MIT',
     classifiers=[

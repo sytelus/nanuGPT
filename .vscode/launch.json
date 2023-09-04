@@ -29,6 +29,14 @@
             "args": ["configs/grokking/prime50k.yaml"]
         },
         {
+            "name": "Grokking-SeedSearch",
+            "type": "python",
+            "request": "launch",
+            "program": "${cwd}/seed_search.py",
+            "console": "integratedTerminal",
+            "args": ["configs/grokking/prime223.yaml"]
+        },
+       {
             "name": "Python: Current File",
             "type": "python",
             "request": "launch",

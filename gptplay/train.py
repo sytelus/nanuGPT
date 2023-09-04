@@ -110,6 +110,7 @@ def train(config:Mapping, logger=None):
 
     utils.setup_sys(seed + torch_info.seed_offset)
 
+    own_logger = logger is None
     if logger is None:
         logger = logging.Logger(master_process=torch_info.is_master, **logging_config)
 
@@ -265,3 +266,6 @@ def train(config:Mapping, logger=None):
 
     if torch_info.is_distributed:
         torch.distributed.distroy_process_group()
+
+    if own_logger and torch_info.is_master:
+        logger.all_done()
