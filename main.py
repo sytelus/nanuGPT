@@ -33,8 +33,8 @@ if __name__ == "__main__":
                     ])
 
     for i in range(20000):
-        config['seed'] = random.randint(0, 100000)
-        config['data_loader_seed'] = random.randint(0, 100000)
+        config['seed'] = random.randint(0, 32000)
+        config['data_loader_seed'] = random.randint(0, 32000)
         train(config, logger)
 
     logger.info({'start_time': start_time, 'total_time': time.time() - start_time})
