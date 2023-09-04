@@ -74,58 +74,6 @@ def train(config:Mapping, logger):
         seq_len=5, # currently each input eq has [eos a op b =] which is 5 tokens
         ).to(device)
 
-    #torch.save(model.state_dict(), os.path.join(out_dir, 'model42_8.pt'))
-
-    model42_8 = Transformer(
-        num_layers=config['num_layers'],
-        dim_model=config['dim_model'],
-        num_heads=config['num_heads'],
-        num_tokens=len(tokenizer),
-        seq_len=5, # currently each input eq has [eos a op b =] which is 5 tokens
-        ).to(device)
-    model42_8.load_state_dict(torch.load(os.path.join(out_dir, 'model42_8.pt')))
-
-    #model.load_state_dict(torch.load(os.path.join(out_dir, 'model42_8.pt')))
-
-    modules = list(model.modules())
-    modules42_8 = list(model42_8.modules())
-
-    # modules[5].load_state_dict(modules42_8[5].state_dict())
-    # modules[7].load_state_dict(modules42_8[7].state_dict())
-    # modules[8].load_state_dict(modules42_8[8].state_dict())
-    # modules[12].load_state_dict(modules42_8[12].state_dict())
-    modules[14].load_state_dict(modules42_8[14].state_dict())
-    #modules[16].load_state_dict(modules42_8[16].state_dict())
-    modules[17].load_state_dict(modules42_8[17].state_dict())
-    # modules[21].load_state_dict(modules42_8[21].state_dict())
-    modules[1].load_state_dict(modules42_8[1].state_dict())
-    #modules[2].load_state_dict(modules42_8[2].state_dict())
-    #modules[4].load_state_dict(modules42_8[4].state_dict())
-    #modules[13].load_state_dict(modules42_8[13].state_dict())
-    #modules[22].load_state_dict(modules42_8[22].state_dict())
-    modules[23].load_state_dict(modules42_8[23].state_dict())
-
-
-
-    # for i in range(len(modules)):
-    #     module_str = str(modules[i]).replace('\n', '->')
-    #     patam_count = sum(p.numel() for p in modules[i].parameters())
-    #     param_norm = sum(p.norm().item() for p in modules[i].parameters())
-    #     param_mean = sum(p.mean().item() for p in modules[i].parameters())
-    #     param_norm42_8 = sum(p.norm().item() for p in modules42_8[i].parameters())
-    #     param_mean42_8 = sum(p.mean().item() for p in modules42_8[i].parameters())
-    #     logger.info({'module_index': i,
-    #                  'patam_count': patam_count,
-    #                  'param_norm': param_norm,
-    #                  'param_mean': param_mean,
-    #                  'param_norm42_8': param_norm42_8,
-    #                  'param_mean42_8': param_mean42_8,
-    #                  'module_str': module_str})
-    # logger.flush()
-
-    # weights = np.concatenate([p.detach().cpu().flatten().numpy() for p in model.get_params(non_embedding=True)])
-    # np.save(os.path.join(out_dir, 'seed56_7_weights.npy'), weights)
-
     # optimizer
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -141,12 +89,6 @@ def train(config:Mapping, logger):
 
     step, start_time = 0, time.time()
     epoch, epoch_step = 0, 0
-    ewa_train_loss, ewa_val_loss = ExponentialMovingAverage(weight=0.1), ExponentialMovingAverage(weight=0.1)
-    w_norm_ewa = ExponentialMovingAverage(weight=0.3)
-    d_train_loss = SmoothedDyDx(y_ema_weight=1.0, x_ema_weight=0.5, dx_ema_weight=0.9,
-                                 dy_ema_weight=1.0, dydx_ema_weight=0.1)
-    d_val_loss = SmoothedDyDx(y_ema_weight=1.0, x_ema_weight=0.5, dx_ema_weight=0.9,
-                                 dy_ema_weight=1.0, dydx_ema_weight=0.1)
     criterion = torch.nn.CrossEntropyLoss()
     model.train()
     while step < num_steps:
@@ -171,19 +113,6 @@ def train(config:Mapping, logger):
             # Update weights
             optimizer.step()
             scheduler.step()
-
-            # ewa_train_loss.add(loss.item())
-            # d_train_loss.add(loss.item(), step)
-
-            # if step % 20 == 0 or step+1 >= num_steps:
-            #     metrics = {
-            #         "train/step": step,
-            #         "train/acc": acc.item(),
-            #         "train/loss": loss.item(),
-            #         "train/ewa_loss": ewa_train_loss.value,
-            #         "train/d_loss": d_train_loss.value,
-            #     }
-                #logger.info(metrics)
 
             if (step+1) % eval_every == 0 or step+1 >= num_steps:
                 val_loss, val_acc = evaluate(model, val_loader, device, criterion)
