@@ -10,7 +10,7 @@ from gptplay import utils
 
 
 @torch.no_grad()
-def estimate_loss(model, get_loss, data_loader, eval_iters, amp_ctx, is_cuda, device)->Tuple[float, float]:
+def estimate_loss(model, get_loss, data_loader, eval_iters, is_cuda, device)->Tuple[float, float]:
     model.eval()
     loss_sum, correct_sum, data_count = 0., 0, 0
     for i, (x, y) in enumerate(data_loader):
@@ -18,23 +18,22 @@ def estimate_loss(model, get_loss, data_loader, eval_iters, amp_ctx, is_cuda, de
             break
         x, y = x.to(device) if is_cuda else x.to(device), \
                y.to(device) if is_cuda else y.to(device)
-        with amp_ctx:
-            logits = model(x)
-            loss, correct = get_loss(logits, y)
-            loss_sum += loss.item() * len(y)
-            correct_sum += correct.item()
-            data_count += len(y)
+        logits = model(x)
+        loss, correct = get_loss(logits, y)
+        loss_sum += loss.item() * len(y)
+        correct_sum += correct.item()
+        data_count += len(y)
     model.train()
     return loss_sum / data_count, correct_sum / data_count
 
 def log_metrics(logger, step, model, get_loss, eval_iters, lr,
-                amp_ctx, is_cuda, device, train_loader, val_loader, test_loader, seed):
+                is_cuda, device, train_loader, val_loader, test_loader, seed):
 
     train_loss, train_acc = estimate_loss(model, get_loss, train_loader, eval_iters,
-                                    amp_ctx, is_cuda, device)
+                                    is_cuda, device)
 
     val_loss, val_acc = estimate_loss(model, get_loss, val_loader, eval_iters,
-                                    amp_ctx, is_cuda, device)
+                                    is_cuda, device)
 
     w_norm = model.weight_norm()
 
@@ -53,7 +52,7 @@ def log_metrics(logger, step, model, get_loss, eval_iters, lr,
 
     if test_loader:
         test_loss, test_acc = estimate_loss(model, get_loss, test_loader, eval_iters,
-                                    amp_ctx, is_cuda, device)
+                                    is_cuda, device)
         metrics["test/loss"] = test_loss,
         metrics["test/ppl"] = math.exp(test_loss),
         metrics["test/acc"] = test_acc,
@@ -213,7 +212,7 @@ def train(config:Mapping, logger):
             if torch_info.is_master and (step+1) % eval_every == 0 or step+1 >= num_steps:
                 val_loss = log_metrics(logger, step, model, get_loss, eval_iters,
                     optimizer.param_groups[0]['lr'],
-                    amp_ctx, torch_info.is_cuda, device, train_loader, val_loader,
+                    torch_info.is_cuda, device, train_loader, val_loader,
                     test_loader if step+1 >= num_steps else None, seed)
 
             step += 1
