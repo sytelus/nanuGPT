@@ -2,7 +2,7 @@ general:
   device_type: 'cuda'            # auto select if blank or cpu, cuda
   backend: 'nccl'       # nccl, gloo, mpi, horovod)
   dtype: 'float32'         # float32, float16, bfloat16
-  torch_compile: True
+  torch_compile: false
   seed: 56
   enable_distributed: false
   out_dir: '~/out_dir/grokking'
@@ -13,7 +13,7 @@ logging:
   run_name: nil  # select random name
   run_description: nil
   log_dir: '~/out_dir/grokking'
-  log_filename: 'log.txt'
+  log_filename: 'seed_scane_new_code.txt'
   allow_overwrite_log: true
   metrics_type: 'classification'
 
@@ -41,14 +41,14 @@ data:
   val_fraction: null # if null, use 1 - training_fraction, test fraction is 0
   train_batch_size: 512
   eval_batch_size: 32768 # 2^15=32768
-  data_loader_seed: 6
+  data_loader_seed: 42 # 6
   context_length: *context_length
 
 tokenizer:
   module: 'gptplay.tokenizers.grokking_tokenizer.get_tokenizer'
 
 training:
-  num_steps: 120000    # 1e5 is not enough when weight_decay=0.0
+  num_steps: 3000    # 1e5 is not enough when weight_decay=0.0
   log_every: 4000000
   grad_clip: 0.0 # disabled if 0.0
   gradient_accumulation_steps: 1 # will be automatically divided by GPU count
@@ -67,7 +67,7 @@ scheduler:
   total_iters: 10
 
 eval:
-  eval_every: 100
+  eval_every: 1000000
   eval_iters: null # number of samples to evaluate for dataset
   save_checkpoint: false
   checkoint_after: 2000000 # starts saving checkpoint after these steps

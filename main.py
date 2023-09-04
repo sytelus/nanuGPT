@@ -14,6 +14,8 @@ if __name__ == "__main__":
     logger.log_sys_info()
     logger.log_config(config)
 
-    train(config, logger)
+    for i in range(20000):
+        config['general']['seed'] = i
+        train(config, logger)
 
     logger.all_done()

@@ -16,8 +16,8 @@ def estimate_loss(model, get_loss, data_loader, eval_iters, amp_ctx, is_cuda, de
     for i, (x, y) in enumerate(data_loader):
         if eval_iters is not None and i >= eval_iters: # eval_iters is None means eval the whole dataset
             break
-        x, y = x.pin_memory().to(device, non_blocking=True) if is_cuda else x.to(device), \
-               y.pin_memory().to(device, non_blocking=True) if is_cuda else y.to(device)
+        x, y = x.to(device) if is_cuda else x.to(device), \
+               y.to(device) if is_cuda else y.to(device)
         with amp_ctx:
             logits = model(x)
             loss, correct = get_loss(logits, y)
@@ -28,7 +28,7 @@ def estimate_loss(model, get_loss, data_loader, eval_iters, amp_ctx, is_cuda, de
     return loss_sum / data_count, correct_sum / data_count
 
 def log_metrics(logger, step, model, get_loss, eval_iters, lr,
-                amp_ctx, is_cuda, device, train_loader, val_loader, test_loader):
+                amp_ctx, is_cuda, device, train_loader, val_loader, test_loader, seed):
 
     train_loss, train_acc = estimate_loss(model, get_loss, train_loader, eval_iters,
                                     amp_ctx, is_cuda, device)
@@ -39,6 +39,7 @@ def log_metrics(logger, step, model, get_loss, eval_iters, lr,
     w_norm = model.weight_norm()
 
     metrics = {
+        "seed": seed,
         "train/step": step,
         "train/loss": train_loss,
         "train/ppl": math.exp(train_loss),
@@ -107,35 +108,35 @@ def train(config:Mapping, logger):
 
     utils.setup_sys(seed + torch_info.seed_offset)
 
-    logger.summary(dataclasses.asdict(torch_info))
-    logger.summary({"global_batch_size": gradient_accumulation_steps * train_batch_size * torch_info.world_size,
-                    "local_batch_size": gradient_accumulation_steps * torch_info.world_size,
-                    "tokens_per_iter": gradient_accumulation_steps * train_batch_size * torch_info.world_size * context_length
-                    })
+    # logger.summary(dataclasses.asdict(torch_info))
+    # logger.summary({"global_batch_size": gradient_accumulation_steps * train_batch_size * torch_info.world_size,
+    #                 "local_batch_size": gradient_accumulation_steps * torch_info.world_size,
+    #                 "tokens_per_iter": gradient_accumulation_steps * train_batch_size * torch_info.world_size * context_length
+    #                 })
 
     device = torch.device(torch_info.device_name)
-    amp_ctx = nullcontext() if torch_info.device_type == 'cpu' else torch.amp.autocast(device_type=torch_info.device_type, dtype=torch_info.pt_dtype)
+    amp_ctx = nullcontext() if torch_info.pt_dtype != torch.float16 else torch.amp.autocast(device_type=torch_info.device_type, dtype=torch_info.pt_dtype)
 
     # get dataset
     train_loader, val_loader, test_loader = get_data(local_rank=torch_info.local_rank,
                                                      **clean(data_config))
     tokenizer = get_tokenizer(**clean(tokenizer_config))
 
-    logger.summary({'vocab_size': len(tokenizer),
-                    'train_len': len(train_loader.dataset),
-                    'val_len': len(val_loader.dataset),
-                    'test_len': len(test_loader.dataset) if test_loader is not None else 0,
-                    'train_batches': len(train_loader),
-                    'val_batches': len(val_loader),
-                    'test_batches': len(test_loader) if test_loader is not None else 0
-                    })
+    # logger.summary({'vocab_size': len(tokenizer),
+    #                 'train_len': len(train_loader.dataset),
+    #                 'val_len': len(val_loader.dataset),
+    #                 'test_len': len(test_loader.dataset) if test_loader is not None else 0,
+    #                 'train_batches': len(train_loader),
+    #                 'val_batches': len(val_loader),
+    #                 'test_batches': len(test_loader) if test_loader is not None else 0
+    #                 })
 
     # create model
     model = get_model(vocab_size=len(tokenizer),
                       **clean(model_config)).to(device)
 
     # optimizer
-    optimizer = get_optim(model.named_parameters(),
+    optimizer = get_optim(model,
                           enable_fused=torch_info.is_cuda,
                           **clean(optimizer_config))
 
@@ -155,7 +156,7 @@ def train(config:Mapping, logger):
     scheduler = get_scheduler(optimizer, **clean(scheduler_config))
 
     # initialize a GradScaler. If enabled=False scaler is a no-op
-    scaler = torch.cuda.amp.GradScaler(enabled=(torch_info.pt_dtype == torch.float16))
+    # scaler = torch.cuda.amp.GradScaler(enabled=(torch_info.pt_dtype == torch.float16))
 
     step, eval_count = 0, 0
     epoch, epoch_step = 0, 0 # epoch steps is useful to know how many epochs we did
@@ -163,24 +164,20 @@ def train(config:Mapping, logger):
 
     if torch_info.is_master:
         out_dir = utils.full_path(out_dir, create=True)
-        logger.info({'out_dir': out_dir})
+        #logger.info({'out_dir': out_dir})
 
     # run steps
     while step < num_steps:
         epoch_step = 0 # step within the epoch
 
-        batch_iter = iter(train_loader) # restart iterator
-        try:
-            x, y = next(batch_iter)
-            batch_iter_done = False
-        except StopIteration:
-            break # empty dataset
-
         # Loop over the training set
-        while not batch_iter_done:
+        for t in train_loader:
             model.train()
-            x, y = x.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else x.to(device), \
-                   y.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else y.to(device)
+            optimizer.zero_grad()
+
+            x, y = tuple(t)
+            x, y = x.to(device) if torch_info.is_cuda else x.to(device), \
+                   y.to(device) if torch_info.is_cuda else y.to(device)
 
             loss_sum, correct_sum, data_count = 0., 0, 0
             for micro_step in range(gradient_accumulation_steps):
@@ -202,28 +199,22 @@ def train(config:Mapping, logger):
                     # so that the net value of grads is same as if we had a larger batch size
                     loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
 
-                # immediately async prefetch next batch while model is doing the forward pass on the GPU
-                try:
-                    x, y = next(batch_iter)
-                except StopIteration:
-                    batch_iter_done = True
-
                 # backward pass, with gradient scaling if training in fp16
-                scaler.scale(loss).backward()
+                loss.backward()
 
             # clip the gradient
-            if grad_clip != 0.0:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            # if grad_clip != 0.0:
+            #     scaler.unscale_(optimizer)
+            #     torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
 
             # step the optimizer and scaler if training in fp16
-            scaler.step(optimizer)
-            scaler.update()
+            optimizer.step()
+            # scaler.update()
             scheduler.step()
             # flush the gradients as soon as we can, no need for this memory anymore
-            optimizer.zero_grad(set_to_none=True)
 
-            if torch_info.is_master and step % train_log_every == 0 or step+1 >= num_steps:
+            # log train loss for this step
+            if torch_info.is_master and (step+1) % train_log_every == 0 or (step+1) >= num_steps:
                 metrics = {
                     "train/step": step,
                     "train/step_acc": correct_sum / data_count,
@@ -232,12 +223,13 @@ def train(config:Mapping, logger):
                 }
                 logger.info(metrics)
 
+            # log eval metrics upto this step
             if torch_info.is_master and (step+1) % eval_every == 0 or step+1 >= num_steps:
                 eval_count += 1
                 val_loss = log_metrics(logger, step, model, get_loss, eval_iters,
                     optimizer.param_groups[0]['lr'],
                     amp_ctx, torch_info.is_cuda, device, train_loader, val_loader,
-                    test_loader if step+1 >= num_steps else None)
+                    test_loader if step+1 >= num_steps else None, seed)
 
                 if save_checkpoint and val_loss < best_val_loss and \
                         ((step+1 >= num_steps) or \

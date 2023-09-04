@@ -268,10 +268,9 @@ def setup_torch(seed:int,
         seed_offset = 0
         gradient_accumulation_steps = gradient_accumulation_steps_1gpu
 
-
+    torch.manual_seed(seed+seed_offset)
     if is_cuda:
         torch.cuda.manual_seed(seed+seed_offset)
-    torch.manual_seed(seed+seed_offset)
 
     return TorchInfo(is_cuda=is_cuda, is_distributed=is_distributed,
                      device_type=device_type, dtype=dtype, device_name=device_name,

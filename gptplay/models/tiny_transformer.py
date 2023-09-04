@@ -8,14 +8,13 @@ class DecoderBlock(torch.nn.Module):
                attn_dropout, ffn_dropout):
     super().__init__()
 
-    self.self_attn = nn.MultiheadAttention(n_embd, n_heads, dropout=attn_dropout,
-                                           bias=attn_proj_bias, add_bias_kv=attn_kv_bias)
+    self.self_attn = nn.MultiheadAttention(n_embd, n_heads)
     self.self_attn_norm = nn.LayerNorm(n_embd)
     self.ffn = nn.Sequential(
-        nn.Linear(n_embd, n_embd * 4, bias=ffn_bias),
+        nn.Linear(n_embd, n_embd * 4),
         nn.GELU(),
-        nn.Linear(n_embd * 4, n_embd, bias=ffn_bias),
-        nn.Dropout(ffn_dropout)
+        nn.Linear(n_embd * 4, n_embd),
+        #nn.Dropout(ffn_dropout)
     )
     self.ffn_norm = nn.LayerNorm(n_embd)
 
@@ -53,7 +52,7 @@ class TinyTransformer(torch.nn.Module):
         # decoder: (context_len, batch_size, n_embd)
         nn.LayerNorm(n_embd),
         # logits: (context_len, batch_size, vocab_size)
-        nn.Linear(n_embd, vocab_size, bias=ffn_bias)
+        nn.Linear(n_embd, vocab_size)
     )
 
   def forward(self, inputs: Tensor):
