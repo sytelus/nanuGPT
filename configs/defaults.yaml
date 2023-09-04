@@ -8,7 +8,7 @@ device: ''            # auto select or cpu, cuda
 seed: 56 # 42 is good seed, 56 is bad seed
 data_loader_seed: 0 # 8 is good seed, 7 is bad seed
 out_dir: '~/out_dir/grokking'
-log_filename: 'grokking_baseline2rand.txt'
+log_filename: 'seed_search_v1_baseline.txt'
 allow_overwrite_log: true
 
 # data
