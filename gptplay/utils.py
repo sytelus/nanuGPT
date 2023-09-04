@@ -297,3 +297,16 @@ def import_fn(spec:str)->Callable:
     module = importlib.import_module(module_name)
     fn = getattr(module, fn_name)
     return fn
+
+def get_stats(nums):
+    if isinstance(nums, torch.Tensor):
+        nums = nums.detach().cpu().numpy()
+    if isinstance(nums, list):
+        nums = np.array(nums)
+    nums = np.array(nums)
+    return {'mean': np.mean(nums),
+            'median': np.median(nums),
+            'std': np.std(nums),
+            'min': np.min(nums),
+            'max': np.max(nums),
+            'n': len(nums)}
