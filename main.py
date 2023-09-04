@@ -1,5 +1,6 @@
 import os
 import time
+import random
 
 from grokking.config import Config
 from grokking.train import train
@@ -31,8 +32,9 @@ if __name__ == "__main__":
                         {"name": "w_norm_ewa", "step_metric":"train/step", "summary":"min", "goal":"min"},
                     ])
 
-    for i in range(24):
-        config['seed'] = i
+    for i in range(20000):
+        config['seed'] = random.randint(0, 100000)
+        config['data_loader_seed'] = random.randint(0, 100000)
         train(config, logger)
 
     logger.info({'start_time': start_time, 'total_time': time.time() - start_time})
