@@ -21,7 +21,7 @@ if __name__ == "__main__":
     logger = logging.Logger(master_process=True, **logging_config)
 
 
-    for i in range (2000):
+    for i in range (120):
         config['general']['seed'] = random.randint(0, 32000)
         config['data']['data_loader_seed'] = random.randint(0, 32000)
         train(config, logger=logger)
