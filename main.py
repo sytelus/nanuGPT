@@ -13,7 +13,7 @@ if __name__ == "__main__":
     logger.log_sys_info()
     logger.log_config(config)
 
-    for i in range(20000):
+    for i in range(1000):
         config['general']['seed'] = random.randint(0, 32000)
         config['general']['data_loader_seed'] = random.randint(0, 32000)
         train(config, logger)
