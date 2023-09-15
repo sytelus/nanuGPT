@@ -13,7 +13,7 @@ logging:
   run_name: nil  # select random name
   run_description: nil
   log_dir: '~/out_dir/grokking'
-  log_filename: 'sead_search_v2_min_code.txt'
+  log_filename: 'sead_search_v2_min_code_xformer.txt'
   allow_overwrite_log: true
   metrics_type: 'classification'
 
