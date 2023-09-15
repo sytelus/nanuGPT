@@ -7,4 +7,5 @@ def get_optim(model, learning_rate, weight_decay,
     return torch.optim.AdamW(
         model.parameters(),
         lr=learning_rate,
-        betas=(beta1, beta2))
+        betas=(beta1, beta2),
+        eight_decay=weight_decay,)

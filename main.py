@@ -15,7 +15,7 @@ if __name__ == "__main__":
 
     for i in range(1000):
         config['general']['seed'] = random.randint(0, 32000)
-        config['general']['data_loader_seed'] = random.randint(0, 32000)
+        config['data']['data_loader_seed'] = random.randint(0, 32000)
         train(config, logger)
 
     logger.all_done()
