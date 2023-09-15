@@ -172,7 +172,7 @@ def train(config:Mapping, logger=None):
 
     if torch_info.is_master:
         out_dir = utils.full_path(out_dir, create=True)
-        logger.info({'out_dir': out_dir})
+        logger.summary({'out_dir': out_dir})
 
     # run steps
     while step < num_steps:
@@ -232,7 +232,7 @@ def train(config:Mapping, logger=None):
             # flush the gradients as soon as we can, no need for this memory anymore
             optimizer.zero_grad(set_to_none=True)
 
-            if enable_train_log and torch_info.is_master and step % train_log_every == 0 or step+1 >= num_steps:
+            if enable_train_log and torch_info.is_master and (step % train_log_every == 0 or step+1 >= num_steps):
                 metrics = {
                     "train/step": step,
                     "train/step_acc": correct_sum / data_count,
@@ -241,7 +241,7 @@ def train(config:Mapping, logger=None):
                 }
                 logger.info(metrics)
 
-            if torch_info.is_master and (step+1) % eval_every == 0 or step+1 >= num_steps:
+            if torch_info.is_master and ((step+1) % eval_every == 0 or step+1 >= num_steps):
                 eval_count += 1
                 val_loss = log_metrics(logger, step, model, get_loss, eval_iters,
                     optimizer.param_groups[0]['lr'],
