@@ -28,7 +28,7 @@ model:
   # PyTorch default for bias is true
   ffn_bias: true # pytorch default
   attn_proj_bias: true # for projection layers in attention
-  attn_kv_bias: true # for kv in attention
+  attn_kv_bias: false # for kv in attention
   attn_dropout: 0.0 # dropout for attention layer
   ffn_dropout: 0.0 # dropout for feedforward layer
 

@@ -172,7 +172,7 @@ def train(config:Mapping, logger=None):
 
     if torch_info.is_master:
         out_dir = utils.full_path(out_dir, create=True)
-        logger.info({'out_dir': out_dir})
+        logger.summary({'out_dir': out_dir})
 
     # run steps
     while step < num_steps:
