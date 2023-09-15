@@ -1,6 +1,6 @@
 import os
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True' # needed to avoid Jupyter kernal crash due to matplotlib
-from typing import Callable, Tuple, Dict, List, Sequence
+from typing import Callable, Tuple, Dict, List, Sequence, Any
 from itertools import groupby, chain
 from collections import defaultdict
 import os
@@ -19,7 +19,7 @@ import matplotlib.cm as cm
 import json
 from dataclasses import dataclass
 import importlib
-
+import multiprocessing
 
 import torch
 
@@ -310,4 +310,31 @@ def get_stats(nums):
             'std': np.std(nums),
             'min': np.min(nums),
             'max': np.max(nums),
-            'n': len(nums)}
+            'n': len(nums),
+            'sum': np.sum(nums),}
+
+def for_parallel(l:list, f:Callable[[Any], Any], num_cpus=multiprocessing.cpu_count() - 1)->list:
+    """Calls f() on each element of list l in parallel using num_cpus CPUs"""
+    if num_cpus < 1:
+        num_cpus = 1  # Make sure at least one CPU is used
+
+    # Calculate size of each slice
+    slice_size = len(l) // num_cpus
+    slices = [l[i * slice_size:(i + 1) * slice_size] for i in range(num_cpus)]
+    # If there are remaining elements, add them to the last slice
+    remaining = len(l) % num_cpus
+    if remaining:
+        slices[-1].extend(l[-remaining:])
+
+    # Function to process each slice
+    def process_slice(slice_data):
+        return [f(x) for x in slice_data]
+
+    # Perform parallel computation
+    with multiprocessing.Pool(num_cpus) as pool:
+        result_slices = pool.map(process_slice, slices)
+
+    # Combine the slices back into a single list
+    result = [x for sublist in result_slices for x in sublist]
+
+    return result
