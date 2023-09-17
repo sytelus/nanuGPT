@@ -144,7 +144,7 @@ def train(config:Mapping, logger=None):
                       **clean(model_config)).to(device)
 
     # optimizer
-    optimizer = get_optim(model.named_parameters(),
+    optimizer = get_optim(model,
                           enable_fused=torch_info.is_cuda,
                           **clean(optimizer_config))
 

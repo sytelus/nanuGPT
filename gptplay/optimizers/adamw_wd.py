@@ -2,10 +2,10 @@ import inspect
 
 import torch
 
-def get_optim(model_named_params, learning_rate, weight_decay,
+def get_optim(model, learning_rate, weight_decay,
               beta1, beta2, eps, enable_fused):
     # start with all of the candidate parameters
-    param_dict = {pn: p for pn, p in model_named_params}
+    param_dict = {pn: p for pn, p in model.named_parameters()}
     # filter out those that do not require grad
     param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
     # create optim groups. Any parameters that is 2D will be weight decayed, otherwise no.
