@@ -39,59 +39,59 @@ class DecoderBlock(torch.nn.Module):
     return a2
 
 class TinyTransformer(torch.nn.Module):
-  def __init__(self, n_layer: int, n_embd: int, n_head: int,
-               vocab_size: int, context_len: int,
-               ffn_bias: bool, attn_proj_bias: float, attn_kv_bias: float,
-               attn_dropout: float, ffn_dropout: float):
-    super().__init__()
+    def __init__(self, n_layer: int, n_embd: int, n_head: int,
+                vocab_size: int, context_len: int,
+                ffn_bias: bool, attn_proj_bias: float, attn_kv_bias: float,
+                attn_dropout: float, ffn_dropout: float):
+        super().__init__()
 
-    self.token_embeddings = nn.Embedding(vocab_size, n_embd)
-    self.position_embeddings = nn.Embedding(context_len, n_embd)
-    self.model = nn.Sequential(
-        *[DecoderBlock(n_embd, n_head, ffn_bias, attn_proj_bias, attn_kv_bias, attn_dropout, ffn_dropout) \
-          for _ in range(n_layer)],
-        # decoder: (context_len, batch_size, n_embd)
-        nn.LayerNorm(n_embd),
-        # logits: (context_len, batch_size, vocab_size)
-        nn.Linear(n_embd, vocab_size, bias=ffn_bias)
-    )
+        self.token_embeddings = nn.Embedding(vocab_size, n_embd)
+        self.position_embeddings = nn.Embedding(context_len, n_embd)
+        self.model = nn.Sequential(
+            *[DecoderBlock(n_embd, n_head, ffn_bias, attn_proj_bias, attn_kv_bias, attn_dropout, ffn_dropout) \
+            for _ in range(n_layer)],
+            # decoder: (context_len, batch_size, n_embd)
+            nn.LayerNorm(n_embd),
+            # logits: (context_len, batch_size, vocab_size)
+            nn.Linear(n_embd, vocab_size, bias=ffn_bias)
+        )
 
-  def forward(self, inputs: Tensor):
-    # inputs: (batch_size, context_len)
+    def forward(self, inputs: Tensor):
+        # inputs: (batch_size, context_len)
 
-    batch_size, context_len = inputs.shape
-    # token_embedding: (batch_size, context_len, n_embd)
-    token_embedding = self.token_embeddings(inputs)
-    # positions: (batch_size, context_len)
-    positions = repeat(torch.arange(context_len, device=inputs.device), "p -> b p", b = batch_size)
-    # position_embedding: (batch_size, context_len, n_embd)
-    position_embedding = self.position_embeddings(positions)
-    # embedding: (batch_size, context_len, n_embd)
-    embedding = token_embedding + position_embedding
-    # embedding: (context_len, batch_size, n_embd)
-    embedding = rearrange(embedding, 'b s d -> s b d')
-    #embedding = embedding.permute(1, 0, 2)
-    # output: (context_len, batch_size, vocab_size)
-    return self.model(embedding)
+        batch_size, context_len = inputs.shape
+        # token_embedding: (batch_size, context_len, n_embd)
+        token_embedding = self.token_embeddings(inputs)
+        # positions: (batch_size, context_len)
+        positions = repeat(torch.arange(context_len, device=inputs.device), "p -> b p", b = batch_size)
+        # position_embedding: (batch_size, context_len, n_embd)
+        position_embedding = self.position_embeddings(positions)
+        # embedding: (batch_size, context_len, n_embd)
+        embedding = token_embedding + position_embedding
+        # embedding: (context_len, batch_size, n_embd)
+        embedding = rearrange(embedding, 'b s d -> s b d')
+        #embedding = embedding.permute(1, 0, 2)
+        # output: (context_len, batch_size, vocab_size)
+        return self.model(embedding)
 
-  def get_num_params(self, non_embedding=True)->int:
-      """
-      Return the number of parameters in the model.
-      For non-embedding count (default), the position embeddings get subtracted.
-      The token embeddings would too, except due to the parameter sharing these
-      params are actually used as weights in the final layer, so we include them.
-      """
-      n_params = sum(p.numel() for p in self.get_params(non_embedding))
-      return n_params
+    def get_num_params(self, non_embedding=True)->int:
+        """
+        Return the number of parameters in the model.
+        For non-embedding count (default), the position embeddings get subtracted.
+        The token embeddings would too, except due to the parameter sharing these
+        params are actually used as weights in the final layer, so we include them.
+        """
+        n_params = sum(p.numel() for p in self.get_params(non_embedding))
+        return n_params
 
-  def get_params(self, non_embedding=True):
-    for p in self.parameters():
-      if not non_embedding or \
-        (p is not self.token_embeddings.weight and p is not self.position_embeddings.weight):
-          yield p
+    def get_params(self, non_embedding=True):
+        for p in self.parameters():
+        if not non_embedding or \
+            (p is not self.token_embeddings.weight and p is not self.position_embeddings.weight):
+            yield p
 
-  def weight_norm(self, non_embedding=True)->float:
-    return torch.linalg.norm(torch.cat([p.view(-1) for p in self.get_params(non_embedding)])).item()
+    def weight_norm(self, non_embedding=True)->float:
+        return torch.linalg.norm(torch.cat([p.view(-1) for p in self.get_params(non_embedding)])).item()
 
 def get_model(n_layer: int, n_embd: int, n_head: int,
               vocab_size: int, context_length: int,
@@ -101,5 +101,5 @@ def get_model(n_layer: int, n_embd: int, n_head: int,
               attn_dropout: float, # dropout for attention layer
               ffn_dropout: float # dropout for feedforward layer
               ):
-  return TinyTransformer(n_layer, n_embd, n_head,
+    return TinyTransformer(n_layer, n_embd, n_head,
               vocab_size, context_length, ffn_bias, attn_proj_bias, attn_kv_bias, attn_dropout, ffn_dropout)

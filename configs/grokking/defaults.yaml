@@ -1,14 +1,11 @@
+__include__: ['global_defaults.yaml']
+
 general:
-  device_type: 'cuda'            # auto select if blank or cpu, cuda
-  backend: 'nccl'       # nccl, gloo, mpi, horovod)
   dtype: 'float32'         # float32, float16, bfloat16
-  torch_compile: false # because we are using Python 3.11
-  seed: 42
   enable_distributed: false
   out_dir: '~/out_dir/grokking'
 
 logging:
-  enable_wandb: false
   project_name: grokking
   run_name: nil  # select random name
   run_description: nil
@@ -16,7 +13,6 @@ logging:
   log_filename: 'log.txt'
   allow_overwrite_log: true
   metrics_type: 'classification'
-  enable_summaries: true
 
 model:
   module: 'gptplay.models.tiny_transformer.get_model'
@@ -61,7 +57,6 @@ optimizer:
   weight_decay: 0.1     # weight_decay=1 makes convergence much faster and original graph is not reproducible
   beta1: 0.9
   beta2: 0.98
-  eps: 1.0E-8 # pytorch default
 
 scheduler:
   module: 'gptplay.schedulers.linear.get_scheduler'
@@ -72,5 +67,4 @@ eval:
   eval_every: 100
   eval_iters: null # number of samples to evaluate for dataset
   save_checkpoint: false
-  checkoint_after: 2000 # starts saving checkpoint after these steps
-  checkpoint_every: 400 # multiple of eval_iters, save checkpoint after these steps from last checkpoint when val loss is better
+

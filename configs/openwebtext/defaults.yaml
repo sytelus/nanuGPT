@@ -1,0 +1,12 @@
+__include__: ['global_defaults.yaml']
+
+general:
+  out_dir: '~/out_dir/gpt2_124m_owt'
+
+logging:
+  project_name: gpt2_124m_owt
+  run_name: nil  # select random name
+  run_description: nil
+  log_dir: '~/out_dir/gpt2_124m_owt'
+
+
