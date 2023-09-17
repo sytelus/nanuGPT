@@ -1,0 +1,17 @@
+__include__: ['prime223.yaml']
+
+model:
+  module: 'gptplay.models.tiny_transformer.get_model'
+
+loss:
+  module: 'gptplay.losses.grokking_loss.get_loss'
+
+tokenizer:
+  module: 'gptplay.tokenizers.grokking_tokenizer.get_tokenizer'
+
+optimizer:
+  module: 'gptplay.optimizers.adam_w.get_optim'
+
+scheduler:
+  module: 'gptplay.schedulers.linear.get_scheduler'
+
