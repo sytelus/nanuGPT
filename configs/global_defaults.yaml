@@ -28,12 +28,14 @@ model:
   n_head: 12
   context_length: &context_length 1024
   # set bias to 0.0 for pre-training, 0.1+ for finetuning
-  # PyTorch default for bias is true
-  ffn_bias: false # pytorch default
-  attn_proj_bias: false # for projection layers in attention
-  attn_kv_bias: false # for kv in attention
+  mlp_bias: false # # PyTorch default is Truet
+  attn_proj_bias: false # # PyTorch default is True
+  attn_kv_bias: false # for kv in attention, # PyTorch default is False
+  layer_norm_bias: false # PyTorch default is True, not allowed to change for nn.LayerNorm
   attn_dropout: 0.0 # dropout for attention layer
-  ffn_dropout: 0.0 # dropout for feedforward layer
+  mlp_dropout: 0.0 # dropout for feedforward layer
+  resid_dropout: 0.0 # dropout for residual connection
+  embed_dropout: 0.0 # dropout for embedding layer
 
 loss:
   module: 'gptplay.losses.autoregressive_loss.get_loss'

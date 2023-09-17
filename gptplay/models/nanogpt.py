@@ -32,15 +32,15 @@ class CausalSelfAttention(nn.Module):
         super().__init__()
         assert config.n_embd % config.n_head == 0
         # key, query, value projections for all heads, but in a batch
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
+        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.attn_kv_bias)
         # output projection
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.attn_proj_bias)
         # regularization
-        self.attn_dropout = nn.Dropout(config.dropout)
-        self.resid_dropout = nn.Dropout(config.dropout)
+        self.attn_dropout = nn.Dropout(config.attn_dropout)
+        self.resid_dropout = nn.Dropout(config.resid_dropout)
         self.n_head = config.n_head
         self.n_embd = config.n_embd
-        self.dropout = config.dropout
+        self.attn_dropout = config.attn_dropout
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
         if not self.flash:
@@ -61,7 +61,7 @@ class CausalSelfAttention(nn.Module):
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:
             # efficient attention using Flash Attention CUDA kernels
-            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True)
+            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.attn_dropout if self.training else 0, is_causal=True)
         else:
             # manual implementation of attention
             att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
@@ -79,10 +79,10 @@ class MLP(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
+        self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.mlp_bias)
         self.gelu    = nn.GELU()
-        self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
-        self.dropout = nn.Dropout(config.dropout)
+        self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.mlp_bias)
+        self.dropout = nn.Dropout(config.mlp_dropout)
 
     def forward(self, x):
         x = self.c_fc(x)
@@ -95,9 +95,9 @@ class Block(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
+        self.ln_1 = LayerNorm(config.n_embd, bias=config.layer_norm_bias)
         self.attn = CausalSelfAttention(config)
-        self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
+        self.ln_2 = LayerNorm(config.n_embd, bias=config.layer_norm_bias)
         self.mlp = MLP(config)
 
     def forward(self, x):
@@ -112,8 +112,14 @@ class GPTConfig:
     n_layer: int = 12
     n_head: int = 12
     n_embd: int = 768
-    dropout: float = 0.0
-    bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+    mlp_bias: bool = True
+    attn_proj_bias: bool = True
+    attn_kv_bias: bool = False
+    layer_norm_bias: bool = True
+    attn_dropout: float = 0.0 # applied on softmax of QK^T
+    mlp_dropout: float = 0.0
+    resid_dropout: float = 0.0
+    embed_dropout: float = 0.0
 
 class GPT(nn.Module):
 
@@ -126,9 +132,9 @@ class GPT(nn.Module):
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd),
             wpe = nn.Embedding(config.block_size, config.n_embd),
-            drop = nn.Dropout(config.dropout),
+            embed_dropout = nn.Dropout(config.embed_dropout),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-            ln_f = LayerNorm(config.n_embd, bias=config.bias),
+            ln_f = LayerNorm(config.n_embd, bias=config.layer_norm_bias),
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         # with weight tying when using torch.compile() some warnings get generated:
@@ -176,7 +182,7 @@ class GPT(nn.Module):
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
         pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
-        x = self.transformer.drop(tok_emb + pos_emb)
+        x = self.transformer.embed_dropout(tok_emb + pos_emb)
         for block in self.transformer.h:
             x = block(x)
         x = self.transformer.ln_f(x)
@@ -331,11 +337,14 @@ class GPT(nn.Module):
 
 def get_model(n_layer: int, n_embd: int, n_head: int,
               vocab_size: int, context_length: int,
-              ffn_bias: bool,
+              mlp_bias: bool,
               attn_proj_bias: bool, # for projection layers in attention
               attn_kv_bias: bool, # for kv in attention
+              layer_norm_bias: bool, # for layer norm
               attn_dropout: float, # dropout for attention layer
-              ffn_dropout: float # dropout for feedforward layer
+              mlp_dropout: float, # dropout for feedforward layer
+              resid_dropout: float, # dropout for residual in attention
+              embed_dropout: float # dropout for embedding layer
               ):
 
     gpt_config = GPTConfig(block_size=context_length,
@@ -343,7 +352,13 @@ def get_model(n_layer: int, n_embd: int, n_head: int,
                             n_layer=n_layer,
                             n_head=n_head,
                             n_embd=n_embd,
-                            dropout=attn_dropout,
-                            bias=ffn_bias)
+                            mlp_bias=mlp_bias,
+                            attn_proj_bias=attn_proj_bias,
+                            attn_kv_bias=attn_kv_bias,
+                            layer_norm_bias=layer_norm_bias,
+                            attn_dropout=attn_dropout,
+                            mlp_dropout=mlp_dropout,
+                            resid_dropout=resid_dropout,
+                            embed_dropout=embed_dropout)
 
     return GPT(gpt_config)

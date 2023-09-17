@@ -22,11 +22,12 @@ model:
   context_length: &context_length 5 # currently each input eq has [eos a op b =] which is 5 tokens
   # set bias to 0.0 for pre-training, 0.1+ for finetuning
   # PyTorch default for bias is true
-  ffn_bias: true # pytorch default
+  mlp_bias: true # pytorch default
   attn_proj_bias: true # for projection layers in attention
   attn_kv_bias: false # for kv in attention
+  layer_norm_bias: true # pytorch default, not allowed to change
   attn_dropout: 0.0 # dropout for attention layer
-  ffn_dropout: 0.0 # dropout for feedforward layer
+  mlp_dropout: 0.0 # dropout for feedforward layer
 
 loss:
   module: 'gptplay.losses.grokking_loss.get_loss'
