@@ -7,7 +7,7 @@ from gptplay.train import train
 from gptplay import logging
 
 if __name__ == "__main__":
-    config = Config(default_config_filepath='configs/grokking/baseline.yaml')
+    config = Config(default_config_filepath='configs/grokking/prime223.yaml')
 
     config['logging']['enable_summaries'] = False
     config['eval']['eval_every'] = 1000000 # only eval the last step

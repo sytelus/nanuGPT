@@ -1,6 +1,7 @@
 
 from typing import Any, Dict, List, Mapping, Optional, Union
-import logging
+from functools import partial
+import logging as py_logging
 import psutil
 import os
 import time
@@ -28,10 +29,10 @@ def create_py_logger(filepath:Optional[str]=None,
                     run_name:Optional[str]=None,
                     run_description:Optional[str]=None,
                     py_logger_name:Optional[str]=None,    # default is root
-                    level=logging.INFO,
-                    enable_stdout=True)->logging.Logger:
-    logging.basicConfig(level=level) # this sets level for standard logging.info calls
-    logger = logging.getLogger(name=py_logger_name)
+                    level=py_logging.INFO,
+                    enable_stdout=True)->py_logging.Logger:
+    py_logging.basicConfig(level=level) # this sets level for standard py_logging.info calls
+    logger = py_logging.getLogger(name=py_logger_name)
 
     # close current handlers
     for handler in logger.handlers[:]:
@@ -41,9 +42,9 @@ def create_py_logger(filepath:Optional[str]=None,
     logger.setLevel(level)
 
     if enable_stdout:
-        ch = logging.StreamHandler()
+        ch = py_logging.StreamHandler()
         ch.setLevel(level)
-        ch.setFormatter(logging.Formatter('%(asctime)s %(message)s', '%H:%M'))
+        ch.setFormatter(py_logging.Formatter('%(asctime)s %(message)s', '%H:%M'))
         logger.addHandler(ch)
 
     logger.propagate = False # otherwise root logger prints things again
@@ -57,9 +58,9 @@ def create_py_logger(filepath:Optional[str]=None,
         # log files gets appeneded if already exist
         # zero_file(filepath)
         # use mode='a' to append
-        fh = logging.FileHandler(filename=full_path(filepath), mode='w', encoding='utf-8')
+        fh = py_logging.FileHandler(filename=full_path(filepath), mode='w', encoding='utf-8')
         fh.setLevel(level)
-        fh.setFormatter(logging.Formatter('[%(asctime)s][%(levelname)s] %(message)s'))
+        fh.setFormatter(py_logging.Formatter('[%(asctime)s][%(levelname)s] %(message)s'))
         logger.addHandler(fh)
 
     logger.info(_dict2msg({'project_name': project_name, 'run_name': run_name}))
@@ -103,6 +104,22 @@ def create_wandb_logger(project_name, run_name,
         wandb.define_metric(**metric)
     return run
 
+def _uninit_logger(*args, **kwargs):
+    raise RuntimeError('Logger not initialized. Create Logger() first.')
+
+summary = _uninit_logger
+log_config = _uninit_logger
+info = _uninit_logger
+warn = _uninit_logger
+error = _uninit_logger
+log_sys_info = _uninit_logger
+finish = _uninit_logger
+all_done = _uninit_logger
+flush = _uninit_logger
+
+_logger:Optional['Logger'] = None
+
+
 class Logger:
     def __init__(self, master_process:bool,
                  project_name:Optional[str]=None,
@@ -112,9 +129,26 @@ class Logger:
                  metrics_type='default',
                  log_dir:Optional[str]=None,
                  log_filename:Optional[str]=None,
-                 allow_overwrite_log=False, enable_summaries=True) -> None:
+                 allow_overwrite_log=False,
+                 enable_summaries=True,
+                 glabal_instance=False) -> None:
+
+        if glabal_instance:
+            global _logger, summary, log_config, info, warn, error, log_sys_info, finish, all_done, flush
+            _logger = self
+            # module level methods to call global logging object
+            summary = partial(Logger.summary, _logger)
+            log_config = partial(Logger.log_config, _logger)
+            info = partial(Logger.info, _logger)
+            warn = partial(Logger.warn, _logger)
+            error = partial(Logger.error, _logger)
+            log_sys_info = partial(Logger.log_sys_info, _logger)
+            finish = partial(Logger.finish, _logger)
+            all_done = partial(Logger.all_done, _logger)
+            flush = partial(Logger.flush, _logger)
+
         self.start_time = time.time()
-        self._logger = None
+        self._py_logger = None
         self._run = None
         self.enable_wandb = enable_wandb
         self.master_process = master_process
@@ -125,7 +159,7 @@ class Logger:
                 log_filepath = full_path(os.path.join(str(log_dir), str(log_filename)))
             else:
                 log_filepath = None
-            self._logger = create_py_logger(filepath=log_filepath,
+            self._py_logger = create_py_logger(filepath=log_filepath,
                                             allow_overwrite_log=allow_overwrite_log,
                                             project_name=project_name,
                                             run_name=run_name,
@@ -140,16 +174,16 @@ class Logger:
     def log_config(self, config):
         if not self.enable_summaries:
             return
-        if self._logger is not None:
-            self._logger.info(_dict2msg({'project_config': config}))
+        if self._py_logger is not None:
+            self._py_logger.info(_dict2msg({'project_config': config}))
         if self.enable_wandb and self._run is not None:
             self._run.config.update(config)
 
     def info(self, d:Union[str, Mapping[str,Any]], py_logger_only:bool=False):
-        if self._logger is not None:
+        if self._py_logger is not None:
             if isinstance(d, Mapping):
                 msg = _dict2msg(d)
-                self._logger.info(msg)
+                self._py_logger.info(msg)
 
         if not py_logger_only and self.enable_wandb and self._run is not None:
             if isinstance(d, str):
@@ -162,8 +196,8 @@ class Logger:
         if isinstance(d, Mapping):
             d = _dict2msg(d)
 
-        if self._logger is not None:
-            self._logger.warn(d, exc_info=exception_instance, stack_info=stack_info)
+        if self._py_logger is not None:
+            self._py_logger.warn(d, exc_info=exception_instance, stack_info=stack_info)
 
         if not py_logger_only and self.enable_wandb and self._run is not None:
             if exception_instance is not None:
@@ -177,8 +211,8 @@ class Logger:
         if isinstance(d, Mapping):
             d = _dict2msg(d)
 
-        if self._logger is not None:
-            self._logger.error(d, exc_info=exception_instance, stack_info=stack_info)
+        if self._py_logger is not None:
+            self._py_logger.error(d, exc_info=exception_instance, stack_info=stack_info)
 
         if not py_logger_only and self.enable_wandb and self._run is not None:
             if exception_instance is not None:
@@ -188,7 +222,7 @@ class Logger:
     def summary(self, d:Mapping[str,Any], py_logger_only:bool=False):
         if not self.enable_summaries:
             return
-        if self._logger is not None:
+        if self._py_logger is not None:
             self.info(d, py_logger_only=True)
 
         if not py_logger_only and self.enable_wandb and self._run is not None:
@@ -222,8 +256,8 @@ class Logger:
     def finish(self):
         if self._run is not None:
             self._run.finish()
-        if self._logger is not None:
-            logging.shutdown()
+        if self._py_logger is not None:
+            py_logging.shutdown()
 
     def all_done(self, exit_code:int=0, write_total_time:bool=True):
         if write_total_time:
@@ -233,6 +267,7 @@ class Logger:
         exit(exit_code)
 
     def flush(self):
-        if self._logger is not None:
-            for handler in self._logger.handlers:
+        if self._py_logger is not None:
+            for handler in self._py_logger.handlers:
                 handler.flush()
+

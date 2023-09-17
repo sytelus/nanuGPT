@@ -7,8 +7,6 @@ from gptplay.train import train
 from gptplay import utils
 
 if __name__ == "__main__":
-    config = Config(default_config_filepath='configs/grokking/baseline.yaml')
-
+    # specify config file to use as first argument in commandline
+    config = Config(default_config_filepath='configs/grokking/prime223.yaml')
     train(config)
-
-    logger.all_done()

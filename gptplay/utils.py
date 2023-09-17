@@ -338,3 +338,23 @@ def for_parallel(l:list, f:Callable[[Any], Any], num_cpus=multiprocessing.cpu_co
     result = [x for sublist in result_slices for x in sublist]
 
     return result
+
+def flops_utilization(batch_size, iterations, dt,
+                      param_count, n_layer, n_head, n_embd, block_size)->float:
+    """ estimate model flops utilization in TFLOPS """
+
+    # first estimate the number of flops we do per iteration.
+    # see PaLM paper Appendix B as ref: https://arxiv.org/abs/2204.02311
+    N = param_count
+    L, H, Q, T = n_layer, n_head, n_embd//n_head, block_size
+
+    flops_per_token = 6*N + 12*L*H*Q*T
+
+    flops_per_fwdbwd = flops_per_token * T
+
+    flops = flops_per_fwdbwd * batch_size * iterations
+
+    # express our flops throughput as ratio of A100 bfloat16 peak flops
+    flops_achieved = flops * (1.0/dt) # per second
+
+    return flops_achieved / 1.0E12 # TFLOPS
