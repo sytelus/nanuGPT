@@ -41,7 +41,7 @@ loss:
   module: 'gptplay.losses.autoregressive_loss.get_loss'
 
 data:
-  module: 'gptplay.datasets.on_demand_tokenization.get_data'
+  module: 'gptplay.data.on_demand_tokenization.get_data'
   train_batch_size: 12
   eval_batch_size: 32768 # 2^15=32768
   data_loader_seed: 8

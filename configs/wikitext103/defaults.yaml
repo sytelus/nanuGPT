@@ -36,7 +36,7 @@ loss:
   module: 'gptplay.losses.autoregressive_loss.get_loss'
 
 data:
-  module: 'gptplay.datasets.tokenized_data.get_data'
+  module: 'gptplay.data.tokenized_data.get_data'
   tokenized_train_path: $DATA_DIR/tokenized/tinystories_v2/tiktoken/train.bin
   tokenized_val_path: $DATA_DIR/tokenized/tinystories_v2/tiktoken/validation.bin
   tokenized_test_path: null
