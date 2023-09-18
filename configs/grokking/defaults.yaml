@@ -53,7 +53,7 @@ training:
   gradient_accumulation_steps: 1 # will be automatically divided by GPU count
 
 optimizer:
-  module: 'gptplay.optimizers.adam_w.get_optim'
+  module: 'gptplay.optimizers.adamw.get_optim'
   learning_rate: 1.0E-3
   weight_decay: 0.1     # weight_decay=1 makes convergence much faster and original graph is not reproducible
   beta1: 0.9

@@ -1,6 +1,6 @@
 import os
 
-import gptplay.tokenizers.hf_tokenize as hf_data_prepare
+import gptplay.tokenizers.pre_tokenize as hf_data_prepare
 from gptplay import utils
 
 if __name__ == '__main__':
