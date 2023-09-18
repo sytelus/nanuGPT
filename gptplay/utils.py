@@ -358,3 +358,6 @@ def flops_utilization(batch_size, iterations, dt,
     flops_achieved = flops * (1.0/dt) # per second
 
     return flops_achieved / 1.0E12 # TFLOPS
+
+def cpu_count()->int:
+    return multiprocessing.cpu_count()

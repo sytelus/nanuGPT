@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import List
+from typing import List, Mapping, Optional
 
 class TokenizerBase:
     @abstractmethod
@@ -8,5 +8,9 @@ class TokenizerBase:
 
     @abstractmethod
     def batch_decode(self, ids:List[List[int]])->List[str]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def eot_token_id(self)->Optional[int]:
         raise NotImplementedError
 

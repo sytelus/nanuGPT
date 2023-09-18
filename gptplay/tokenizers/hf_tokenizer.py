@@ -1,4 +1,4 @@
-from typing import List, Mapping, Optional
+from typing import List, Mapping, Optional, Callable
 
 from transformers import AutoTokenizer
 
@@ -40,10 +40,13 @@ class HfTokenizer(TokenizerBase):
                                            skip_special_tokens=self.skip_special_decoded_tokens,
                                            clean_up_tokenization_spaces=self.clean_up_tokenization_spaces)
 
+    def eot_token_id(self)->Optional[int]:
+        return self.tokenizer.eos_token_id
 
-def get_tokenizer(hf_path:str, cache_dir:str, fix_pad_token:bool,
+
+def get_tokenizer_factory(hf_path:str, cache_dir:str, fix_pad_token:bool,
                   padding:bool, trucate:bool, truncation_side:Optional[str], padding_side:Optional[str],
-                  model_max_length:int, **kwargs)->TokenizerBase:
+                  model_max_length:int, **kwargs)->Callable[[], TokenizerBase]:
 
-    return HfTokenizer(hf_path, cache_dir, fix_pad_token, padding, trucate,
+    return lambda : HfTokenizer(hf_path, cache_dir, fix_pad_token, padding, trucate,
                        truncation_side, padding_side, model_max_length, **kwargs)
