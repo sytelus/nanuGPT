@@ -5,11 +5,12 @@ from transformers import AutoTokenizer
 from gptplay.tokenizers.tokenizer_base import TokenizerBase
 
 class HfTokenizer(TokenizerBase):
-    def __init__(self, hf_path:str, cache_dir:str, fix_pad_token:bool,
+    def __init__(self, hf_path:str, name:str, cache_dir:str, fix_pad_token:bool,
                  padding:bool, trucate:bool, truncation_side:Optional[str], padding_side:Optional[str],
                 model_max_length:int, skip_special_decoded_tokens:bool,
                 clean_up_tokenization_spaces:bool, **kwargs):
 
+        self.name = name
         self.padding = padding
         self.trucate = trucate
         self.skip_special_decoded_tokens = skip_special_decoded_tokens
@@ -43,10 +44,16 @@ class HfTokenizer(TokenizerBase):
     def eot_token_id(self)->Optional[int]:
         return self.tokenizer.eos_token_id
 
+    def get_name(self)->str:
+        return self.name
 
-def get_tokenizer_factory(hf_path:str, cache_dir:str, fix_pad_token:bool,
+    def __len__(self):
+        return len(self.tokenizer)
+
+
+def get_tokenizer_factory(hf_path:str, name:str, cache_dir:str, fix_pad_token:bool,
                   padding:bool, trucate:bool, truncation_side:Optional[str], padding_side:Optional[str],
                   model_max_length:int, **kwargs)->Callable[[], TokenizerBase]:
 
-    return lambda : HfTokenizer(hf_path, cache_dir, fix_pad_token, padding, trucate,
+    return lambda : HfTokenizer(hf_path, name, cache_dir, fix_pad_token, padding, trucate,
                        truncation_side, padding_side, model_max_length, **kwargs)

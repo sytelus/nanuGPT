@@ -1,0 +1,20 @@
+__include__: ['../global_defaults.yaml']
+
+pre_tokenization:
+  hf_name_path: '$DATA_ROOT/datasets/tinystories_v2/'
+  hf_dataset_name: nil
+  hf_data_dir: nil
+  hf_data_files: nil
+  hf_revision: nil
+  train_split: 'train'
+  val_split: 'validation'
+  test_split: nil
+  hf_cache_dir: nil
+  val_fraction: nil
+  test_fraction: nil
+  text_column: 'text'
+  tokenized_out_dir: '$DATA_ROOT/datasets/tokenized/tinystories_v2/tiktoken/'
+
+tokenizer:
+  module: 'gptplay.tokenizers.tiktoken_wrap.get_tokenizer_factory'
+  encoding_name: 'gpt2'

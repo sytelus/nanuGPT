@@ -14,3 +14,11 @@ class TokenizerBase:
     def eot_token_id(self)->Optional[int]:
         raise NotImplementedError
 
+    @abstractmethod
+    def get_name(self)->str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def __len__(self):
+        raise NotImplementedError
+

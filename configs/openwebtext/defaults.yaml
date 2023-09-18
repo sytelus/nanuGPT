@@ -1,4 +1,4 @@
-__include__: ['global_defaults.yaml']
+__include__: ['../global_defaults.yaml']
 
 general:
   out_dir: '~/out_dir/gpt2_124m_owt'

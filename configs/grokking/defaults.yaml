@@ -1,4 +1,4 @@
-__include__: ['global_defaults.yaml']
+__include__: ['../global_defaults.yaml']
 
 general:
   dtype: 'float32'         # float32, float16, bfloat16
