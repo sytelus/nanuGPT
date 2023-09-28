@@ -1,6 +1,6 @@
 __include__: ['../global_defaults.yaml']
 
-pre_tokenization:
+tokenization:
   hf_name_path: '$DATA_ROOT/datasets/tinystories_v2/'
   hf_dataset_name: nil
   hf_data_dir: nil
@@ -17,4 +17,5 @@ pre_tokenization:
 
 tokenizer:
   module: 'gptplay.tokenizers.tiktoken_wrap.get_tokenizer_factory'
-  encoding_name: 'gpt2'
+  module_kwargs:
+    encoding_name: 'gpt2'

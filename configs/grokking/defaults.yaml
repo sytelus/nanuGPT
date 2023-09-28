@@ -16,31 +16,33 @@ logging:
 
 model:
   module: 'gptplay.models.tiny_transformer.get_model'
-  n_layer: 2
-  n_embd: 128
-  n_head: 4
-  context_length: &context_length 5 # currently each input eq has [eos a op b =] which is 5 tokens
-  # set bias to 0.0 for pre-training, 0.1+ for finetuning
-  # PyTorch default for bias is true
-  mlp_bias: true # pytorch default
-  attn_proj_bias: true # for projection layers in attention
-  attn_kv_bias: false # for kv in attention
-  layer_norm_bias: true # pytorch default, not allowed to change
-  attn_dropout: 0.0 # dropout for attention layer
-  mlp_dropout: 0.0 # dropout for feedforward layer
+  module_kwargs:
+    n_layer: 2
+    n_embd: 128
+    n_head: 4
+    context_length: &context_length 5 # currently each input eq has [eos a op b =] which is 5 tokens
+    # set bias to 0.0 for pre-training, 0.1+ for finetuning
+    # PyTorch default for bias is true
+    mlp_bias: true # pytorch default
+    attn_proj_bias: true # for projection layers in attention
+    attn_kv_bias: false # for kv in attention
+    layer_norm_bias: true # pytorch default, not allowed to change
+    attn_dropout: 0.0 # dropout for attention layer
+    mlp_dropout: 0.0 # dropout for feedforward layer
 
 loss:
   module: 'gptplay.losses.grokking_loss.get_loss'
 
 data:
   module: 'gptplay.data.grokking_data.get_data'
-  operation: 'x/y'
-  training_fraction: 0.5
-  val_fraction: null # if null, use 1 - training_fraction, test fraction is 0
-  train_batch_size: 512
-  eval_batch_size: 32768 # 2^15=32768
-  data_loader_seed: 8
-  context_length: *context_length
+  module_kwargs:
+    operation: 'x/y'
+    training_fraction: 0.5
+    val_fraction: null # if null, use 1 - training_fraction, test fraction is 0
+    train_batch_size: 512
+    eval_batch_size: 32768 # 2^15=32768
+    data_loader_seed: 8
+    context_length: *context_length
 
 tokenizer:
   module: 'gptplay.tokenizers.grokking_tokenizer.get_tokenizer'
@@ -54,15 +56,17 @@ training:
 
 optimizer:
   module: 'gptplay.optimizers.adamw.get_optim'
-  learning_rate: 1.0E-3
-  weight_decay: 0.1     # weight_decay=1 makes convergence much faster and original graph is not reproducible
-  beta1: 0.9
-  beta2: 0.98
+  module_kwargs:
+    learning_rate: 1.0E-3
+    weight_decay: 0.1     # weight_decay=1 makes convergence much faster and original graph is not reproducible
+    beta1: 0.9
+    beta2: 0.98
 
 scheduler:
   module: 'gptplay.schedulers.linear.get_scheduler'
-  start_factor: 1.0E-8
-  total_iters: 10
+  module_kwargs:
+    start_factor: 1.0E-8
+    total_iters: 10
 
 eval:
   eval_every: 100

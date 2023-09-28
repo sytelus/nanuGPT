@@ -62,11 +62,6 @@ def log_metrics(logger, step, model, get_loss, eval_iters, lr,
 
     return val_loss
 
-def clean(config:Mapping)->Mapping:
-    """Remove module key from config so we can pass it as arguments to functions."""
-    c = config.copy()
-    c.pop('module')
-    return c
 
 def train(config:Mapping, logger=None):
     project_name = config['logging']['project_name']
@@ -95,13 +90,14 @@ def train(config:Mapping, logger=None):
     optimizer_config = config['optimizer']
     scheduler_config = config['scheduler']
     tokenizer_config = config['tokenizer']
+    loss_config = config['loss']
 
-    get_data = utils.import_fn(config['data']['module'])
-    get_tokenizer = utils.import_fn(config['tokenizer']['module'])
-    get_optim = utils.import_fn(config['optimizer']['module'])
-    get_scheduler = utils.import_fn(config['scheduler']['module'])
-    get_model = utils.import_fn(config['model']['module'])
-    get_loss = utils.import_fn(config['loss']['module'])
+    get_data = utils.import_fn(data_config['module'])
+    get_tokenizer_factory = utils.import_fn(tokenizer_config['module'])
+    get_optim = utils.import_fn(optimizer_config['module'])
+    get_scheduler = utils.import_fn(scheduler_config['module'])
+    get_model = utils.import_fn(model_config['module'])
+    get_loss = utils.import_fn(loss_config['module'])
 
     torch_info = utils.setup_torch(seed=seed,
                 device_type=device_type, dtype=dtype,
@@ -127,8 +123,9 @@ def train(config:Mapping, logger=None):
 
     # get dataset
     train_loader, val_loader, test_loader = get_data(local_rank=torch_info.local_rank,
-                                                     **clean(data_config))
-    tokenizer = get_tokenizer(**clean(tokenizer_config))
+                                                     **data_config['module_kwargs'])
+    tokenizer_factory = get_tokenizer_factory(**tokenizer_config['module_kwargs'])
+    tokenizer = tokenizer_factory()
 
     logger.summary({'vocab_size': len(tokenizer),
                     'train_len': len(train_loader.dataset),
@@ -141,12 +138,12 @@ def train(config:Mapping, logger=None):
 
     # create model
     model = get_model(vocab_size=len(tokenizer),
-                      **clean(model_config)).to(device)
+                      **model_config['module_kwargs']).to(device)
 
     # optimizer
     optimizer = get_optim(model,
                           enable_fused=torch_info.is_cuda,
-                          **clean(optimizer_config))
+                          **optimizer_config['module_kwargs'])
 
     if torch_compile:
         logger.info("Compiling model...")
@@ -161,7 +158,7 @@ def train(config:Mapping, logger=None):
                                         device_ids=[torch_info.local_rank])
 
     # scheduler provides warmup and then constant lr
-    scheduler = get_scheduler(optimizer, **clean(scheduler_config))
+    scheduler = get_scheduler(optimizer, **scheduler_config['module_kwargs'])
 
     # initialize a GradScaler. If enabled=False scaler is a no-op
     scaler = torch.cuda.amp.GradScaler(enabled=(torch_info.pt_dtype == torch.float16))
