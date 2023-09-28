@@ -2,7 +2,7 @@ import os
 import time
 
 from gptplay.config import Config
-from gptplay.train import train
+from gptplay.trainer import train
 
 from gptplay import utils
 
