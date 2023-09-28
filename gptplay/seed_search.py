@@ -2,7 +2,7 @@ import random
 from datetime import datetime
 
 from gptplay.config import Config
-from gptplay.trainer import train
+from gptplay.train import train
 
 from gptplay import logging
 

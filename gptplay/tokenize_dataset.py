@@ -18,6 +18,7 @@ from torch.utils.data import DataLoader
 from gptplay.tokenizers.tokenizer_base import TokenizerBase
 from gptplay import logging
 from gptplay import utils
+from gptplay.config import Config
 
 
 def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Optional[str], hf_data_files:Optional[str], hf_revision:Optional[str],
@@ -126,3 +127,16 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
         arr.flush()
 
     logging.info(f'Tokenized dataset saved to {tokenized_out_dir}')
+
+
+if __name__ == "__main__":
+    # specify config file to use as first argument in commandline
+    config = Config(default_config_filepath='configs/tokenize/tiktoken_gpt2.yaml')
+    tokenization_config = config['tokenization']
+    tokenizer_config = config['tokenizer']
+
+    get_tokenizer_factory = utils.import_fn(tokenizer_config['module'])
+    tokenizer_factory = get_tokenizer_factory(**tokenizer_config['module_kwargs'])
+    tokenizer = tokenizer_factory()
+
+    tokenize(**tokenization_config)

@@ -5,10 +5,21 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Tokenize Dataset",
+            "type": "python",
+            "request": "launch",
+            "module": "gptplay.tokenize_dataset",
+            "console": "integratedTerminal",
+            "args": ["configs/tokenize/tiktoken_gpt2.yaml",
+                    "--hf_name_path", "$DATA_ROOT/datasets/tiny_stories/tinystories_v2/",
+                    "--tokenized_out_dir", "$DATA_ROOT/tokenized/tinystories_v2/tiktoken/"
+                    ]
+        },
+        {
             "name": "Grokking-Prime223",
             "type": "python",
             "request": "launch",
-            "program": "${cwd}/main.py",
+            "module": "gptplay.train",
             "console": "integratedTerminal",
             "args": ["configs/grokking/prime223.yaml"]
         },
@@ -16,7 +27,7 @@
             "name": "Grokking-baseline",
             "type": "python",
             "request": "launch",
-            "program": "${cwd}/main.py",
+            "module": "gptplay.train",
             "console": "integratedTerminal",
             "args": ["configs/grokking/baseline.yaml"]
         },
@@ -24,7 +35,7 @@
             "name": "Grokking-50k",
             "type": "python",
             "request": "launch",
-            "program": "${cwd}/main.py",
+            "module": "gptplay.train",
             "console": "integratedTerminal",
             "args": ["configs/grokking/prime50k.yaml"]
         },
@@ -32,7 +43,7 @@
             "name": "Grokking-SeedSearch",
             "type": "python",
             "request": "launch",
-            "program": "${cwd}/seed_search.py",
+            "module": "gptplay.seed_search",
             "console": "integratedTerminal",
             "args": ["configs/grokking/prime223.yaml"]
         },

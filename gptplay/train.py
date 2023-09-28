@@ -7,6 +7,7 @@ import torch
 from torch.nn.parallel import DistributedDataParallel
 
 from gptplay import utils
+from gptplay.config import Config
 from gptplay import logging
 
 
@@ -266,3 +267,9 @@ def train(config:Mapping, logger=None):
 
     if own_logger and torch_info.is_master:
         logger.all_done()
+
+
+if __name__ == "__main__":
+    # specify config file to use as first argument in commandline
+    config = Config(default_config_filepath='configs/grokking/prime223.yaml')
+    train(config)

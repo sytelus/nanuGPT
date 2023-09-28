@@ -1,7 +1,7 @@
 __include__: ['../global_defaults.yaml']
 
 tokenization:
-  hf_name_path: '$DATA_ROOT/datasets/tinystories_v2/'
+  hf_name_path: nil #'$DATA_ROOT/datasets/tinystories_v2/'
   hf_dataset_name: nil
   hf_data_dir: nil
   hf_data_files: nil
@@ -13,7 +13,7 @@ tokenization:
   val_fraction: nil
   test_fraction: nil
   text_column: 'text'
-  tokenized_out_dir: '$DATA_ROOT/datasets/tokenized/tinystories_v2/tiktoken/'
+  tokenized_out_dir: nil # '$DATA_ROOT/datasets/tokenized/tinystories_v2/tiktoken/'
 
 tokenizer:
   module: 'gptplay.tokenizers.tiktoken_wrap.get_tokenizer_factory'
