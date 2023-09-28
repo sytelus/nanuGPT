@@ -1,4 +1,4 @@
-__include__: ['prime223.yaml']
+__include__: ['base_config.yaml']
 
 model:
   module: 'gptplay.models.tiny_transformer.get_model'

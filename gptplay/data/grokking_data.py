@@ -1,11 +1,9 @@
-import random
 from typing import Optional, Tuple
-from math import ceil
 import torch
 
 from torch.utils.data import DataLoader
 
-from gptplay.tokenizers.grokking_tokenizer import GrokkingTokenizer, get_tokenizer, DIVISION_MODULO_OPERATIONS, ALL_OPERATIONS
+from gptplay.tokenizers.grokking_tokenizer import GrokkingTokenizer, get_tokenizer_factory, DIVISION_MODULO_OPERATIONS, ALL_OPERATIONS
 
 def operation_mod_p_data(operation: str, p: int, tokenizer: GrokkingTokenizer):
     """
@@ -52,7 +50,7 @@ def operation_mod_p_data(operation: str, p: int, tokenizer: GrokkingTokenizer):
 def get_data(operation: str, prime: int, training_fraction: float, val_fraction:Optional[float],
              train_batch_size: int, eval_batch_size:int, data_loader_seed:int,
              local_rank:int, context_length:int)->Tuple[DataLoader,DataLoader, Optional[DataLoader]]:
-    tokenizer = get_tokenizer(prime)
+    tokenizer = get_tokenizer_factory(prime)()
 
     inputs, labels = operation_mod_p_data(operation, prime, tokenizer)
 

@@ -1,12 +1,15 @@
-__include__: ['defaults.yaml']
+__include__: ['base_config.yaml']
 
 data:
-  training_fraction: 0.5
-  val_fraction: null # if null, use 1 - training_fraction
-  prime: &prime 223
+  module_kwargs:
+    training_fraction: 0.5
+    val_fraction: null # if null, use 1 - training_fraction
+    prime: &prime 223
 
 tokenizer:
-  prime: *prime
+  module_kwargs:
+    prime: *prime
 
-training:
-  weight_decay: 0.1     # weight_decay=1 makes convergence much faster and original graph is not reproducible
+optimizer:
+  module_kwargs:
+    weight_decay: 0.1     # weight_decay=1 makes convergence much faster and original graph is not reproducible

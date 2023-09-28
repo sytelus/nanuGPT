@@ -1,11 +1,16 @@
-__include__: ['defaults.yaml']
+__include__: ['base_config.yaml']
 
 data:
-  prime: &prime 97
+  module_kwargs:
+    prime: &prime 97
 
 tokenizer:
-  prime: *prime
+  module_kwargs:
+    prime: *prime
+
+optimizer:
+  module_kwargs:
+    weight_decay: 0.0     # weight_decay=1 makes convergence much faster and original graph is not reproducible
 
 training:
-  weight_decay: 0.0     # weight_decay=1 makes convergence much faster and original graph is not reproducible
   num_steps: 1000000    # 1e5 is not enough when weight_decay=0.0

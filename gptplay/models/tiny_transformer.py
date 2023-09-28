@@ -41,19 +41,19 @@ class DecoderBlock(torch.nn.Module):
 class TinyTransformer(torch.nn.Module):
     def __init__(self, n_layer: int, n_embd: int, n_head: int,
                 vocab_size: int, context_len: int,
-                ffn_bias: bool, attn_proj_bias: float, attn_kv_bias: float,
-                attn_dropout: float, ffn_dropout: float):
+                mlp_bias: bool, attn_proj_bias: float, attn_kv_bias: float,
+                attn_dropout: float, mlp_dropout: float):
         super().__init__()
 
         self.token_embeddings = nn.Embedding(vocab_size, n_embd)
         self.position_embeddings = nn.Embedding(context_len, n_embd)
         self.model = nn.Sequential(
-            *[DecoderBlock(n_embd, n_head, ffn_bias, attn_proj_bias, attn_kv_bias, attn_dropout, ffn_dropout) \
+            *[DecoderBlock(n_embd, n_head, mlp_bias, attn_proj_bias, attn_kv_bias, attn_dropout, mlp_dropout) \
             for _ in range(n_layer)],
             # decoder: (context_len, batch_size, n_embd)
             nn.LayerNorm(n_embd),
             # logits: (context_len, batch_size, vocab_size)
-            nn.Linear(n_embd, vocab_size, bias=ffn_bias)
+            nn.Linear(n_embd, vocab_size, bias=mlp_bias)
         )
 
     def forward(self, inputs: Tensor):
@@ -86,20 +86,26 @@ class TinyTransformer(torch.nn.Module):
 
     def get_params(self, non_embedding=True):
         for p in self.parameters():
-        if not non_embedding or \
-            (p is not self.token_embeddings.weight and p is not self.position_embeddings.weight):
-            yield p
+            if not non_embedding or \
+                (p is not self.token_embeddings.weight and p is not self.position_embeddings.weight):
+                yield p
 
     def weight_norm(self, non_embedding=True)->float:
         return torch.linalg.norm(torch.cat([p.view(-1) for p in self.get_params(non_embedding)])).item()
 
 def get_model(n_layer: int, n_embd: int, n_head: int,
               vocab_size: int, context_length: int,
-              ffn_bias: bool,
+              mlp_bias: bool,
               attn_proj_bias: bool, # for projection layers in attention
               attn_kv_bias: bool, # for kv in attention
               attn_dropout: float, # dropout for attention layer
-              ffn_dropout: float # dropout for feedforward layer
+              mlp_dropout: float, # dropout for feedforward layer
+              layer_norm_bias:bool,
+              resid_dropout: float, # dropout for residual connection
+              embed_dropout: float, # dropout for embedding layer
               ):
-    return TinyTransformer(n_layer, n_embd, n_head,
-              vocab_size, context_length, ffn_bias, attn_proj_bias, attn_kv_bias, attn_dropout, ffn_dropout)
+    return TinyTransformer(n_layer=n_layer, n_embd=n_embd, n_head=n_head,
+              vocab_size=vocab_size, context_len=context_length,
+              mlp_bias=mlp_bias, attn_proj_bias=attn_proj_bias,
+              attn_kv_bias=attn_kv_bias, attn_dropout=attn_dropout,
+              mlp_dropout=mlp_dropout)

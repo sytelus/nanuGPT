@@ -1,6 +1,9 @@
-from typing import List, Union
+from typing import List, Union, Optional, Callable, Mapping
 
 import torch
+
+from gptplay.tokenizers.tokenizer_base import TokenizerBase
+
 
 TokenType = Union[int, str]
 
@@ -24,7 +27,7 @@ ALL_OPERATIONS = {
     **ALL_MODULO_OPERATIONS,
 }
 
-class GrokkingTokenizer:
+class GrokkingTokenizer(TokenizerBase):
     def __init__(self, prime: int, operations: list[str],
                  eos_token="<|eos|>", eq_token="="):
         self.prime = prime
@@ -40,6 +43,8 @@ class GrokkingTokenizer:
         self.token_to_idx = {token: idx for idx, token in enumerate(self.all_tokens)}
         self.idx_to_token = {idx: token for idx, token in enumerate(self.all_tokens)}
 
+        self.eos_token_id = self.token_to_idx[self.eos_token]
+
     def __len__(self):
         return self.vocab_size
 
@@ -53,21 +58,29 @@ class GrokkingTokenizer:
         return self.idx_to_token[idx]
 
     def encode(self, token: TokenType)->int:
+        """Token is number of chars like =, +, -, x, y, etc."""
         return self.token_to_idx[token]
 
-    def encode_batch(self, tokens: list[TokenType])->list[int]:
-        return [self.encode(token) for token in tokens]
+    def batch_encode(self, batch: List[List[TokenType]])->Mapping:
+        return {'input_ids':
+                    [[self.encode(item) for item in row]+[self.eos_token_id] for row in batch]
+        }
 
-    def decode_batch(self, idxs: list[int])->list[TokenType]:
-        return [self.decode(idx) for idx in idxs]
+    def batch_decode(self, batch: List[List[int]])->List[List[TokenType]]:
+        return [[self.decode(idx) for idx in row] for row in batch]
+
+    def eot_token_id(self)->Optional[int]:
+        return self.eos_token_id
+
+    def get_name(self)->str:
+        return f'grokking_tokenizer_{self.prime}'
 
     # this method can only be used to encode tensor of numbers
     def encode_tensor(self, tokens: torch.Tensor)->torch.Tensor:
-        return torch.tensor(self.encode_batch(tokens.tolist()))
+        return torch.tensor(self.batch_encode(tokens.tolist()))
     # this method can only be used to decode tensor of numbers
     def decode_tensor(self, idxs: torch.Tensor)->torch.Tensor:
-        return torch.tensor(self.decode_batch(idxs.tolist()))
+        return torch.tensor(self.batch_decode(idxs.tolist()))
 
-def get_tokenizer(prime:int):
-    tokenizer = GrokkingTokenizer(prime, list(ALL_OPERATIONS.keys()))
-    return tokenizer
+def get_tokenizer_factory(prime:int)->Callable[[], GrokkingTokenizer]:
+    return lambda : GrokkingTokenizer(prime, list(ALL_OPERATIONS.keys()))

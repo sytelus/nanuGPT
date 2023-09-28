@@ -3,11 +3,11 @@ from typing import List, Mapping, Optional
 
 class TokenizerBase:
     @abstractmethod
-    def batch_encode(self, texts:List[str])->Mapping:
+    def batch_encode(self, batch:list)->Mapping:
         raise NotImplementedError
 
     @abstractmethod
-    def batch_decode(self, ids:List[List[int]])->List[str]:
+    def batch_decode(self, batch:list)->list:
         raise NotImplementedError
 
     @abstractmethod

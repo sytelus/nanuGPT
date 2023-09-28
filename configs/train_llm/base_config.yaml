@@ -1,18 +1,22 @@
-__include__: ['../global_defaults.yaml']
-
 general:
-  dtype: 'float32'         # float32, float16, bfloat16
-  enable_distributed: false
+  device_type: 'cuda'            # auto select if blank or cpu, cuda
+  backend: 'nccl'       # nccl, gloo, mpi, horovod)
+  torch_compile: true # will not compile if Python > 3.11, torch < 2.1.0 or Windows
+  seed: 42
+  dtype: 'bfloat16'         # float32, float16, bfloat16
+  enable_distributed: true
   out_dir: '~/out_dir/grokking'
 
 logging:
-  project_name: grokking
+  enable_wandb: false
+  project_name: train_llm
   run_name: nil  # select random name
   run_description: nil
-  log_dir: '~/out_dir/grokking'
+  log_dir: '~/out_dir/train_llm'
   log_filename: 'log.txt'
   allow_overwrite_log: true
   metrics_type: 'classification'
+  enable_summaries: true
 
 model:
   module: 'gptplay.models.tiny_transformer.get_model'
@@ -20,7 +24,7 @@ model:
     n_layer: 2
     n_embd: 128
     n_head: 4
-    context_length: &context_length 5 # currently each input eq has [eos a op b =] which is 5 tokens
+    context_length: 5 # currently each input eq has [eos a op b =] which is 5 tokens
     # set bias to 0.0 for pre-training, 0.1+ for finetuning
     # PyTorch default for bias is true
     mlp_bias: true # pytorch default
@@ -29,6 +33,8 @@ model:
     layer_norm_bias: true # pytorch default, not allowed to change
     attn_dropout: 0.0 # dropout for attention layer
     mlp_dropout: 0.0 # dropout for feedforward layer
+    resid_dropout: 0.0 # dropout for residual connection
+    embed_dropout: 0.0 # dropout for embedding layer
 
 loss:
   module: 'gptplay.losses.grokking_loss.get_loss'
@@ -39,15 +45,19 @@ data:
     operation: 'x/y'
     training_fraction: 0.5
     val_fraction: null # if null, use 1 - training_fraction, test fraction is 0
-    train_batch_size: 512
+    train_batch_size: '_copy: /training/train_batch_size'
     eval_batch_size: 32768 # 2^15=32768
     data_loader_seed: 8
-    context_length: *context_length
+    context_length: '_copy: /model/module_kwargs/context_length'
+    prime: &prime nil # to be set by overriden config
 
 tokenizer:
-  module: 'gptplay.tokenizers.grokking_tokenizer.get_tokenizer'
+  module: 'gptplay.tokenizers.grokking_tokenizer.get_tokenizer_factory'
+  module_kwargs:
+    prime: *prime
 
 training:
+  train_batch_size: 512
   num_steps: 3000    # 1e5 is not enough when weight_decay=0.0
   enable_train_log: false
   log_every: 20
@@ -61,6 +71,7 @@ optimizer:
     weight_decay: 0.1     # weight_decay=1 makes convergence much faster and original graph is not reproducible
     beta1: 0.9
     beta2: 0.98
+    eps: 1.0E-8 # pytorch default
 
 scheduler:
   module: 'gptplay.schedulers.linear.get_scheduler'
@@ -72,4 +83,6 @@ eval:
   eval_every: 100
   eval_iters: null # number of samples to evaluate for dataset
   save_checkpoint: false
+  checkoint_after: 2000 # starts saving checkpoint after these steps
+  checkpoint_every: 10 # multiple of eval_iters, save checkpoint after these steps from last checkpoint when val loss is better
 

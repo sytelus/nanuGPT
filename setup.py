@@ -18,6 +18,7 @@ setuptools.setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/sytelus/gptplay",
+    #packages=setuptools.find_packages(),
     packages=setuptools.find_packages(),
 	license='MIT',
     classifiers=[
@@ -29,3 +30,4 @@ setuptools.setup(
     include_package_data=True,
     install_requires=install_requires
 )
+
