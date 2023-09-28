@@ -8,6 +8,9 @@
 		},
 		{
 			"path": "../../out_dir"
+		},
+		{
+			"path": "../../../../data"
 		}
 	],
 	"settings": {}

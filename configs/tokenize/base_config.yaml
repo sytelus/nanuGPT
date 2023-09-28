@@ -1,19 +1,29 @@
-__include__: ['../global_defaults.yaml']
+logging:
+  enable_wandb: false
+  enable_summaries: true
+  project_name: 'tokenization'
+  run_name: null  # select random name
+  run_description: null
+  log_dir: '~/out_dir/grokking'
+  log_filename: 'log.txt'
+  allow_overwrite_log: true
+  metrics_type: null
 
 tokenization:
-  hf_name_path: nil #'$DATA_ROOT/datasets/tinystories_v2/'
-  hf_dataset_name: nil
-  hf_data_dir: nil
-  hf_data_files: nil
-  hf_revision: nil
+  hf_name_path: null #'$DATA_ROOT/datasets/tinystories_v2/'
+  hf_dataset_name: null
+  hf_data_dir: null
+  hf_data_files: null
+  hf_sample_by: null
   train_split: 'train'
   val_split: 'validation'
-  test_split: nil
-  hf_cache_dir: nil
-  val_fraction: nil
-  test_fraction: nil
+  test_split: null
+  hf_cache_dir: null
+  val_fraction: null
+  test_fraction: null
   text_column: 'text'
-  tokenized_out_dir: nil # '$DATA_ROOT/datasets/tokenized/tinystories_v2/tiktoken/'
+  data_loader_seed: 8
+  tokenized_out_dir: null # '$DATA_ROOT/datasets/tokenized/tinystories_v2/tiktoken/'
 
 tokenizer:
   module: 'gptplay.tokenizers.tiktoken_wrap.get_tokenizer_factory'

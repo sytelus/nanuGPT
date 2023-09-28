@@ -361,3 +361,11 @@ def flops_utilization(batch_size, iterations, dt,
 
 def cpu_count()->int:
     return multiprocessing.cpu_count()
+
+def work_cpu_count()->int:
+    """Returns the number of CPUs to use for work so that we leave some CPUs for the OS and other processes"""
+    count = cpu_count()
+    if count > 1:
+        return count - 1
+    else:
+        return count

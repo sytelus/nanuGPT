@@ -1,7 +1,7 @@
 # saves the openwebtext dataset to a binary file for training. following was helpful:
 # https://github.com/HazyResearch/flash-attention/blob/main/training/src/datamodules/language_modeling_hf.py
 
-from typing import Optional, Tuple, List, Dict, Mapping, Callable
+from typing import Optional, Tuple, List, Dict, Mapping, Callable, MutableMapping
 import math
 import os
 from multiprocessing import cpu_count, Pool
@@ -21,17 +21,21 @@ from gptplay import utils
 from gptplay.config import Config
 
 
-def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Optional[str], hf_data_files:Optional[str], hf_revision:Optional[str],
+def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Optional[str], hf_data_files:Optional[str],
              train_split:Optional[str], val_split:Optional[str], test_split:Optional[str], hf_cache_dir:Optional[str],
              val_fraction:Optional[float], test_fraction:Optional[float],
              text_column:str, tokenizer_factory:Callable[[], TokenizerBase],
-             tokenized_out_dir:str)->None:
+             tokenized_out_dir:str, data_loader_seed:int, hf_sample_by:Optional[str]=None)->None:
 
-    if os.path.isdir(hf_name_path):
+    if hf_name_path != 'text' and os.path.isdir(hf_name_path):
         dataset = load_from_disk(hf_name_path)
     else:
-        dataset = load_dataset(hf_name_path, dataset_name=hf_dataset_name, data_dir=hf_data_dir, data_files=hf_data_files, revision=hf_revision,
-                               cache_dir=hf_cache_dir)
+        if hf_name_path == 'text' and isinstance(hf_data_files, MutableMapping):
+            hf_data_files = dict(hf_data_files) # HuggingFace doesn't like MutableMapping and must have dict
+            for split, filepath in hf_data_files.items():
+                hf_data_files[split] = [utils.full_path(f) for f in hf_data_files[split]]
+        dataset = load_dataset(hf_name_path, name=hf_dataset_name, data_dir=hf_data_dir, data_files=hf_data_files,
+                               cache_dir=hf_cache_dir, sample_by=hf_sample_by)
 
     # standardize splits
     if not isinstance(dataset, DatasetDict):
@@ -82,7 +86,14 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
             self._tok = None
             self.tokenizer_factory = tokenizer_factory
 
-        def encode_text(self, text:str)->Mapping:
+        def encode_text(self, text_or_row)->Mapping:
+            if isinstance(text_or_row, Mapping): # could be LazyRow
+                text = text_or_row[text_column if text_column else 'text']
+            elif isinstance(text_or_row, str):
+                text = text_or_row
+            else:
+                raise ValueError(f'encode_text expected str or Mapping, got {type(text_or_row)}')
+
             if self._tok is None:
                 self._tok = tokenizer_factory()
             ids = self._tok.batch_encode([text])['input_ids'][0]
@@ -92,9 +103,9 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
     # tokenize all splits in the dataset
     tokenized = dataset.map(
         partial(lambda tok, text: tok.encode_text(text), TokenizerPerThread(tokenizer_factory)),
-        remove_columns=[text_column],
+        remove_columns=[text_column] if text_column else None,
         desc="tokenizing the splits",
-        num_proc=max(1, cpu_count()//2),
+        num_proc=utils.work_cpu_count(),
     )
 
     tok = tokenizer_factory()
@@ -104,14 +115,14 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
 
     # concatenate all the ids in each dataset into one large file we can use for training
     for split in [train_split, val_split, test_split]:
-        if not split:
+        if split not in tokenized:
             continue
         dset = tokenized[split]
 
         arr_len = np.sum(dset['len'], dtype=np.uint64)
         logging.summary({f'{split}_tokens': arr_len})
 
-        filename = utils.full_path(os.path.join(tokenized_out_dir, f'{split}.bin'))
+        filename = os.path.join(utils.full_path(tokenized_out_dir, create=True) , f'{split}.bin')
         arr = np.memmap(filename, dtype=np_dtype, mode='w+', shape=(arr_len,))
         # each shard has 8192 samples, so we need to calculate how many shards we need
         total_batches = 2**math.ceil(math.log2((len(dset) // 8192) + 1))
@@ -132,11 +143,16 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
 if __name__ == "__main__":
     # specify config file to use as first argument in commandline
     config = Config(default_config_filepath='configs/tokenize/tiktoken_gpt2.yaml')
+
+    logging_config = config['logging']
+    logger = logging.Logger(master_process=True,  **logging_config)
+
     tokenization_config = config['tokenization']
     tokenizer_config = config['tokenizer']
 
     get_tokenizer_factory = utils.import_fn(tokenizer_config['module'])
     tokenizer_factory = get_tokenizer_factory(**tokenizer_config['module_kwargs'])
-    tokenizer = tokenizer_factory()
 
-    tokenize(**tokenization_config)
+    tokenize(tokenizer_factory=tokenizer_factory, **tokenization_config)
+
+    logging.all_done()

@@ -131,10 +131,11 @@ class Logger:
                  log_filename:Optional[str]=None,
                  allow_overwrite_log=False,
                  enable_summaries=True,
-                 glabal_instance=False) -> None:
+                 glabal_instance:Optional[bool]=None) -> None:
 
-        if glabal_instance:
-            global _logger, summary, log_config, info, warn, error, log_sys_info, finish, all_done, flush
+        global _logger, summary, log_config, info, warn, error, log_sys_info, finish, all_done, flush
+
+        if glabal_instance!=False and _logger is None:
             _logger = self
             # module level methods to call global logging object
             summary = partial(Logger.summary, _logger)

@@ -161,7 +161,13 @@ def deep_update(d:MutableMapping, u:Mapping, create_map:Callable[[],MutableMappi
         ->MutableMapping:
     for k, v in u.items():
         if isinstance(v, Mapping):
-            d[k] = deep_update(d.get(k, create_map()), v, create_map)
+            # v is mapping so d[k] needs to be mapping to be able to merge
+            # if k doesn't exist or set to None, create new mapping
+            target = d.get(k, None)
+            if target is None:
+                target = create_map()
+                d[k] = target
+            d[k] = deep_update(d[k], v, create_map)
         else:
             d[k] = v
     return d
