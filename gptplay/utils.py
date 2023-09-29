@@ -222,7 +222,9 @@ class TorchInfo:
 def setup_torch(seed:int,
     device_type:str,
     dtype:str,
-    enable_distributed:bool=False,
+    enable_distributed:bool,
+    distributed_backend:str, # ex 'nccl
+    distributed_init_method:str, # ex 'env://'
     print_precision:int=10,
     gradient_accumulation_steps_1gpu:int=1)->TorchInfo:
 
@@ -233,11 +235,8 @@ def setup_torch(seed:int,
 
     assert device_type != 'cuda' or (device_type == 'cuda' and torch.cuda.is_available()), 'cuda not available. Set device_type=cpu.'
     assert (device_type != 'cuda' or dtype != 'bfloat16') or (device_type == 'cuda' and dtype == 'bfloat16' and torch.cuda.is_bf16_supported()), 'bfloat16 not supported on your cuda device. Use float16 or float32.'
-    assert (not enable_distributed) or (enable_distributed and torch.distributed.is_available()), 'Distributed training not available. Set enable_distributed=False.'
-    assert (not enable_distributed) or (enable_distributed and torch.distributed.is_initialized()), 'Distributed training not initialized. Call torch.distributed.init_process_group() first.'
 
     is_cuda = device_type == 'cuda'
-    is_distributed = enable_distributed # we already asserted above so good to go
     device_name = device_type # we will add GPU ID later
     pt_dtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
 
@@ -247,6 +246,13 @@ def setup_torch(seed:int,
         torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
 
     if enable_distributed:
+        assert torch.distributed.is_available(), 'Distributed training not available. Set enable_distributed=False.'
+        env_rank = os.environ.get('RANK', '-1')
+        if env_rank=='-1':
+            raise ValueError('RANK environment variable not set BUT enable_distributed=True. You probably want to launch this script using torch.distributed.launch.')
+
+        torch.distributed.init_process_group(backend=distributed_backend, init_method=distributed_init_method)
+
         is_distributed = True
         rank = torch.distributed.get_rank()
         local_rank = torch.distributed.get_rank()
@@ -261,6 +267,7 @@ def setup_torch(seed:int,
             torch.cuda.set_device(local_rank)
             device_name = f'cuda:{local_rank}'
     else:
+        is_distributed = False
         rank = 0
         local_rank = 0
         world_size = 1
@@ -272,6 +279,8 @@ def setup_torch(seed:int,
     if is_cuda:
         torch.cuda.manual_seed(seed+seed_offset)
     torch.manual_seed(seed+seed_offset)
+
+    assert (not enable_distributed) or (enable_distributed and torch.distributed.is_initialized()), 'Distributed training not initialized. Call torch.distributed.init_process_group() first.'
 
     return TorchInfo(is_cuda=is_cuda, is_distributed=is_distributed,
                      device_type=device_type, dtype=dtype, device_name=device_name,
@@ -369,3 +378,23 @@ def work_cpu_count()->int:
         return count - 1
     else:
         return count
+
+def module_params(module:torch.nn.Module, non_embedding=True):
+    for m in module.modules():
+        if non_embedding and isinstance(m, nn.Embedding):
+            continue
+        for p in m.parameters():
+            yield p
+
+def module_params_count(module:torch.nn.Module, non_embedding=True)->int:
+    """
+    Return the number of parameters in the model.
+    For non-embedding count (default), the position embeddings get subtracted.
+    The token embeddings would too, except due to the parameter sharing these
+    params are actually used as weights in the final layer, so we include them.
+    """
+    n_params = sum(p.numel() for p in module_params(module, non_embedding))
+    return n_params
+
+def weight_norm(module:torch.nn.Module, non_embedding=True)->float:
+    return torch.linalg.norm(torch.cat([p.view(-1) for p in module_params(module, non_embedding)])).item()

@@ -38,7 +38,7 @@ def log_metrics(logger, step, model, get_loss, eval_iters, lr,
     val_loss, val_acc = estimate_loss(model, get_loss, val_loader, eval_iters,
                                     amp_ctx, is_cuda, device)
 
-    w_norm = model.weight_norm()
+    w_norm = utils.weight_norm(model)
 
     metrics = {
         "train/step": step,
@@ -70,6 +70,8 @@ def train(config:Mapping, logger=None):
     device_type = config['general']['device_type']
     dtype = config['general']['dtype']
     enable_distributed = config['general']['enable_distributed']
+    distributed_backend = config['general']['distributed_backend']
+    distributed_init_method = config['general']['distributed_init_method']
     gradient_accumulation_steps = config['training']['gradient_accumulation_steps']
     train_batch_size = config['training']['train_batch_size']
     seed = config['general']['seed']
@@ -103,6 +105,8 @@ def train(config:Mapping, logger=None):
     torch_info = utils.setup_torch(seed=seed,
                 device_type=device_type, dtype=dtype,
                 enable_distributed=enable_distributed,
+                distributed_backend=distributed_backend,
+                distributed_init_method=distributed_init_method,
                 gradient_accumulation_steps_1gpu=gradient_accumulation_steps)
 
     utils.setup_sys(seed + torch_info.seed_offset)
@@ -140,7 +144,8 @@ def train(config:Mapping, logger=None):
     # create model
     model = get_model(vocab_size=len(tokenizer),
                       **model_config['module_kwargs']).to(device)
-
+    logger.summary({'model_params_all': utils.module_params_count(model, non_embedding=False),
+                    'model_params_no_embedding': utils.module_params_count(model, non_embedding=True),})
     # optimizer
     optimizer = get_optim(model,
                           enable_fused=torch_info.is_cuda,
@@ -186,11 +191,11 @@ def train(config:Mapping, logger=None):
         # Loop over the training set
         while not batch_iter_done:
             model.train()
-            x, y = x.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else x.to(device), \
-                   y.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else y.to(device)
-
             loss_sum, correct_sum, data_count = 0., 0, 0
             for micro_step in range(gradient_accumulation_steps):
+                x, y = x.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else x.to(device), \
+                    y.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else y.to(device)
+
                 if torch_info.is_distributed:
                     # Instead of model.no_sync(), we do Karpathy's hack
                     # On last step, flag model to require backward grad sync

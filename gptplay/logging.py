@@ -157,7 +157,7 @@ class Logger:
 
         if master_process:
             if log_dir or log_filename:
-                log_filepath = full_path(os.path.join(str(log_dir), str(log_filename)))
+                log_filepath = os.path.join(full_path(str(log_dir), create=True), str(log_filename))
             else:
                 log_filepath = None
             self._py_logger = create_py_logger(filepath=log_filepath,

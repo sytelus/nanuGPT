@@ -12,7 +12,7 @@ def get_loss(model_output, labels)->Tuple[torch.Tensor, torch.Tensor]:
     # ignore_index=-1 is actually not needed because we never output -ve index for tokens.
     # PyTorch default is -100. The negative index is used to ignore the loss for padding tokens.
     loss = torch.nn.functional.cross_entropy(preds, targets, ignore_index=-1)
-    correct = (torch.argmax(preds, dim=-1) == labels).sum()
+    correct = (torch.argmax(preds, dim=-1) == targets).sum()
 
     return loss, correct
 

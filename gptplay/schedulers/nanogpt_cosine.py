@@ -1,7 +1,7 @@
 import math
 import numpy as np
 
-from torch.optim import LRScheduler
+from torch.optim.lr_scheduler import LRScheduler
 
 from gptplay import logging
 
@@ -18,8 +18,7 @@ class NanoGptCosineScheduler(LRScheduler):
             logging.warn("To get the last learning rate computed by the scheduler, please use `get_last_lr()`.")
 
         # get initial LR set in each group in optimizer
-        init_lrs = np.fromiter(group['initial_lr'] \
-                                for group in self.optimizer.param_groups)
+        init_lrs = np.fromiter((group['initial_lr'] for group in self.optimizer.param_groups), dtype=np.float32)
 
          # 1) linear warmup for warmup_iters steps
         if self.last_epoch < self.warmup_iters:
