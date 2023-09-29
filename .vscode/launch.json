@@ -13,6 +13,14 @@
             "args": ["configs/tokenize/tinyshakespeare.yaml"]
         },
         {
+            "name": "GPT2-Shakespear",
+            "type": "python",
+            "request": "launch",
+            "module": "gptplay.train",
+            "console": "integratedTerminal",
+            "args": ["configs/train_llm/tinyshakespeare.yaml"]
+        },
+        {
             "name": "Grokking-Prime223",
             "type": "python",
             "request": "launch",

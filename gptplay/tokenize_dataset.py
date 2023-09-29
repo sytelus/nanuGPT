@@ -112,6 +112,8 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
     vocab_size = len(tok)
     logging.summary({'vocab_size': vocab_size})
     np_dtype = np.uint16 if vocab_size < 2**16 else np.uint32
+    logging.summary({'np_dtype': str(np_dtype)})
+
 
     # concatenate all the ids in each dataset into one large file we can use for training
     for split in [train_split, val_split, test_split]:
@@ -144,7 +146,12 @@ if __name__ == "__main__":
     # specify config file to use as first argument in commandline
     config = Config(default_config_filepath='configs/tokenize/tiktoken_gpt2.yaml')
 
+    # setup output dirs and logging
     logging_config = config['logging']
+    out_dir = config['tokenization']['tokenized_out_dir']
+    if not logging_config['log_dir']:
+        logging_config['log_dir'] = utils.full_path(out_dir, create=True)
+
     logger = logging.Logger(master_process=True,  **logging_config)
 
     tokenization_config = config['tokenization']

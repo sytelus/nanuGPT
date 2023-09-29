@@ -298,9 +298,9 @@ def get_model(n_layer: int, n_embd: int, n_head: int,
               mlp_bias: bool,
               attn_proj_bias: bool, # for projection layers in attention
               attn_kv_bias: bool, # for kv in attention
-              layer_norm_bias: bool, # for layer norm
               attn_dropout: float, # dropout for attention layer
               mlp_dropout: float, # dropout for feedforward layer
+              layer_norm_bias: bool, # for layer norm
               resid_dropout: float, # dropout for residual in attention
               embed_dropout: float # dropout for embedding layer
               ):

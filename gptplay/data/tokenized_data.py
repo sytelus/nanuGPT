@@ -42,9 +42,10 @@ class MemmapDataloader:
     def __len__(self):
         return len(self.data) // self.batch_size
 
-def get_data(context_length:int, dtype,
+def get_data(local_rank:int, # everything except local rank comes from config
+             context_length:int, dtype,
              train_batch_size:int, eval_batch_size:int,
-             data_loader_seed:int, local_rank:int,
+             data_loader_seed:int,
              tokenized_train_path:str, tokenized_val_path:str,
              tokenized_test_path=None):
     train_dataset = MemmapDataset(np.memmap(tokenized_train_path, dtype=dtype, mode='r'),

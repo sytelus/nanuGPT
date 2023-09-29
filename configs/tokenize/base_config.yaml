@@ -4,7 +4,7 @@ logging:
   project_name: 'tokenization'
   run_name: null  # select random name
   run_description: null
-  log_dir: '~/out_dir/grokking'
+  log_dir: null # wo=ill be set to output folder
   log_filename: 'log.txt'
   allow_overwrite_log: true
   metrics_type: null

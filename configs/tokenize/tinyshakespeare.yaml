@@ -3,7 +3,7 @@ __include__: ['tiktoken_gpt2.yaml']
 tokenization:
   hf_name_path: 'text'
   hf_data_files: {train: ['$DATA_ROOT/datasets/tinyshakespeare/input.txt']}
-  tokenized_out_dir: '$DATA_ROOT/datasets/tokenized/tinyshakespeare/tiktoken/'
+  tokenized_out_dir: '$DATA_ROOT/tokenized/tinyshakespeare/tiktoken/'
   hf_sample_by: 'paragraph'
 
   val_fraction: 0.1

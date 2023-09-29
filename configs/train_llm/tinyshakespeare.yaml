@@ -1,0 +1,25 @@
+__include__: ['base_config.yaml']
+
+general:
+  out_dir: '~/out_dir/gpt2_tinyshakespeare'
+
+logging:
+  project_name: gpt2_tinyshakespeare
+
+data:
+  module_kwargs:
+    tokenized_train_path: '$DATA_ROOT/tokenized/tinyshakespeare/tiktoken/train.bin'
+    tokenized_val_path: '$DATA_ROOT/tokenized/tinyshakespeare/tiktoken/validation.bin'
+
+training:
+  train_batch_size: 12
+  # total tokens in dataset in 300k, so each step consumes whole dataset!
+  num_steps: 10
+  gradient_accumulation_steps: 32
+
+eval:
+  eval_every: 1
+  eval_iters: 200 # number of samples to evaluate for dataset
+  save_checkpoint: true
+  checkoint_after: 2 # starts saving checkpoint after these steps
+  checkpoint_every: 2 # multiple of eval_every, save checkpoint after these steps from last checkpoint when val loss is better
