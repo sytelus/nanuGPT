@@ -210,8 +210,8 @@ def train(config:Mapping, logger=None):
                 }
                 logger.info(metrics)
 
-            # is it time to evaluate?
-            if torch_info.is_master and ((step+1) % eval_every == 0 or step+1 >= num_steps):
+            # is it time to evaluate? We evaluate after 1st step to get initial loss.
+            if torch_info.is_master and (step % eval_every == 0 or step+1 >= num_steps):
                 eval_count += 1
                 val_loss = log_metrics(logger, step, model, get_loss, eval_iters,
                     optimizer.param_groups[0]['lr'],
