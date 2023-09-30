@@ -3,7 +3,7 @@ import numpy as np
 
 from torch.optim.lr_scheduler import LRScheduler
 
-from gptplay import glogging
+from gptplay import glogging as logging
 
 class NanoGptCosineScheduler(LRScheduler):
     def __init__(self, optimizer, warmup_iters: int, lr_decay_iters: int, min_lr: float,
@@ -15,7 +15,7 @@ class NanoGptCosineScheduler(LRScheduler):
 
     def get_lr(self):
         if not self._get_lr_called_within_step:
-            glogging.warn("To get the last learning rate computed by the scheduler, please use `get_last_lr()`.")
+            logging.warn("To get the last learning rate computed by the scheduler, please use `get_last_lr()`.")
 
         # get initial LR set in each group in optimizer
         init_lrs = np.fromiter((group['initial_lr'] for group in self.optimizer.param_groups), dtype=np.float32)

@@ -7,11 +7,11 @@ from packaging import version
 import torch
 
 from gptplay import utils
-from gptplay import glogging
+from gptplay import glogging as logging
 from gptplay.tokenizers.tokenizer_base import TokenizerBase
 
 
-def setup_device(config:Mapping, logger:Optional[glogging.Logger])->Tuple[torch.device, AbstractContextManager, glogging.Logger, utils.TorchInfo]:
+def setup_device(config:Mapping, logger:Optional[logging.Logger])->Tuple[torch.device, AbstractContextManager, logging.Logger, utils.TorchInfo]:
     seed = config['general']['seed']
     device_type = config['general']['device_type']
     dtype = config['general']['dtype']
@@ -31,7 +31,7 @@ def setup_device(config:Mapping, logger:Optional[glogging.Logger])->Tuple[torch.
     utils.setup_sys(seed + torch_info.seed_offset)
 
     if logger is None:
-        logger = glogging.Logger(master_process=torch_info.is_master, **logging_config)
+        logger = logging.Logger(master_process=torch_info.is_master, **logging_config)
 
     logger.log_sys_info()
     logger.log_config(config)
@@ -42,7 +42,7 @@ def setup_device(config:Mapping, logger:Optional[glogging.Logger])->Tuple[torch.
 
     return device, amp_ctx, logger, torch_info
 
-def create_model_tokenizer(config:Mapping, logger:glogging.Logger, device:torch.device,
+def create_model_tokenizer(config:Mapping, logger:logging.Logger, device:torch.device,
                            state_dict=None)->Tuple[torch.nn.Module, TokenizerBase]:
     model_config = config['model']
     tokenizer_config = config['tokenizer']

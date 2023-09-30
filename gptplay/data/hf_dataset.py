@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 
 from gptplay.tokenizers.tokenizer_base import TokenizerBase
 from gptplay import utils
-from gptplay import glogging
+from gptplay import glogging as logging
 
 
 def get_datasets(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Optional[str], hf_data_files:Optional[str], hf_revision:Optional[str],
@@ -19,7 +19,7 @@ def get_datasets(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Op
 
     if hf_name_path != 'text' and os.path.isdir(utils.full_path(hf_name_path)):
         hf_name_path = utils.full_path(hf_name_path)
-        glogging.info(f'Loading dataset from disk {hf_name_path}...')
+        logging.info(f'Loading dataset from disk {hf_name_path}...')
         dataset = load_from_disk(hf_name_path)
     else:
         if hf_name_path == 'text' and isinstance(hf_data_files, MutableMapping):
@@ -28,7 +28,7 @@ def get_datasets(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Op
             for split, filepath in hf_data_files.items():
                 hf_data_files[split] = [utils.full_path(f) for f in hf_data_files[split]]
 
-        glogging.info(f'Loading HuggingFace dataset {hf_name_path}...')
+        logging.info(f'Loading HuggingFace dataset {hf_name_path}...')
         dataset = load_dataset(hf_name_path, name=hf_dataset_name, data_dir=hf_data_dir,
                                data_files=hf_data_files, revision=hf_revision,
                                cache_dir=hf_cache_dir, sample_by=hf_sample_by)
@@ -37,9 +37,9 @@ def get_datasets(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Op
     if not isinstance(dataset, DatasetDict):
         dataset = DatasetDict({train_split: dataset})
 
-    glogging.info(f'Loaded dataset {hf_name_path}')
+    logging.info(f'Loaded dataset {hf_name_path}')
     for split in dataset.keys():
-        glogging.summary({f'{split}_original_rows': len(dataset[split])})
+        logging.summary({f'{split}_original_rows': len(dataset[split])})
 
     # set default values
     train_split = train_split or 'train'
@@ -68,16 +68,16 @@ def get_datasets(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Op
             # there is only a test split
             dataset[test_split] = splits['test']
     else:
-        glogging.info(f'Using existing val_split "{val_split}", ignoring val_fraction={val_fraction}')
+        logging.info(f'Using existing val_split "{val_split}", ignoring val_fraction={val_fraction}')
         if test_split not in dataset and test_fraction:
             splits = dataset[train_split].train_test_split(test_size=test_fraction, shuffle=True, seed=data_loader_seed)
             dataset[train_split] = splits['train']
             dataset[test_split] = splits['test']
         else:
-            glogging.info(f'Using existing test_split "{test_split}", ignoring test_fraction={test_fraction}')
+            logging.info(f'Using existing test_split "{test_split}", ignoring test_fraction={test_fraction}')
 
     for split in dataset.keys():
-        glogging.summary({f'{split}_split_rows': len(dataset[split])})
+        logging.summary({f'{split}_split_rows': len(dataset[split])})
 
     return dataset
 

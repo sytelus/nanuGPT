@@ -7,7 +7,7 @@ import torch
 from gptplay import utils
 from gptplay.config import Config
 from gptplay import common
-from gptplay import glogging
+from gptplay import glogging as logging
 
 class Generator:
     def __init__(self, config:Mapping, logger) -> None:
@@ -71,7 +71,7 @@ if __name__ == "__main__":
     # specify config file to use as first argument in commandline
     config = Config(default_config_filepath='configs/train_llm/tinyshakespeare.yaml')
     logging_config = config['logging']
-    logger = glogging.Logger(master_process=True, **logging_config)
+    logger = logging.Logger(master_process=True, **logging_config)
 
     gen = Generator(config, logger)
     results = gen.generate(['\n'], 200)

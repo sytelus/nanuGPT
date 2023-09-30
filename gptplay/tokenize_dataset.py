@@ -16,7 +16,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from gptplay.tokenizers.tokenizer_base import TokenizerBase
-from gptplay import glogging
+from gptplay import glogging as logging
 from gptplay import utils
 from gptplay.config import Config
 from gptplay.data.hf_dataset import get_datasets
@@ -62,9 +62,9 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
 
     tok = tokenizer_factory()
     vocab_size = len(tok)
-    glogging.summary({'vocab_size': vocab_size})
+    logging.summary({'vocab_size': vocab_size})
     np_dtype = np.uint16 if vocab_size < 2**16 else np.uint32
-    glogging.summary({'np_dtype': str(np_dtype)})
+    logging.summary({'np_dtype': str(np_dtype)})
 
 
     # concatenate all the ids in each dataset into one large file we can use for training
@@ -74,7 +74,7 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
         dset = tokenized[split]
 
         arr_len = np.sum(dset['len'], dtype=np.uint64)
-        glogging.summary({f'{split}_tokens': arr_len})
+        logging.summary({f'{split}_tokens': arr_len})
 
         filename = os.path.join(utils.full_path(tokenized_out_dir, create=True) , f'{split}.bin')
         arr = np.memmap(filename, dtype=np_dtype, mode='w+', shape=(arr_len,))
@@ -91,7 +91,7 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
             idx += len(arr_batch)
         arr.flush()
 
-    glogging.info(f'Tokenized dataset saved to {tokenized_out_dir}')
+    logging.info(f'Tokenized dataset saved to {tokenized_out_dir}')
 
 
 if __name__ == "__main__":
@@ -104,7 +104,7 @@ if __name__ == "__main__":
     if not logging_config['log_dir']:
         logging_config['log_dir'] = utils.full_path(out_dir, create=True)
 
-    logger = glogging.Logger(master_process=True,  **logging_config)
+    logger = logging.Logger(master_process=True,  **logging_config)
 
     tokenization_config = config['tokenization']
     tokenizer_config = config['tokenizer']
@@ -114,4 +114,4 @@ if __name__ == "__main__":
 
     tokenize(tokenizer_factory=tokenizer_factory, **tokenization_config)
 
-    glogging.all_done()
+    logging.all_done()

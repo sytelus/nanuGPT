@@ -2,7 +2,7 @@ import inspect
 
 import torch
 
-from gptplay import glogging
+from gptplay import glogging as logging
 
 def get_optim(model, learning_rate, weight_decay,
               beta1, beta2, eps, enable_fused):
@@ -21,13 +21,13 @@ def get_optim(model, learning_rate, weight_decay,
 
     num_decay_params = sum(p.numel() for p in decay_params)
     num_nodecay_params = sum(p.numel() for p in nodecay_params)
-    glogging.summary({'num_decay_params': num_decay_params,
+    logging.summary({'num_decay_params': num_decay_params,
                      'num_nodecay_params': num_nodecay_params})
 
     # Create AdamW optimizer and use the fused version if it is available
     use_fused = enable_fused and \
         'fused' in inspect.signature(torch.optim.AdamW).parameters
-    glogging.summary({'use_fused_adamw': use_fused})
+    logging.summary({'use_fused_adamw': use_fused})
     extra_args = dict(fused=True) if use_fused else dict()
 
     return torch.optim.AdamW(
