@@ -35,7 +35,9 @@ def setup_device(config:Mapping, logger:Optional[logging.Logger])->Tuple[torch.d
 
     logger.log_sys_info()
     logger.log_config(config)
-    logger.summary(dataclasses.asdict(torch_info))
+    d = dataclasses.asdict(torch_info)
+    d['pt_dtype'] = str(d['pt_dtype'])  # make it JSON serializable so it can be logged
+    logger.summary(d)
 
     device = torch.device(torch_info.device_name)
     amp_ctx = nullcontext() if torch_info.device_type == 'cpu' else torch.amp.autocast(device_type=torch_info.device_type, dtype=torch_info.pt_dtype)
