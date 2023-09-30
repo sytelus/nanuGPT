@@ -35,10 +35,13 @@ class Generator:
         self.model, self.tokenizer = common.create_model_tokenizer(config, logger, self.device, state_dict=state_dict)
         self.model.eval()
 
+    @torch.no_grad()
     def generate(self, prompts:List[str], max_length:int, temperature:float=1.0, top_k:Optional[int]=None):
         if abs(temperature) < 1e-6:
             temperature = 1e-6 * (1 if temperature > 0 else -1)
         assert top_k is None or top_k > 0, f'top_k must be > 0, got {top_k}'
+
+        self.model.eval()
 
         idxs = self.tokenizer.batch_encode(prompts)['input_ids']
         results = []
