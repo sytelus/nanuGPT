@@ -6,6 +6,11 @@ import torch
 import numpy as np
 from gptplay.tokenizers.byte_tokenizer import ByteTokenizer
 
+import os
+path=os.path.dirname("C:/folder1/folder2/filename.xml")
+print(path)
+print(os.path.basename(path))
+
 bt = ByteTokenizer()
 en = bt.batch_encode(["ab<EOS>c", "<UNK>def"])
 print(en)

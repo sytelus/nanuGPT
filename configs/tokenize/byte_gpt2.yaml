@@ -1,0 +1,6 @@
+__include__: ['base_config.yaml']
+
+tokenizer:
+  module: 'gptplay.tokenizers.byte_tokenizer.get_tokenizer_factory'
+  module_kwargs:
+    encoding_name: 'utf-8'

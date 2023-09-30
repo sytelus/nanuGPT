@@ -6,20 +6,51 @@ general:
 logging:
   project_name: gpt2_tinyshakespeare
 
+model:
+  module: 'gptplay.models.nanogpt.get_model'
+  module_kwargs:
+    n_layer: 6
+    n_embd: 384
+    n_head: 6
+    context_length: 256
+    mlp_dropout: 0.2 # dropout for feedforward layer
+    attn_dropout: 0.2 # dropout for attention layer
+    resid_dropout: 0.2 # dropout for residual connection
+    embed_dropout: 0.2 # dropout for embedding layer
+
+tokenizer:
+  module: 'gptplay.tokenizers.byte_tokenizer.get_tokenizer_factory'
+  module_kwargs:
+    encoding_name: 'utf-8'
+
 data:
   module_kwargs:
-    tokenized_train_path: '$DATA_ROOT/tokenized/tinyshakespeare/tiktoken/train.bin'
-    tokenized_val_path: '$DATA_ROOT/tokenized/tinyshakespeare/tiktoken/validation.bin'
+    tokenized_train_path: '$DATA_ROOT/tokenized/tinyshakespeare/byte/train.bin'
+    tokenized_val_path: '$DATA_ROOT/tokenized/tinyshakespeare/byte/validation.bin'
 
 training:
-  train_batch_size: 12
-  # total tokens in dataset in 300k, so each step consumes whole dataset!
-  num_steps: 10
-  gradient_accumulation_steps: 32
+  train_batch_size: 64
+  num_steps: 5000
+  gradient_accumulation_steps: 1 # will be automatically divided by GPU count
+
+optimizer:
+  module: 'gptplay.optimizers.adamw_nanogpt.get_optim'
+  module_kwargs:
+    learning_rate: 1.0E-3
+    weight_decay: 0.1
+    beta1: 0.9
+    beta2: 0.99
+
+scheduler:
+  module: 'gptplay.schedulers.nanogpt_cosine.get_scheduler'
+  module_kwargs:
+    warmup_iters: 100
+    lr_decay_iters: '_copy: /training/num_steps'
+    min_lr: 1.0E-4
 
 eval:
-  eval_every: 1
+  eval_every: 250
   eval_iters: 200 # number of samples to evaluate for dataset
   save_checkpoint: true
-  checkoint_after: 2 # starts saving checkpoint after these steps
-  checkpoint_every: 2 # multiple of eval_every, save checkpoint after these steps from last checkpoint when val loss is better
+  checkoint_after: 4000 # starts saving checkpoint after these steps
+  checkpoint_every: 10 # multiple of eval_every, save checkpoint after these steps from last checkpoint when val loss is better

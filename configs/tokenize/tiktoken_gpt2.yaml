@@ -1,2 +1,7 @@
 __include__: ['base_config.yaml']
 
+tokenizer:
+  module: 'gptplay.tokenizers.tiktoken_wrap.get_tokenizer_factory'
+  module_kwargs:
+    encoding_name: 'gpt2'
+

@@ -3,7 +3,7 @@ general:
   device_type: 'cuda'            # auto select if blank or cpu, cuda
   distributed_backend: 'nccl'       # nccl, gloo, mpi, horovod)
   distributed_init_method: 'env://' # for horovod, use 'tcp://localhost:23456'
-  torch_compile: true # will not compile if Python > 3.11, torch < 2.1.0 or Windows
+  torch_compile: false # will not compile if Python > 3.11, torch < 2.1.0 or Windows
   seed: 42
   dtype: 'bfloat16'         # float32, float16, bfloat16
   enable_distributed: false
@@ -32,8 +32,8 @@ model:
     attn_proj_bias: false # for projection layers in attention
     attn_kv_bias: false # for kv in attention
     layer_norm_bias: false # pytorch default, not allowed to change
-    attn_dropout: 0.0 # dropout for attention layer
     mlp_dropout: 0.0 # dropout for feedforward layer
+    attn_dropout: 0.0 # dropout for attention layer
     resid_dropout: 0.0 # dropout for residual connection
     embed_dropout: 0.0 # dropout for embedding layer
 

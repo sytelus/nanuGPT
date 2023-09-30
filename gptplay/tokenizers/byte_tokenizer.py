@@ -46,7 +46,7 @@ class ByteTokenizer(TokenizerBase):
         return decoded
 
     def batch_encode(self, texts:List[str])->Mapping:
-        eot_append = [self.eot_token] if self.append_eot else []
+        eot_append = [self.eot_token_id()] if self.append_eot else []
         return {'input_ids': [self.encode(text)+eot_append for text in texts]}
 
     def batch_decode(self, ids_batch:List[List[int]])->List[str]:
