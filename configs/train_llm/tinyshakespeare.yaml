@@ -33,6 +33,10 @@ training:
   num_steps: 5000
   gradient_accumulation_steps: 1 # will be automatically divided by GPU count
 
+generate:
+  checkpoint_path: '_copy: /general/out_dir'
+  checkpoint_name: 'checkpoint_best.pt'
+
 optimizer:
   module: 'gptplay.optimizers.adamw_nanogpt.get_optim'
   module_kwargs:

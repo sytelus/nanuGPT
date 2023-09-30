@@ -13,10 +13,18 @@
             "args": ["configs/tokenize/tinyshakespeare.yaml"]
         },
         {
-            "name": "GPT2-Shakespear",
+            "name": "Train GPT2-Shakespear",
             "type": "python",
             "request": "launch",
             "module": "gptplay.train",
+            "console": "integratedTerminal",
+            "args": ["configs/train_llm/tinyshakespeare.yaml"]
+        },
+        {
+            "name": "Generate GPT2-Shakespear",
+            "type": "python",
+            "request": "launch",
+            "module": "gptplay.generate",
             "console": "integratedTerminal",
             "args": ["configs/train_llm/tinyshakespeare.yaml"]
         },

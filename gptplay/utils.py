@@ -1,27 +1,38 @@
+import csv
+from datetime import datetime
 import os
+import pathlib
+import platform
+import subprocess
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True' # needed to avoid Jupyter kernal crash due to matplotlib
-from typing import Callable, Tuple, Dict, List, Sequence, Any
+from typing import Callable, Mapping, MutableMapping, Optional, Tuple, Dict, List, Sequence, Any, Type
 from itertools import groupby, chain
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 import os
 import sys
-import torch
-import torch.nn as nn
 import numpy as np
 from collections import defaultdict
 import math
 import psutil
+from itertools import zip_longest
 import random
 import hashlib
-import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-import matplotlib.cm as cm
 import json
 from dataclasses import dataclass
 import importlib
 import multiprocessing
+from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
+
+import yaml
+
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import matplotlib.cm as cm
 
 import torch
+import torch.nn as nn
+
 
 # We setup env variable if debugging mode is detected for vs_code_debugging.
 # The reason for this is that when Python multiprocessing is used, the new process
@@ -139,7 +150,7 @@ def shuffle_tuple_of_lists(t:Tuple[List, ...])->Tuple[List, ...]:
     random.shuffle(permuted_indices)
 
     # Reorder each member of the tuple using the permuted indices
-    shuffled = tuple([member[permuted_indices] for member in t])
+    shuffled = tuple([member[permuted_indices] for member in t]) # type: ignore
 
     return shuffled
 
@@ -189,7 +200,7 @@ def draw_histogram(data, xlabel='Values', ylabel='Frequency', title='Histogram',
 
     # Assigning a color for each bar using the 'viridis' colormap
     for thisfrac, thispatch in zip(fracs, patches):
-        color = cm.viridis(norm(thisfrac))
+        color = cm.viridis(norm(thisfrac)) # type: ignore
         thispatch.set_facecolor(color)
 
     plt.xlabel(xlabel)
@@ -290,7 +301,7 @@ def setup_torch(seed:int,
                      pt_dtype=pt_dtype)
 
 def save_checkpoint(out_dir:str, name:str, model, optimizer, scheduler,
-                    step:int, best_val_loss:float):
+                    step:int, best_val_loss:float)->str:
     checkpoint = {'model': model.state_dict(),
                   'optimizer': optimizer.state_dict(),
                   'scheduler': scheduler.state_dict(),
@@ -298,8 +309,9 @@ def save_checkpoint(out_dir:str, name:str, model, optimizer, scheduler,
                   'best_val_loss': best_val_loss}
 
     out_dir = full_path(out_dir, create=True)
-    checkpoint_filepath = os.path.join(out_dir, f'{name}_{step}.pt')
-    torch.save(checkpoint, os.path.join(out_dir, checkpoint_filepath))
+    checkpoint_filepath = os.path.join(out_dir, f'{name}.pt')
+    torch.save(checkpoint, checkpoint_filepath)
+    return checkpoint_filepath
 
 def import_fn(spec:str)->Callable:
     """Import a function from a module. The spec is in the form of module.submodule.function"""
@@ -398,3 +410,209 @@ def module_params_count(module:torch.nn.Module, non_embedding=True)->int:
 
 def weight_norm(module:torch.nn.Module, non_embedding=True)->float:
     return torch.linalg.norm(torch.cat([p.view(-1) for p in module_params(module, non_embedding)])).item()
+
+def save_yaml(obj, filepath:str):
+    with open(filepath, 'w', encoding='utf-8') as f:
+        yaml.dump(obj, f, default_flow_style=False)
+
+def load_yaml(filepath:str)->Any:
+    with open(full_path(filepath), 'r', encoding='utf-8') as f:
+        return yaml.load(f, Loader=yaml.FullLoader)
+
+def dedup_list(l: List) -> List:
+    return list(OrderedDict.fromkeys(l))
+
+
+def delete_file(filepath: str) -> bool:
+    if os.path.isfile(filepath):
+        os.remove(filepath)
+        return True
+    else:
+        return False
+
+def path2uri(path: str, windows_non_standard: bool = False) -> str:
+    uri = pathlib.Path(full_path(path)).as_uri()
+
+    # there is lot of buggy regex based code out there which expects Windows file URIs as
+    # file://C/... instead of standard file:///C/...
+    # When passing file uri to such code, turn on windows_non_standard
+    if windows_non_standard and is_windows():
+        uri = uri.replace('file:///', 'file://')
+    return uri
+
+
+def uri2path(file_uri: str, windows_non_standard: bool = False) -> str:
+    # there is lot of buggy regex based code out there which expects Windows file URIs as
+    # file://C/... instead of standard file:///C/...
+    # When passing file uri to such code, turn on windows_non_standard
+    if windows_non_standard and is_windows():
+        file_uri = file_uri.replace('file://', 'file:///')
+
+    parsed = urlparse(file_uri)
+    host = "{0}{0}{mnt}{0}".format(os.path.sep, mnt=parsed.netloc)
+    return os.path.normpath(
+        os.path.join(host, url2pathname(unquote(parsed.path)))
+    )
+
+def deep_comp(o1: Any, o2: Any) -> bool:
+    # NOTE: dict don't have __dict__
+    o1d = getattr(o1, '__dict__', None)
+    o2d = getattr(o2, '__dict__', None)
+
+    # if both are objects
+    if o1d is not None and o2d is not None:
+        # we will compare their dictionaries
+        o1, o2 = o1.__dict__, o2.__dict__
+
+    if o1 is not None and o2 is not None:
+        # if both are dictionaries, we will compare each key
+        if isinstance(o1, dict) and isinstance(o2, dict):
+            for k in set().union(o1.keys(), o2.keys()):
+                if k in o1 and k in o2:
+                    if not deep_comp(o1[k], o2[k]):
+                        return False
+                else:
+                    return False  # some key missing
+            return True
+    # mismatched object types or both are scalers, or one or both None
+    return o1 == o2
+
+def zero_file(filepath) -> None:
+    """Creates or truncates existing file"""
+    open(filepath, 'w').close()
+
+
+def write_string(filepath: str, content: str) -> None:
+    pathlib.Path(filepath).write_text(content)
+
+
+def read_string(filepath: str) -> str:
+    return pathlib.Path(filepath).read_text()
+
+def fmt(val: Any) -> str:
+    if isinstance(val, float):
+        return f'{val:.4g}'
+    return str(val)
+
+def append_csv_file(filepath: str, new_row: List[Tuple[str, Any]], delimiter='\t'):
+    fieldnames, rows = [], []
+    if os.path.exists(filepath):
+        with open(filepath, 'r') as f:
+            dr = csv.DictReader(f, delimiter=delimiter)
+            fieldnames = dr.fieldnames
+            rows = [row for row in dr.reader]
+    if fieldnames is None:
+        fieldnames = []
+
+    new_fieldnames = OrderedDict([(fn, None) for fn, v in new_row])
+    for fn in fieldnames:
+        new_fieldnames[fn] = None
+
+    with open(filepath, 'w', newline='') as f:
+        dr = csv.DictWriter(f, fieldnames=new_fieldnames.keys(), delimiter=delimiter)
+        dr.writeheader()
+        for row in rows:
+            d = dict((k, v) for k, v in zip(fieldnames, row))
+            dr.writerow(d)
+        dr.writerow(OrderedDict(new_row))
+
+
+def has_method(o, name):
+    return callable(getattr(o, name, None))
+
+def extract_tar(src, dest=None, gzip=None, delete=False):
+    import tarfile
+
+    if dest is None:
+        dest = os.path.dirname(src)
+    if gzip is None:
+        gzip = src.lower().endswith('.gz')
+
+    mode = 'r:gz' if gzip else 'r'
+    with tarfile.open(src, mode) as tarfh:
+        tarfh.extractall(path=dest)
+
+    if delete:
+        os.remove(src)
+
+
+def extract_zip(src, dest=None, delete=False):
+    import zipfile
+
+    if dest is None:
+        dest = os.path.dirname(src)
+
+    with zipfile.ZipFile(src, 'r') as zip_ref:
+        zip_ref.extractall(dest)
+
+    if delete:
+        os.remove(src)
+
+def cuda_device_names() -> str:
+    return ', '.join([torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())])
+
+
+def exec_shell_command(command: str, print_command_start=True, print_command_end=True) -> subprocess.CompletedProcess:
+    if print_command_start:
+        print(f'[{datetime.now()}] Running: {command}')
+
+    ret = subprocess.run(command, shell=True, check=True)
+
+    if print_command_end:
+        print(f'[{datetime.now()}] returncode={ret.returncode} Finished: {command}')
+
+    return ret
+
+
+def zip_eq(*iterables):
+    sentinel = object()
+    for count, combo in enumerate(zip_longest(*iterables, fillvalue=sentinel)):
+        if any(True for c in combo if sentinel is c):
+            shorter_its = ','.join([str(i) for i, c in enumerate(combo) if sentinel is c])
+            raise ValueError(f'Iterator {shorter_its} have length {count} which is shorter than others')
+        yield combo
+
+def filepath_without_ext(filepath: str) -> str:
+    """Returns '/a/b/c/d.e' for '/a/b/c/d.e.f' """
+    return str(pathlib.Path(filepath).with_suffix(''))
+
+
+def filepath_ext(filepath: str) -> str:
+    """Returns '.f' for '/a/b/c/d.e.f' """
+    return pathlib.Path(filepath).suffix
+
+
+def filepath_name_ext(filepath: str) -> str:
+    """Returns 'd.e.f' for '/a/b/c/d.e.f' """
+    return pathlib.Path(filepath).name
+
+
+def filepath_name_only(filepath: str) -> str:
+    """Returns 'd.e' for '/a/b/c/d.e.f' """
+    return pathlib.Path(filepath).stem
+
+
+def change_filepath_ext(filepath: str, new_ext: str) -> str:
+    """Returns '/a/b/c/d.e.g' for filepath='/a/b/c/d.e.f', new_ext='.g' """
+    return str(pathlib.Path(filepath).with_suffix(new_ext))
+
+
+def change_filepath_name(filepath: str, new_name: str, new_ext: Optional[str] = None) -> str:
+    """Returns '/a/b/c/h.f' for filepath='/a/b/c/d.e.f', new_name='h' """
+    ext = new_ext or filepath_ext(filepath)
+    return str(pathlib.Path(filepath).with_name(new_name).with_suffix(ext))
+
+def process_name() -> str:
+    return multiprocessing.current_process().name
+
+
+def is_windows() -> bool:
+    return platform.system() == 'Windows'
+
+def deep_update(d: MutableMapping, u: Mapping, map_type: Type[MutableMapping] = dict) -> MutableMapping:
+    for k, v in u.items():
+        if isinstance(v, Mapping):
+            d[k] = deep_update(d.get(k, map_type()), v, map_type)
+        else:
+            d[k] = v
+    return d

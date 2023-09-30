@@ -1,16 +1,18 @@
+import os
 from typing import Mapping, Tuple
 import sys
+from datetime import datetime
 from contextlib import nullcontext
 import dataclasses
 import math
+import yaml
 
 import torch
 from torch.nn.parallel import DistributedDataParallel
 
 from gptplay import utils
 from gptplay.config import Config
-from gptplay import logging
-
+from gptplay import common
 
 @torch.no_grad()
 def estimate_loss(model, get_loss, data_loader, eval_iters, amp_ctx, is_cuda, device)->Tuple[float, float]:
@@ -66,17 +68,10 @@ def log_metrics(logger, step, model, get_loss, eval_iters, lr,
 
 
 def train(config:Mapping, logger=None):
+    gradient_accumulation_steps = config['training']['gradient_accumulation_steps']
     project_name = config['logging']['project_name']
     run_name = config['logging']['run_name']
-    device_type = config['general']['device_type']
-    dtype = config['general']['dtype']
-    enable_distributed = config['general']['enable_distributed']
-    distributed_backend = config['general']['distributed_backend']
-    distributed_init_method = config['general']['distributed_init_method']
-    gradient_accumulation_steps = config['training']['gradient_accumulation_steps']
     train_batch_size = config['training']['train_batch_size']
-    seed = config['general']['seed']
-    torch_compile = config['general']['torch_compile']
     num_steps = config['training']['num_steps']
     grad_clip = config['training']['grad_clip']
     enable_train_log = config['training']['enable_train_log']
@@ -84,55 +79,37 @@ def train(config:Mapping, logger=None):
     eval_every = config['eval']['eval_every']
     eval_iters = config['eval']['eval_iters']
     save_checkpoint = config['eval']['save_checkpoint']
-    checkpoint_every = config['eval']['checkpoint_every']
+    checkpoint_every_eval = config['eval']['checkpoint_every_eval']
+    checkpoint_keep_best = config['eval']['checkpoint_keep_best']
+
     checkoint_after = config['eval']['checkoint_after']
     out_dir = config['general']['out_dir']
     data_config = config['data']
-    model_config = config['model']
     context_length = config['model']['module_kwargs']['context_length'] #TODO: refactor so trainer is independent of context length?
-    logging_config = config['logging']
     optimizer_config = config['optimizer']
     scheduler_config = config['scheduler']
-    tokenizer_config = config['tokenizer']
     loss_config = config['loss']
 
     get_data = utils.import_fn(data_config['module'])
-    get_tokenizer_factory = utils.import_fn(tokenizer_config['module'])
     get_optim = utils.import_fn(optimizer_config['module'])
     get_scheduler = utils.import_fn(scheduler_config['module'])
-    get_model = utils.import_fn(model_config['module'])
     get_loss = utils.import_fn(loss_config['module'])
 
-    torch_info = utils.setup_torch(seed=seed,
-                device_type=device_type, dtype=dtype,
-                enable_distributed=enable_distributed,
-                distributed_backend=distributed_backend,
-                distributed_init_method=distributed_init_method,
-                gradient_accumulation_steps_1gpu=gradient_accumulation_steps)
-
-    utils.setup_sys(seed + torch_info.seed_offset)
-
+    # setup system, device, logger, torch
     own_logger = logger is None
-    if logger is None:
-        logger = logging.Logger(master_process=torch_info.is_master, **logging_config)
+    device, amp_ctx, logger, torch_info = common.setup_device(config, logger)
 
-    logger.log_sys_info()
-    logger.log_config(config)
-    logger.summary(dataclasses.asdict(torch_info))
     logger.summary({"global_batch_size": gradient_accumulation_steps * train_batch_size * torch_info.world_size,
                     "local_batch_size": gradient_accumulation_steps * torch_info.world_size,
                     "tokens_per_iter": gradient_accumulation_steps * train_batch_size * torch_info.world_size * context_length
                     })
 
-    device = torch.device(torch_info.device_name)
-    amp_ctx = nullcontext() if torch_info.device_type == 'cpu' else torch.amp.autocast(device_type=torch_info.device_type, dtype=torch_info.pt_dtype)
+    # create model and tokenizer
+    model, tokenizer = common.create_model_tokenizer(config, logger, device)
 
     # get dataset
     train_loader, val_loader, test_loader = get_data(local_rank=torch_info.local_rank,
                                                      **data_config['module_kwargs'])
-    tokenizer_factory = get_tokenizer_factory(**tokenizer_config['module_kwargs'])
-    tokenizer = tokenizer_factory()
-
     logger.summary({'vocab_size': len(tokenizer),
                     'train_len': len(train_loader.dataset),
                     'val_len': len(val_loader.dataset),
@@ -142,28 +119,10 @@ def train(config:Mapping, logger=None):
                     'test_batches': len(test_loader) if test_loader is not None else 0
                     })
 
-    # create model
-    model = get_model(vocab_size=len(tokenizer),
-                      **model_config['module_kwargs']).to(device)
-    logger.summary({'model_params_all': utils.module_params_count(model, non_embedding=False),
-                    'model_params_no_embedding': utils.module_params_count(model, non_embedding=True),})
     # optimizer
     optimizer = get_optim(model,
                           enable_fused=torch_info.is_cuda,
                           **optimizer_config['module_kwargs'])
-
-    if torch_compile:
-        python_version = sys.version_info
-        pytorch_version = tuple(map(int, torch.__version__.split('.')[:3]))
-        if python_version >= (3, 11) and pytorch_version <= (2, 1, 0):
-            logger.warn(f"PyTorch {pytorch_version} does not support Python {python_version} for model compilation.")
-        else:
-            logger.info("Compiling model...")
-            try:
-                model = torch.compile(model) # requires PyTorch 2.0
-            except Exception as e:
-                logger.error(f"Failed to compile model: {str(e)}")
-            logger.info("Compiling done.")
 
     if torch_info.is_distributed:
         model = DistributedDataParallel(model,
@@ -178,6 +137,7 @@ def train(config:Mapping, logger=None):
     step, eval_count = 0, 0
     epoch, epoch_step = 0, 0 # epoch steps is useful to know how many epochs we did
     best_val_loss, evel_count = float('inf'), 0
+    checkpoint_log = []
 
     if torch_info.is_master:
         out_dir = utils.full_path(out_dir, create=True)
@@ -250,6 +210,7 @@ def train(config:Mapping, logger=None):
                 }
                 logger.info(metrics)
 
+            # is it time to evaluate?
             if torch_info.is_master and ((step+1) % eval_every == 0 or step+1 >= num_steps):
                 eval_count += 1
                 val_loss = log_metrics(logger, step, model, get_loss, eval_iters,
@@ -257,14 +218,20 @@ def train(config:Mapping, logger=None):
                     amp_ctx, torch_info.is_cuda, device, train_loader, val_loader,
                     test_loader if step+1 >= num_steps else None)
 
-                if save_checkpoint and val_loss < best_val_loss and \
+                # if this is the best model so far, save it
+                if save_checkpoint and val_loss <= best_val_loss and \
                         ((step+1 >= num_steps) or \
-                            (step > checkoint_after and eval_count % checkpoint_every == 0)
+                            (step > checkoint_after and (eval_count+1) % checkpoint_every_eval == 0)
                         ):
                     best_val_loss = val_loss
-                    utils.save_checkpoint(out_dir, f'{project_name}_{run_name}' ,
+                    checkpoint_filename = project_name + \
+                        (f"_{run_name}" if run_name else "") + \
+                        f"_{step}" if not checkpoint_keep_best else "_best"
+                    checkpoint_filepath = utils.save_checkpoint(out_dir, checkpoint_filename,
                                           model.module if torch_info.is_distributed else model,
                                           optimizer, scheduler, step, best_val_loss)
+                    checkpoint_log.append({'step':step, 'best_val_loss':best_val_loss, 'checkpoint_filepath': checkpoint_filepath})
+                    logger.info(checkpoint_log[-1])
 
             step += 1
             epoch_step += 1
@@ -272,6 +239,8 @@ def train(config:Mapping, logger=None):
                 break
 
         epoch += 1
+
+    utils.save_yaml(checkpoint_log, os.path.join(out_dir, "checkpoint_log.yaml"))
 
     if torch_info.is_distributed:
         torch.distributed.distroy_process_group()
