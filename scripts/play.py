@@ -3,9 +3,22 @@ import os
 from transformers import AutoTokenizer
 import transformers
 import torch
+import numpy as np
+from gptplay.tokenizers.byte_tokenizer import ByteTokenizer
 
-model = "Salesforce/codegen-350M-nl"
+bt = ByteTokenizer()
+en = bt.batch_encode(["ab<EOS>c", "<UNK>def"])
+print(en)
+de = bt.batch_decode(en["input_ids"])
+print(de)
 
-tokenizer = AutoTokenizer.from_pretrained(model, use_auth_token=os.environ.get('HF_AUTH_TOKEN', None))
+n = np.array([1, 5, 8, 2, 5, 7, 2, 3])
+ind = np.where(n == 5)
 
-print(tokenizer.pad_token)
+s = bytes([]).decode(encoding="utf-8")
+
+d = {"a": 1, "b": 2}
+
+b = "abc".encode("utf-8")
+i = list(b)
+print(i)
