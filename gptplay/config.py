@@ -181,13 +181,14 @@ class Config(UserDict):
 
         Config is simply a dictionary of key, value which can form hirarchical
         config values. This class allows to load config from yaml and override
-        any values using command line arguments using syntax --parent.child 42.
+        any values using command line arguments using syntax
+            --parent.child 42
         You can also use  `'__include__': another.yaml` to  specify base yaml.
         The base yaml is loaded first and the key-value pairs in the main yaml
         will override the ones in include file. Furthermore, you can also use
         `'_copy': 'path'` to copy values from one path to another inside yaml.
         For example,
-            `'_copy': 'a.b.c'` will copy value of `a.b.c` to current path.
+            `'_copy': '/a/b/c'` will copy value of `/a/b/c` to current path.
 
         Keyword Arguments:
             config_filepath {[str]} -- [Yaml file to load config from, could be names of files separated by semicolon which will be loaded in sequence oveeriding previous config] (default: {None})
