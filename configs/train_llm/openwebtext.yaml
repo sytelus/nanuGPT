@@ -4,7 +4,11 @@ general:
   out_dir: '~/out_dir/gpt2_124m_owt'
 
 logging:
-  project_name: gpt2_124m_owt
+  project_name: 'gpt2_124m_owt'
+  enable_wandb: true
+  enable_summaries: true
+  run_name: 'nanogpt_baseline'  # select random name
+  run_description: 'Reproduce NanoGPT baseline for GPT2 124M on OpenWebText'
 
 data:
   module_kwargs:
