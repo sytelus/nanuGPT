@@ -1,5 +1,6 @@
-from contextlib import nullcontext
 from typing import Mapping, Tuple
+import sys
+from contextlib import nullcontext
 import dataclasses
 import math
 
@@ -152,12 +153,17 @@ def train(config:Mapping, logger=None):
                           **optimizer_config['module_kwargs'])
 
     if torch_compile:
-        logger.info("Compiling model...")
-        try:
-            model = torch.compile(model) # requires PyTorch 2.0
-        except Exception as e:
-            logger.error(f"Failed to compile model: {str(e)}")
-        logger.info("Compiling done.")
+        python_version = sys.version_info
+        pytorch_version = tuple(map(int, torch.__version__.split('.')[:3]))
+        if python_version >= (3, 11) and pytorch_version <= (2, 1, 0):
+            logger.warn(f"PyTorch {pytorch_version} does not support Python {python_version} for model compilation.")
+        else:
+            logger.info("Compiling model...")
+            try:
+                model = torch.compile(model) # requires PyTorch 2.0
+            except Exception as e:
+                logger.error(f"Failed to compile model: {str(e)}")
+            logger.info("Compiling done.")
 
     if torch_info.is_distributed:
         model = DistributedDataParallel(model,
