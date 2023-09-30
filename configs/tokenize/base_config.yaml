@@ -15,8 +15,9 @@ tokenization:
   hf_data_dir: null
   hf_data_files: null
   hf_sample_by: null
+  hf_revision: null
   train_split: 'train'
-  val_split: 'validation'
+  val_split: 'val'
   test_split: null
   hf_cache_dir: null
   val_fraction: null

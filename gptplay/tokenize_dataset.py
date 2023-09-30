@@ -19,67 +19,19 @@ from gptplay.tokenizers.tokenizer_base import TokenizerBase
 from gptplay import logging
 from gptplay import utils
 from gptplay.config import Config
+from gptplay.data.hf_dataset import get_datasets
 
 
 def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Optional[str], hf_data_files:Optional[str],
              train_split:Optional[str], val_split:Optional[str], test_split:Optional[str], hf_cache_dir:Optional[str],
              val_fraction:Optional[float], test_fraction:Optional[float],
              text_column:str, tokenizer_factory:Callable[[], TokenizerBase],
-             tokenized_out_dir:str, data_loader_seed:int, hf_sample_by:Optional[str]=None)->None:
+             tokenized_out_dir:str, data_loader_seed:int, hf_sample_by:Optional[str], hf_revision:Optional[str])->None:
 
-    if hf_name_path != 'text' and os.path.isdir(hf_name_path):
-        dataset = load_from_disk(hf_name_path)
-    else:
-        if hf_name_path == 'text' and isinstance(hf_data_files, MutableMapping):
-            hf_data_files = dict(hf_data_files) # HuggingFace doesn't like MutableMapping and must have dict
-            for split, filepath in hf_data_files.items():
-                hf_data_files[split] = [utils.full_path(f) for f in hf_data_files[split]]
-        dataset = load_dataset(hf_name_path, name=hf_dataset_name, data_dir=hf_data_dir, data_files=hf_data_files,
-                               cache_dir=hf_cache_dir, sample_by=hf_sample_by)
-
-    # standardize splits
-    if not isinstance(dataset, DatasetDict):
-        dataset = DatasetDict({train_split: dataset})
-
-    logging.info(f'Loaded dataset {hf_name_path}')
-    for split in dataset.keys():
-        logging.summary({f'{split}_rows': len(dataset[split])})
-
-    # set default values
-    train_split = train_split or 'train'
-    val_split = val_split or 'validation'
-    test_split = test_split or 'test'
-    val_fraction = val_fraction or 0.
-    test_fraction = test_fraction or 0.
-
-    if test_fraction: # simplify code
-        assert val_fraction > 0, 'test_fraction can only be used if val_fraction > 0'
-
-    # create or get splits
-    if val_split not in dataset and (val_fraction+test_fraction)>0.:
-        splits = dataset[train_split].train_test_split(test_size=val_fraction+test_fraction, shuffle=True, seed=data_loader_seed)
-        dataset[train_split] = splits['train']
-        if val_fraction:
-            if not test_fraction:
-                # there is no test split
-                dataset[val_split] = splits['test']
-            else:
-                # there is a test split
-                splits = splits['test'].train_test_split(test_size=test_fraction/(val_fraction+test_fraction), shuffle=True, seed=data_loader_seed)
-                dataset[val_split] = splits['train']
-                dataset[test_split] = splits['test']
-        else:
-            # there is only a test split
-            dataset[test_split] = splits['test']
-    else:
-        logging.info(f'Using existing val_split "{val_split}", ignoring val_fraction={val_fraction}')
-        if test_split not in dataset and test_fraction:
-            splits = dataset[train_split].train_test_split(test_size=test_fraction, shuffle=True, seed=data_loader_seed)
-            dataset[train_split] = splits['train']
-            dataset[test_split] = splits['test']
-        else:
-            logging.info(f'Using existing test_split "{test_split}", ignoring test_fraction={test_fraction}')
-
+    dataset = get_datasets(hf_name_path=hf_name_path, hf_dataset_name=hf_dataset_name, hf_data_dir=hf_data_dir, hf_data_files=hf_data_files,
+                           train_split=train_split, val_split=val_split, test_split=test_split, hf_cache_dir=hf_cache_dir,
+                           val_fraction=val_fraction, test_fraction=test_fraction, data_loader_seed=data_loader_seed,
+                           hf_sample_by=hf_sample_by, hf_revision=hf_revision)
 
     class TokenizerPerThread:
         def __init__(self, tokenizer_factory):

@@ -1,0 +1,10 @@
+__include__: ['tiktoken_gpt2.yaml']
+
+tokenization:
+  hf_name_path: '$DATA_ROOT/datasets/openwebtext'
+  tokenized_out_dir: '$DATA_ROOT/tokenized/openwebtext/tiktoken/'
+
+  val_fraction: 0.0005
+  text_column: null
+
+

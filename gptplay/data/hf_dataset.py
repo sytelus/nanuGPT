@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, List, Dict, Mapping, Callable
+from typing import Optional, Tuple, List, Dict, Mapping, Callable, MutableMapping
 import os
 
 from datasets import DatasetDict, load_dataset, load_from_disk
@@ -11,18 +11,35 @@ from gptplay import utils
 from gptplay import logging
 
 
-def get_data(path:str, hf_data_dir:Optional[str], hf_data_files:Optional[str], hf_revision:Optional[str],
+def get_datasets(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Optional[str], hf_data_files:Optional[str], hf_revision:Optional[str],
              train_split:Optional[str], val_split:Optional[str], test_split:Optional[str], hf_cache_dir:Optional[str],
-             train_fraction:Optional[float], val_fraction:Optional[float], test_fraction:Optional[float],
-             train_batch_size: int, eval_batch_size:int, data_loader_seed:int, text_column:str,
-             local_rank:int, context_length:int, tokenizer_factory:Callable[[], TokenizerBase])->Tuple[DataLoader,DataLoader, Optional[DataLoader]]:
+             hf_sample_by:Optional[str],
+             val_fraction:Optional[float], test_fraction:Optional[float],
+             data_loader_seed:int)->DatasetDict:
 
-    if os.path.isdir(path):
-        dataset = load_from_disk(path)
+    if hf_name_path != 'text' and os.path.isdir(utils.full_path(hf_name_path)):
+        hf_name_path = utils.full_path(hf_name_path)
+        logging.info(f'Loading dataset from disk {hf_name_path}...')
+        dataset = load_from_disk(hf_name_path)
     else:
-        dataset = load_dataset(path, data_dir=hf_data_dir, data_files=hf_data_files, revision=hf_revision,
-                               cache_dir=hf_cache_dir,
-                               num_proc=min(utils.cpu_count()//2,1))
+        if hf_name_path == 'text' and isinstance(hf_data_files, MutableMapping):
+            # dict keys are splits
+            hf_data_files = dict(hf_data_files) # HuggingFace doesn't like MutableMapping and must have dict
+            for split, filepath in hf_data_files.items():
+                hf_data_files[split] = [utils.full_path(f) for f in hf_data_files[split]]
+
+        logging.info(f'Loading HuggingFace dataset {hf_name_path}...')
+        dataset = load_dataset(hf_name_path, name=hf_dataset_name, data_dir=hf_data_dir,
+                               data_files=hf_data_files, revision=hf_revision,
+                               cache_dir=hf_cache_dir, sample_by=hf_sample_by)
+
+    # standardize to DatasetDict
+    if not isinstance(dataset, DatasetDict):
+        dataset = DatasetDict({train_split: dataset})
+
+    logging.info(f'Loaded dataset {hf_name_path}')
+    for split in dataset.keys():
+        logging.summary({f'{split}_original_rows': len(dataset[split])})
 
     # set default values
     train_split = train_split or 'train'
@@ -34,12 +51,8 @@ def get_data(path:str, hf_data_dir:Optional[str], hf_data_files:Optional[str], h
     if test_fraction: # simplify code
         assert val_fraction > 0, 'test_fraction can only be used if val_fraction > 0'
 
-    # standardize splits
-    if not isinstance(dataset, DatasetDict):
-        dataset = DatasetDict({train_split: dataset})
-
     # create or get splits
-    if val_split not in dataset and (val_fraction+test_fraction):
+    if val_split not in dataset and (val_fraction+test_fraction)>0.:
         splits = dataset[train_split].train_test_split(test_size=val_fraction+test_fraction, shuffle=True, seed=data_loader_seed)
         dataset[train_split] = splits['train']
         if val_fraction:
@@ -63,27 +76,28 @@ def get_data(path:str, hf_data_dir:Optional[str], hf_data_files:Optional[str], h
         else:
             logging.info(f'Using existing test_split "{test_split}", ignoring test_fraction={test_fraction}')
 
+    for split in dataset.keys():
+        logging.summary({f'{split}_split_rows': len(dataset[split])})
+
+    return dataset
+
+
+def get_data(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Optional[str], hf_data_files:Optional[str],
+             hf_revision:Optional[str], hf_sample_by:Optional[str],
+             train_split:Optional[str], val_split:Optional[str], test_split:Optional[str], hf_cache_dir:Optional[str],
+             train_fraction:Optional[float], val_fraction:Optional[float], test_fraction:Optional[float],
+             train_batch_size: int, eval_batch_size:int, data_loader_seed:int, text_column:str,
+             local_rank:int, context_length:int, tokenizer_factory:Callable[[], TokenizerBase])->Tuple[DataLoader,DataLoader, Optional[DataLoader]]:
+
+    dataset = get_datasets(hf_name_path=hf_name_path, hf_dataset_name=hf_dataset_name, hf_data_dir=hf_data_dir, hf_data_files=hf_data_files, hf_revision=hf_revision,
+                           train_split=train_split, val_split=val_split, test_split=test_split, hf_cache_dir=hf_cache_dir,
+                           hf_sample_by=hf_sample_by, val_fraction=val_fraction, test_fraction=test_fraction,
+                           data_loader_seed=data_loader_seed)
+
     # get datasets
     train_dataset = dataset[train_split]
     val_dataset = dataset[val_split] if val_split in dataset else None
     test_dataset = dataset[test_split] if test_split in dataset else None
-
-    class TokenizerPerThread:
-        def __init__(self, tokenizer_factory):
-            self._tok = None
-            self.eot_token = None
-            self.tokenizer_factory = tokenizer_factory
-
-        def batch_encode(self, batch_text:List[str])->Mapping:
-            if self._tok is None:
-                self._tok = tokenizer_factory()
-                self.eot_token_id = self._tok.eot_token_id()
-            return self._tok.batch_encode(batch_text)
-
-    # we now want to tokenize the dataset. first define the encoding function (gpt2 bpe)
-    def encode_text(tok, batch_text):
-        encoded = tok.batch_encode(batch_text)
-        return encoded
 
     # set on-the-fly tokenization
     # we need 3 different instances due to threading issues

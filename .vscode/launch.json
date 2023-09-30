@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Tokenize Dataset",
+            "name": "Tokenize TinyShakespear",
             "type": "python",
             "request": "launch",
             "module": "gptplay.tokenize_dataset",
@@ -14,6 +14,22 @@
         },
         {
             "name": "Train GPT2-Shakespear",
+            "type": "python",
+            "request": "launch",
+            "module": "gptplay.train",
+            "console": "integratedTerminal",
+            "args": ["configs/train_llm/tinyshakespeare.yaml"]
+        },
+        {
+            "name": "Tokenize OWT",
+            "type": "python",
+            "request": "launch",
+            "program": "gptplay/tokenize_dataset.py",
+            "console": "integratedTerminal",
+            "args": ["configs/tokenize/openwebtext.yaml"]
+        },
+        {
+            "name": "Train OWT",
             "type": "python",
             "request": "launch",
             "module": "gptplay.train",
