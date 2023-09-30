@@ -23,6 +23,7 @@ import importlib
 import multiprocessing
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
+import logging
 
 import yaml
 
@@ -239,10 +240,12 @@ def setup_torch(seed:int,
     print_precision:int=10,
     gradient_accumulation_steps_1gpu:int=1)->TorchInfo:
 
+    # below is currently disabled because of this bug: https://github.com/pytorch/pytorch/issues/110331
     # show Tensor shape first for tensor's rpresentation
-    normal_repr = torch.Tensor.__repr__
-    torch.Tensor.__repr__ = lambda self: f"{tuple(self.shape)}:{normal_repr(self)}" # type: ignore
+    # normal_repr = torch.Tensor.__repr__
+    # torch.Tensor.__repr__ = lambda self: f"{tuple(self.shape)}:{normal_repr(self)}" # type: ignore
     torch.set_printoptions(precision=print_precision)
+    #torch._dynamo.config.log_level = logging.WARN
 
     assert device_type != 'cuda' or (device_type == 'cuda' and torch.cuda.is_available()), 'cuda not available. Set device_type=cpu.'
     assert (device_type != 'cuda' or dtype != 'bfloat16') or (device_type == 'cuda' and dtype == 'bfloat16' and torch.cuda.is_bf16_supported()), 'bfloat16 not supported on your cuda device. Use float16 or float32.'
@@ -255,6 +258,7 @@ def setup_torch(seed:int,
         torch.backends.cudnn.enabled = True
         torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
         torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
+        torch.set_float32_matmul_precision('high')
 
     if enable_distributed:
         assert torch.distributed.is_available(), 'Distributed training not available. Set enable_distributed=False.'
