@@ -4,7 +4,7 @@ from datetime import datetime
 from gptplay.config import Config
 from gptplay.train import train
 
-from gptplay import logging
+from gptplay import glogging
 
 if __name__ == "__main__":
     config = Config(default_config_filepath='configs/grokking/prime223.yaml')
@@ -18,7 +18,7 @@ if __name__ == "__main__":
     config['training']['enable_train_log'] = False
 
     logging_config = config['logging']
-    logger = logging.Logger(master_process=True, **logging_config)
+    logger = glogging.Logger(master_process=True, **logging_config)
 
 
     for i in range (120):

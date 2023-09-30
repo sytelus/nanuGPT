@@ -11,6 +11,10 @@ import torch
 
 from gptplay.utils import full_path, is_debugging
 
+INFO=py_logging.INFO
+WARN=py_logging.WARN
+ERROR=py_logging.ERROR
+DEBUF=py_logging.DEBUG
 
 def _fmt(val:Any)->str:
     if isinstance(val, torch.Tensor):
