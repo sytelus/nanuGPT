@@ -7,7 +7,10 @@ with open("README.md", "r", encoding='utf_8') as fh:
     long_description = fh.read()
 
 install_requires=[
-    'einops', 'tiktoken', 'datasets'
+    'einops', 'tiktoken', 'datasets',
+    'wandb', 'mlflow',
+    'sentencepiece', 'tokenizers', 'transformers',
+    'tqdm'
 ]
 
 setuptools.setup(
