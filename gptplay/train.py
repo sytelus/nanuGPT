@@ -262,7 +262,7 @@ def train(config:Mapping, logger=None):
     utils.save_yaml(checkpoint_log, os.path.join(out_dir, "checkpoint_log.yaml"))
 
     if torch_info.is_distributed:
-        dist.distroy_process_group()
+        dist.destroy_process_group()
 
     if own_logger and torch_info.is_master:
         logger.all_done()
