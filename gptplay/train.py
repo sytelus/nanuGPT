@@ -259,13 +259,15 @@ def train(config:Mapping, logger=None):
 
         epoch += 1
 
-    utils.save_yaml(checkpoint_log, os.path.join(out_dir, "checkpoint_log.yaml"))
 
-    if torch_info.is_distributed:
-        dist.destroy_process_group()
+    if torch_info.is_master:
+        utils.save_yaml(checkpoint_log, os.path.join(out_dir, "checkpoint_log.yaml"))
 
-    if own_logger and torch_info.is_master:
-        logger.all_done()
+        if torch_info.is_distributed:
+            dist.destroy_process_group()
+
+        if own_logger:
+            logger.all_done()
 
 
 if __name__ == "__main__":
