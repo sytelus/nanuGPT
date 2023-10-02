@@ -77,30 +77,37 @@ def create_py_logger(filepath:Optional[str]=None,
 std_metrics = {}
 std_metrics['default'] = [
                             {"name": "train/step"},
-                            {"name": "train/loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
-                            {"name": "train/ppl", "step_metric":"train/step", "summary":"min", "goal":"min"},
-                            {"name": "train/epoch", "step_metric":"train/step", "summary":"max"},
-                            {"name": "train/epoch_step", "step_metric":"train/step"},
+                            {"name": "train/tokens", "step_metric":"train/step", "summary":"max"},
+
+                            {"name": "train/loss", "step_metric":"train/tokens", "summary":"min", "goal":"min"},
+                            {"name": "train/ppl", "step_metric":"train/tokens", "summary":"min", "goal":"min"},
                             {"name": "train/step_interval", "step_metric":"train/step", "summary":"mean"},
 
-                            {"name": "val/loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
-                            {"name": "val/ppl", "step_metric":"train/step", "summary":"min", "goal":"min"},
-                            {"name": "val/interval", "step_metric":"train/step", "summary":"mean"},
-                            {"name": "test/loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
-                            {"name": "test/ppl", "step_metric":"train/step", "summary":"min", "goal":"min"},
-                            # below are obtained after each step
+                            {"name": "train/epoch", "step_metric":"train/step", "summary":"max"},
+                            {"name": "train/tokens_per_sec", "step_metric":"train/step", "summary":"mean"},
+                            {"name": "train/epoch_step", "step_metric":"train/step"},
+
                             {"name": "train/step_loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
                             {"name": "train/step_ppl", "step_metric":"train/step", "summary":"min", "goal":"min"},
+
+                            {"name": "val/loss", "step_metric":"train/tokens", "summary":"min", "goal":"min"},
+                            {"name": "val/ppl", "step_metric":"train/tokens", "summary":"min", "goal":"min"},
+                            {"name": "val/interval", "step_metric":"train/tokens", "summary":"mean"},
+
+                            {"name": "test/loss", "step_metric":"train/tokens", "summary":"min", "goal":"min"},
+                            {"name": "test/ppl", "step_metric":"train/tokens", "summary":"min", "goal":"min"},
+
+                            {"name": "lr", "step_metric":"train/step", "summary":"max"},
+                            {"name": "ETA_hr", "step_metric":"train/step", "summary":"max", "goal":"min"},
+                            {"name": "w_norm", "step_metric":"train/tokens", "summary":"mean", "goal":"min"},
+                            {"name": "transformer_flops", "step_metric":"train/step", "summary":"mean", "goal":"max"},
+                            {"name": "tokens_per_sec", "step_metric":"train/step", "summary":"mean", "goal":"max"},
                     ]
 std_metrics['classification'] = std_metrics['default'] +[
-                        {"name": "train/acc", "step_metric":"train/step", "summary":"max", "goal":"max"},
-                        {"name": "train/step_acc", "step_metric":"train/step", "summary":"max", "goal":"max"},
-                        {"name": "test/acc", "step_metric":"train/step", "summary":"max", "goal":"max"},
-                        {"name": "val/acc", "step_metric":"train/step", "summary":"max", "goal":"max"},
-                        {"name": "lr", "step_metric":"train/step", "summary":"max", "goal":"max"},
-                        {"name": "ETA_hr", "step_metric":"train/step", "summary":"max", "goal":"max"},
-                        {"name": "w_norm", "step_metric":"train/step", "summary":"mean", "goal":"min"},
-                        {"name": "transformer_flops", "step_metric":"train/step", "summary":"mean", "goal":"min"},
+                        {"name": "train/acc", "step_metric":"train/tokens", "summary":"max", "goal":"max"},
+                        {"name": "train/step_acc", "step_metric":"train/tokens", "summary":"max", "goal":"max"},
+                        {"name": "test/acc", "step_metric":"train/tokens", "summary":"max", "goal":"max"},
+                        {"name": "val/acc", "step_metric":"train/tokens", "summary":"max", "goal":"max"},
                     ]
 
 def create_wandb_logger(project_name, run_name,

@@ -15,7 +15,7 @@ if __name__ == "__main__":
     t = torch.ones(1, device='cuda:{}'.format(dist.get_rank()))
     print("Rank {} has {}".format(dist.get_rank(), t))
 
-    dist.barrier()
+    #dist.barrier()
 
     dist.reduce(t, 0)
 

@@ -5,6 +5,7 @@ import math
 
 import torch
 from torch.nn.parallel import DistributedDataParallel
+from torch import distributed as dist
 
 from gptplay import utils
 from gptplay.config import Config
@@ -134,6 +135,9 @@ def train(config:Mapping, logger=None):
                     # Instead of model.no_sync(), we do Karpathy's hack
                     # On last step, flag model to require backward grad sync
                     model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
+
+                token_count += x.numel()
+
                 with amp_ctx:
                     logits = model(x)
                     loss, correct = get_loss(logits, y)
@@ -170,8 +174,24 @@ def train(config:Mapping, logger=None):
             optimizer.zero_grad(set_to_none=True)
 
             iters_since_eval += 1
+
+            if torch_info.is_distributed:
+                loss_sum_dist = torch.tensor(loss_sum, dtype=torch.float32, device=device)
+                correct_sum_dist = torch.tensor(correct_sum, dtype=torch.float32, device=device)
+                data_count_dist = torch.tensor(data_count, dtype=torch.float32, device=device)
+                token_count_dist = torch.tensor(token_count, dtype=torch.float32, device=device)
+                dist.reduce(loss_sum_dist, 0)
+                dist.reduce(correct_sum_dist, 0)
+                dist.reduce(data_count_dist, 0)
+                dist.reduce(token_count_dist, 0)
+                if torch_info.is_master:
+                    loss_sum, correct_sum, data_count, token_count = \
+                        loss_sum_dist.item(), correct_sum_dist.item(), data_count_dist.item(), token_count_dist.item()
+
+
             if enable_train_log and torch_info.is_master and (step % train_log_every == 0 or step+1 >= num_steps):
                 metrics.update({
+                    "train/tokens": token_count,
                     "train/step": step,
                     "train/acc": correct_sum / data_count,
                     "train/loss": loss_sum / data_count,
@@ -179,6 +199,7 @@ def train(config:Mapping, logger=None):
                     "train/epoch": epoch,
                     "train/epoch_step": epoch_step,
                     "train/step_interval": (datetime.now() - step_start_time).total_seconds(),
+                    "train/tokens_per_sec": token_count / (datetime.now() - loop_start_time).total_seconds(),
                     "lr": optimizer.param_groups[0]['lr'],
                 })
 
@@ -241,7 +262,7 @@ def train(config:Mapping, logger=None):
     utils.save_yaml(checkpoint_log, os.path.join(out_dir, "checkpoint_log.yaml"))
 
     if torch_info.is_distributed:
-        torch.distributed.distroy_process_group()
+        dist.distroy_process_group()
 
     if own_logger and torch_info.is_master:
         logger.all_done()
