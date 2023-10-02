@@ -1,4 +1,5 @@
 
+import sys
 from typing import Any, Dict, List, Mapping, Optional, Union
 from functools import partial
 import logging as py_logging
@@ -255,7 +256,19 @@ class Logger:
         # else do nothing
 
     def log_sys_info(self):
-        self.summary({  'torch.distributed.is_initialized': torch.distributed.is_initialized(),
+        self.summary({
+                        'device_name': torch.cuda.get_device_name() if torch.cuda.is_available() else '<not_cuda>',
+                        'torch_version': torch.__version__,
+                        'python_version': f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}',
+                        'env_rank': os.environ.get('RANK', None),
+                        'env_local_rank': os.environ.get('LOCAL_RANK', None),
+                        'env_world_size': os.environ.get('WORLD_SIZE', None),
+                        'env_master_addr': os.environ.get('MASTER_ADDR', None),
+                        'env_master_port': os.environ.get('MASTER_PORT', None),
+                        'env_OMP_NUM_THREADS': os.environ.get('OMP_NUM_THREADS', None),
+                        'env_CUDA_HOME': os.environ.get('CUDA_HOME', None),
+
+                        'torch.distributed.is_initialized': torch.distributed.is_initialized(),
                         'torch.distributed.is_available': torch.distributed.is_available(),
                         'gloo_available': torch.distributed.is_gloo_available(),
                         'mpi_available': torch.distributed.is_mpi_available(),

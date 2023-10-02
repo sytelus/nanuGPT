@@ -1,4 +1,5 @@
 from typing import Optional, Mapping, Tuple
+import os
 import sys
 import dataclasses
 from contextlib import AbstractContextManager, nullcontext
@@ -20,6 +21,9 @@ def setup_device(config:Mapping, logger:Optional[logging.Logger])->Tuple[torch.d
     distributed_init_method = config['general']['distributed_init_method']
     gradient_accumulation_steps = config['training']['gradient_accumulation_steps']
     logging_config = config['logging']
+
+    if enable_distributed is None and int(os.environ.get('WORLD_SIZE', '1')) > 1:
+        enable_distributed = True
 
     torch_info = utils.setup_torch(seed=seed,
                 device_type=device_type, dtype=dtype,

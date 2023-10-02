@@ -33,9 +33,9 @@ data:
     tokenized_val_path: '$DATA_ROOT/tokenized/tinyshakespeare/byte/val.bin'
 
 training:
-  train_batch_size: 64
+  train_batch_size: 8
   num_steps: 5000
-  gradient_accumulation_steps: 1 # will be automatically divided by GPU count
+  gradient_accumulation_steps: 8 # will be automatically divided by GPU count
 
 optimizer:
   module: 'gptplay.optimizers.adamw_nanogpt.get_optim'

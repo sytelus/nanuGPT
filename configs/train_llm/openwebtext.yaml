@@ -2,7 +2,6 @@ __include__: ['base_config.yaml']
 
 general:
   out_dir: '~/out_dir/gpt2_124m_owt'
-  enable_distributed: true
 
 logging:
   project_name: 'gpt2_124m_owt'
