@@ -54,6 +54,7 @@ def create_py_logger(filepath:Optional[str]=None,
     logger.propagate = False # otherwise root logger prints things again
 
     if filepath:
+        _ = full_path(os.path.dirname(filepath), create=True) # ensure dir exists
         filepath = full_path(filepath)
 
         if os.path.exists(filepath) and not allow_overwrite_log:
@@ -170,10 +171,13 @@ class Logger:
                                             run_name=run_name,
                                             run_description=run_description)
 
-        if enable_wandb and master_process and not is_debugging():
-            self._run = create_wandb_logger(project_name, run_name,
-                                            std_metrics[metrics_type],
-                                            run_description)
+        if enable_wandb and master_process:
+            if is_debugging():
+                self._py_logger.warn('Wandb logging is disabled in debug mode.')
+            else:
+                self._run = create_wandb_logger(project_name, run_name,
+                                                std_metrics[metrics_type],
+                                                run_description)
         # else leave things to None
 
     def log_config(self, config):

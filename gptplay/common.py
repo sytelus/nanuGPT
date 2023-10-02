@@ -70,6 +70,8 @@ def create_model_tokenizer(config:Mapping, logger:logging.Logger, device:torch.d
         pytorch_version = version.parse(torch.__version__)
         if python_version >= (3,11) and pytorch_version <= version.parse('2.1.0'):
             logger.warn(f"PyTorch {pytorch_version} does not support Python {python_version} for model compilation.")
+        elif utils.is_windows() and pytorch_version <= version.parse('2.2.0'):
+            logger.warn(f"PyTorch {pytorch_version} does not support Windows for model compilation.")
         else:
             logger.info("Compiling model...")
             try:
