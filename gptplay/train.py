@@ -1,11 +1,7 @@
+from typing import Mapping, Tuple, Optional, Dict, List, Callable, MutableMapping, Mapping
 import os
-from typing import Mapping, Tuple
-import sys
 from datetime import datetime
-from contextlib import nullcontext
-import dataclasses
 import math
-import yaml
 
 import torch
 from torch.nn.parallel import DistributedDataParallel
@@ -15,7 +11,9 @@ from gptplay.config import Config
 from gptplay import common
 
 @torch.no_grad()
-def estimate_loss(model, get_loss, data_loader, eval_iters, amp_ctx, is_cuda, device)->Tuple[float, float]:
+def estimate_loss(model:torch.nn.Module, get_loss:Callable,
+                  data_loader, eval_iters:Optional[int],
+                  amp_ctx, is_cuda:bool, device)->Tuple[float, float]:
     model.eval()
     loss_sum, correct_sum, data_count = 0., 0, 0
     for i, (x, y) in enumerate(data_loader):
@@ -31,40 +29,6 @@ def estimate_loss(model, get_loss, data_loader, eval_iters, amp_ctx, is_cuda, de
             data_count += len(y)
     model.train()
     return loss_sum / data_count, correct_sum / data_count
-
-def log_metrics(logger, step, model, get_loss, eval_iters, lr,
-                amp_ctx, is_cuda, device, train_loader, val_loader, test_loader):
-
-    train_loss, train_acc = estimate_loss(model, get_loss, train_loader, eval_iters,
-                                    amp_ctx, is_cuda, device)
-
-    val_loss, val_acc = estimate_loss(model, get_loss, val_loader, eval_iters,
-                                    amp_ctx, is_cuda, device)
-
-    w_norm = utils.weight_norm(model)
-
-    metrics = {
-        "train/step": step,
-        "train/loss": train_loss,
-        "train/ppl": math.exp(train_loss),
-        "train/acc": train_acc,
-        "val/loss": val_loss,
-        "val/ppl": math.exp(val_loss),
-        "val/acc": val_acc,
-        "w_norm": w_norm,
-        "lr": lr,
-    }
-
-    if test_loader:
-        test_loss, test_acc = estimate_loss(model, get_loss, test_loader, eval_iters,
-                                    amp_ctx, is_cuda, device)
-        metrics["test/loss"] = test_loss,
-        metrics["test/ppl"] = math.exp(test_loss),
-        metrics["test/acc"] = test_acc,
-
-    logger.info(metrics)
-
-    return val_loss
 
 
 def train(config:Mapping, logger=None):
@@ -105,7 +69,7 @@ def train(config:Mapping, logger=None):
                     })
 
     # create model and tokenizer
-    model, tokenizer = common.create_model_tokenizer(config, logger, device)
+    model, tokenizer, model_config, tokenizer_config = common.create_model_tokenizer(config, logger, device)
 
     # get dataset
     train_loader, val_loader, test_loader = get_data(local_rank=torch_info.local_rank,
@@ -134,17 +98,19 @@ def train(config:Mapping, logger=None):
     # initialize a GradScaler. If enabled=False scaler is a no-op
     scaler = torch.cuda.amp.GradScaler(enabled=(torch_info.pt_dtype == torch.float16))
 
-    step, eval_count = 0, 0
-    epoch, epoch_step = 0, 0 # epoch steps is useful to know how many epochs we did
-    best_val_loss, evel_count = float('inf'), 0
-    checkpoint_log = []
-
     if torch_info.is_master:
         out_dir = utils.full_path(out_dir, create=True)
         logger.summary({'out_dir': out_dir})
 
+    step, eval_count, iters_since_eval, token_count = 0, 0, 0, 0
+    epoch, epoch_step = 0, 0 # epoch steps is useful to know how many epochs we did
+    best_val_loss = float('inf')
+    checkpoint_log = []
+    loop_start_time, last_eval_time = datetime.now(), datetime.now()
+
     # run steps
     while step < num_steps:
+        step_start_time = datetime.now()
         epoch_step = 0 # step within the epoch
 
         batch_iter = iter(train_loader) # restart iterator
@@ -158,6 +124,8 @@ def train(config:Mapping, logger=None):
         while not batch_iter_done:
             model.train()
             loss_sum, correct_sum, data_count = 0., 0, 0
+            metrics = {} # add metrics here if any
+
             for micro_step in range(gradient_accumulation_steps):
                 x, y = x.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else x.to(device), \
                     y.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else y.to(device)
@@ -201,22 +169,49 @@ def train(config:Mapping, logger=None):
             # flush the gradients as soon as we can, no need for this memory anymore
             optimizer.zero_grad(set_to_none=True)
 
+            iters_since_eval += 1
             if enable_train_log and torch_info.is_master and (step % train_log_every == 0 or step+1 >= num_steps):
-                metrics = {
+                metrics.update({
                     "train/step": step,
-                    "train/step_acc": correct_sum / data_count,
-                    "train/step_loss": loss_sum / data_count,
-                    "train/step_ppl": math.exp(loss_sum / data_count),
-                }
-                logger.info(metrics)
+                    "train/acc": correct_sum / data_count,
+                    "train/loss": loss_sum / data_count,
+                    "train/ppl": math.exp(loss_sum / data_count),
+                    "train/epoch": epoch,
+                    "train/epoch_step": epoch_step,
+                    "train/step_interval": (datetime.now() - step_start_time).total_seconds(),
+                    "lr": optimizer.param_groups[0]['lr'],
+                })
 
             # is it time to evaluate? We evaluate after 1st step to get initial loss.
             if torch_info.is_master and (step % eval_every == 0 or step+1 >= num_steps):
                 eval_count += 1
-                val_loss = log_metrics(logger, step, model, get_loss, eval_iters,
-                    optimizer.param_groups[0]['lr'],
-                    amp_ctx, torch_info.is_cuda, device, train_loader, val_loader,
-                    test_loader if step+1 >= num_steps else None)
+                eval_interval = (datetime.now() - last_eval_time).total_seconds()
+
+                model_kwargs = model_config['module_kwargs']
+                transformer_tflops = utils.transformer_tflops(batch_size=train_batch_size,
+                    param_count=utils.module_params_count(model, non_embedding=True),
+                    context_length=context_length, dt=eval_interval, iterations=iters_since_eval,
+                    n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer'], n_head=model_kwargs['n_head'])
+
+                val_loss, val_acc = estimate_loss(model, get_loss, val_loader, eval_iters,
+                                                amp_ctx, torch_info.is_cuda, device)
+                metrics.update({
+                    "val/loss": val_loss,
+                    "val/ppl": math.exp(val_loss),
+                    "val/acc": val_acc,
+                    "w_norm": utils.weight_norm(model),
+                    "val/interval": eval_interval,
+                    "transformer_flops": transformer_tflops
+                })
+                if step+1 >= num_steps and test_loader:
+                    test_loss, test_acc = estimate_loss(model, get_loss, test_loader, None,
+                                                amp_ctx, torch_info.is_cuda, device)
+                    metrics.update({
+                        "test/loss": test_loss,
+                        "test/ppl": math.exp(test_loss),
+                        "test/acc": test_acc,
+                    })
+                last_eval_time, iters_since_eval = datetime.now(), 0
 
                 # if this is the best model so far, save it
                 if save_checkpoint and val_loss <= best_val_loss and \
@@ -232,6 +227,9 @@ def train(config:Mapping, logger=None):
                                           optimizer, scheduler, step, best_val_loss)
                     checkpoint_log.append({'step':step, 'best_val_loss':best_val_loss, 'checkpoint_filepath': checkpoint_filepath})
                     logger.info(checkpoint_log[-1])
+
+            if len(metrics) > 0:
+                logger.info(metrics)
 
             step += 1
             epoch_step += 1

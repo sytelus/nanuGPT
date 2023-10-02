@@ -364,14 +364,14 @@ def for_parallel(l:list, f:Callable[[Any], Any], num_cpus=multiprocessing.cpu_co
 
     return result
 
-def flops_utilization(batch_size, iterations, dt,
-                      param_count, n_layer, n_head, n_embd, block_size)->float:
+def transformer_tflops(batch_size, iterations, dt,
+                      param_count, n_layer, n_head, n_embd, context_length)->float:
     """ estimate model flops utilization in TFLOPS """
 
     # first estimate the number of flops we do per iteration.
     # see PaLM paper Appendix B as ref: https://arxiv.org/abs/2204.02311
     N = param_count
-    L, H, Q, T = n_layer, n_head, n_embd//n_head, block_size
+    L, H, Q, T = n_layer, n_head, n_embd//n_head, context_length
 
     flops_per_token = 6*N + 12*L*H*Q*T
 
@@ -396,19 +396,17 @@ def work_cpu_count()->int:
         return count
 
 def module_params(module:torch.nn.Module, non_embedding=True):
-    for m in module.modules():
-        if non_embedding and isinstance(m, nn.Embedding):
-            continue
-        for p in m.parameters():
+    filter_params = set()
+    if non_embedding:
+        for m in module.modules():
+            if isinstance(m, nn.Embedding):
+                for p in m.parameters():
+                    filter_params.add(p)
+    for p in module.parameters():
+        if p not in filter_params:
             yield p
 
 def module_params_count(module:torch.nn.Module, non_embedding=True)->int:
-    """
-    Return the number of parameters in the model.
-    For non-embedding count (default), the position embeddings get subtracted.
-    The token embeddings would too, except due to the parameter sharing these
-    params are actually used as weights in the final layer, so we include them.
-    """
     n_params = sum(p.numel() for p in module_params(module, non_embedding))
     return n_params
 

@@ -45,7 +45,7 @@ def setup_device(config:Mapping, logger:Optional[logging.Logger])->Tuple[torch.d
     return device, amp_ctx, logger, torch_info
 
 def create_model_tokenizer(config:Mapping, logger:logging.Logger, device:torch.device,
-                           state_dict=None)->Tuple[torch.nn.Module, TokenizerBase]:
+                           state_dict=None)->Tuple[torch.nn.Module, TokenizerBase, Mapping, Mapping]:
     model_config = config['model']
     tokenizer_config = config['tokenizer']
     torch_compile = config['general']['torch_compile']
@@ -81,4 +81,4 @@ def create_model_tokenizer(config:Mapping, logger:logging.Logger, device:torch.d
                 logger.error(f"Failed to compile model: {str(e)}")
             logger.info("Compiling done.")
 
-    return model, tokenizer
+    return model, tokenizer, model_config, tokenizer_config
