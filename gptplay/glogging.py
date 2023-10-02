@@ -212,7 +212,7 @@ class Logger:
             ex_msg = d
             if exception_instance is not None:
                 ex_msg = f'{exception_instance}'
-            wandb.alert(titie=d, text=ex_msg, level=wandb.AlertLevel.WARN)
+            wandb.alert(title=d, text=ex_msg, level=wandb.AlertLevel.WARN)
         # else do nothing
 
     def error(self, d:Union[str, Mapping[str,Any]], py_logger_only:bool=False,
@@ -228,7 +228,7 @@ class Logger:
             ex_msg = d
             if exception_instance is not None:
                 ex_msg = f'{exception_instance}'
-            wandb.alert(titie=d, text=ex_msg, level=wandb.AlertLevel.ERROR)
+            wandb.alert(title=d, text=ex_msg, level=wandb.AlertLevel.ERROR)
 
     def summary(self, d:Mapping[str,Any], py_logger_only:bool=False):
         if not self.enable_summaries:
