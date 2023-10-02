@@ -191,14 +191,14 @@ def train(config:Mapping, logger=None):
 
             if enable_train_log and torch_info.is_master and (step % train_log_every == 0 or step+1 >= num_steps):
                 metrics.update({
-                    "train/tokens": token_count,
                     "train/step": step,
-                    "train/acc": correct_sum / data_count,
                     "train/loss": loss_sum / data_count,
+                    "train/acc": correct_sum / data_count,
                     "train/ppl": math.exp(loss_sum / data_count),
                     "train/epoch": epoch,
                     "train/epoch_step": epoch_step,
                     "train/step_interval": (datetime.now() - step_start_time).total_seconds(),
+                    "train/tokens": token_count,
                     "train/tokens_per_sec": token_count / (datetime.now() - loop_start_time).total_seconds(),
                     "lr": optimizer.param_groups[0]['lr'],
                 })
