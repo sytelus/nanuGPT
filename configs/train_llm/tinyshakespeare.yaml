@@ -1,9 +1,13 @@
 __include__: ['base_config.yaml']
 
 general:
+  dtype: 'bfloat16'         # float32, float16, bfloat16
   out_dir: '~/out_dir/gpt2_tinyshakespeare'
 
 logging:
+  enable_wandb: true
+  run_name: baseline_bgloat16  # select random name
+  run_description: Reproduce val error of 1.4 per Karpathy
   project_name: gpt2_tinyshakespeare
 
 model:
@@ -26,7 +30,7 @@ tokenizer:
 data:
   module_kwargs:
     tokenized_train_path: '$DATA_ROOT/tokenized/tinyshakespeare/byte/train.bin'
-    tokenized_val_path: '$DATA_ROOT/tokenized/tinyshakespeare/byte/validation.bin'
+    tokenized_val_path: '$DATA_ROOT/tokenized/tinyshakespeare/byte/val.bin'
 
 training:
   train_batch_size: 64

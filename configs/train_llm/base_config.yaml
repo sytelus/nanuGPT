@@ -11,7 +11,6 @@ general:
 
 logging:
   enable_wandb: false
-  enable_summaries: true
   project_name: train_llm
   run_name: nil  # select random name
   run_description: nil
@@ -19,6 +18,7 @@ logging:
   log_filename: 'log.txt'
   allow_overwrite_log: true
   metrics_type: 'classification'
+  enable_summaries: true
 
 model:
   module: 'gptplay.models.nanogpt.get_model'
