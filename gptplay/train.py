@@ -222,7 +222,7 @@ def train(config:Mapping, logger=None):
                     "val/acc": val_acc,
                     "w_norm": utils.weight_norm(model),
                     "val/interval": eval_interval,
-                    "transformer_flops": transformer_tflops
+                    "transformer_tflops": transformer_tflops
                 })
                 if step+1 >= num_steps and test_loader:
                     test_loss, test_acc = estimate_loss(model, get_loss, test_loader, None,
