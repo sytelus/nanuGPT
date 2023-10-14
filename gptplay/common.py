@@ -48,6 +48,25 @@ def setup_device(config:Mapping, logger:Optional[logging.Logger])->Tuple[torch.d
 
     return device, amp_ctx, logger, torch_info
 
+def compile_torch_model(model:torch.nn.Module, logger:logging.Logger)->torch.nn.Module:
+    python_version = sys.version_info
+    pytorch_version = version.parse(torch.__version__)
+    if python_version >= (3,11) and pytorch_version <= version.parse('2.1.0'):
+        logger.warn(f"PyTorch {pytorch_version} does not support Python {python_version} for model compilation.")
+    elif utils.is_windows() and pytorch_version <= version.parse('2.2.0'):
+        logger.warn(f"PyTorch {pytorch_version} does not support Windows for model compilation.")
+    else:
+        logger.info("Compiling model...")
+        try:
+            #torch._dynamo.config.verbose=True # if compile error outs
+            model = torch.compile(model) # requires PyTorch 2.0
+        except Exception as e:
+            logger.error(f"Failed to compile model: {str(e)}")
+        logger.info("Compiling done.")
+
+    return model
+
+
 def create_model_tokenizer(config:Mapping, logger:logging.Logger, device:torch.device,
                            state_dict=None)->Tuple[torch.nn.Module, TokenizerBase, Mapping, Mapping]:
     model_config = config['model']
@@ -70,19 +89,6 @@ def create_model_tokenizer(config:Mapping, logger:logging.Logger, device:torch.d
         model.load_state_dict(state_dict)
 
     if torch_compile:
-        python_version = sys.version_info
-        pytorch_version = version.parse(torch.__version__)
-        if python_version >= (3,11) and pytorch_version <= version.parse('2.1.0'):
-            logger.warn(f"PyTorch {pytorch_version} does not support Python {python_version} for model compilation.")
-        elif utils.is_windows() and pytorch_version <= version.parse('2.2.0'):
-            logger.warn(f"PyTorch {pytorch_version} does not support Windows for model compilation.")
-        else:
-            logger.info("Compiling model...")
-            try:
-                #torch._dynamo.config.verbose=True # if compile error outs
-                model = torch.compile(model) # requires PyTorch 2.0
-            except Exception as e:
-                logger.error(f"Failed to compile model: {str(e)}")
-            logger.info("Compiling done.")
+        model = compile_torch_model(model, logger)
 
     return model, tokenizer, model_config, tokenizer_config
