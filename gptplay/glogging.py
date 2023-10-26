@@ -80,6 +80,7 @@ std_metrics['default'] = [
                             {"name": "train/step"},
                             {"name": "train/tokens", "step_metric":"train/step", "summary":"max"},
 
+                            {"name": "val/best_loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
                             {"name": "train/loss", "step_metric":"train/tokens", "summary":"min", "goal":"min"},
                             {"name": "train/ppl", "step_metric":"train/tokens", "summary":"min", "goal":"min"},
                             {"name": "train/step_interval", "step_metric":"train/step", "summary":"mean"},
@@ -298,7 +299,7 @@ class Logger:
 
     def all_done(self, exit_code:int=0, write_total_time:bool=True):
         if write_total_time:
-            self.info({'start_time': self.start_time, 'total_time': time.time() - self.start_time})
+            self.summary({'start_time': self.start_time, 'total_time': time.time() - self.start_time})
 
         self.finish()
         exit(exit_code)

@@ -92,3 +92,8 @@ def create_model_tokenizer(config:Mapping, logger:logging.Logger, device:torch.d
         model = compile_torch_model(model, logger)
 
     return model, tokenizer, model_config, tokenizer_config
+
+def check_env_vars():
+    utils.set_env_vars({'OUT_DIR': ('output', None),
+                        'DATA_ROOT': (None, 'This variable should be set to directory where you data resides')
+                       }, raise_exec=True)

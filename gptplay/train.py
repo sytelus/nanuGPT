@@ -161,6 +161,9 @@ def train(config:Mapping, logger=None):
                 # backward pass, with gradient scaling if training in fp16
                 scaler.scale(loss).backward()
 
+                if batch_iter_done:
+                    break # if we run out of data, break out of the micro steps loop
+
             # clip the gradient
             if grad_clip != 0.0:
                 scaler.unscale_(optimizer)
@@ -246,7 +249,7 @@ def train(config:Mapping, logger=None):
                     checkpoint_filepath = utils.save_checkpoint(out_dir, checkpoint_filename,
                                           model.module if torch_info.is_distributed else model,
                                           optimizer, scheduler, step, best_val_loss)
-                    checkpoint_log.append({'step':step, 'best_val_loss':best_val_loss, 'checkpoint_filepath': checkpoint_filepath})
+                    checkpoint_log.append({'train/step':step, 'val/best_loss':best_val_loss, 'checkpoint_filepath': checkpoint_filepath})
                     logger.info(checkpoint_log[-1])
 
             if len(metrics) > 0:

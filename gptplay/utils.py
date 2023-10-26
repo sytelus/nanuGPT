@@ -309,8 +309,8 @@ def save_checkpoint(out_dir:str, name:str, model, optimizer, scheduler,
     checkpoint = {'model': model.state_dict(),
                   'optimizer': optimizer.state_dict(),
                   'scheduler': scheduler.state_dict(),
-                  'step': step,
-                  'best_val_loss': best_val_loss}
+                  'train/step': step,
+                  'val/best_loss': best_val_loss}
 
     out_dir = full_path(out_dir, create=True)
     checkpoint_filepath = os.path.join(out_dir, f'{name}.pt')
@@ -618,3 +618,15 @@ def deep_update(d: MutableMapping, u: Mapping, map_type: Type[MutableMapping] = 
         else:
             d[k] = v
     return d
+
+def set_env_vars(env_vars:Dict[str, Tuple[Optional[str], Optional[str]]], raise_exec=False):
+    # check if env vars are already set, if not then set from the dict
+    # if value in dict is None, if raise_exec is True, then raise exception else ignore
+    for k, v in env_vars.items():
+        if k not in os.environ:
+            if v[0] is None:
+                if raise_exec:
+                    raise ValueError(f'Environment variable "{k}" not set: {v[1] or "This environment variable is required."}')
+                # else ignore
+            else:
+                os.environ[k] = v[0]

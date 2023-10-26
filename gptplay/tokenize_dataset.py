@@ -20,6 +20,7 @@ from gptplay import glogging as logging
 from gptplay import utils
 from gptplay.config import Config
 from gptplay.data.hf_dataset import get_datasets
+from gptplay import common
 
 
 def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Optional[str], hf_data_files:Optional[str],
@@ -27,6 +28,8 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
              val_fraction:Optional[float], test_fraction:Optional[float],
              text_column:str, tokenizer_factory:Callable[[], TokenizerBase],
              tokenized_out_dir:str, data_loader_seed:int, hf_sample_by:Optional[str], hf_revision:Optional[str])->None:
+
+    common.check_env_vars()
 
     dataset = get_datasets(hf_name_path=hf_name_path, hf_dataset_name=hf_dataset_name, hf_data_dir=hf_data_dir, hf_data_files=hf_data_files,
                            train_split=train_split, val_split=val_split, test_split=test_split, hf_cache_dir=hf_cache_dir,
