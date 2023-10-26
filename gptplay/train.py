@@ -24,10 +24,10 @@ def estimate_loss(model:torch.nn.Module, get_loss:Callable,
                y.pin_memory().to(device, non_blocking=True) if is_cuda else y.to(device)
         with amp_ctx:
             logits = model(x)
-            loss, correct = get_loss(logits, y)
+            loss, correct, n_samples = get_loss(logits, y)
             loss_sum += loss.item() * len(y)
             correct_sum += correct.item()
-            data_count += len(y)
+            data_count += n_samples
     model.train()
     return loss_sum / data_count, correct_sum / data_count
 
@@ -76,12 +76,12 @@ def train(config:Mapping, logger=None):
     train_loader, val_loader, test_loader = get_data(local_rank=torch_info.local_rank,
                                                      **data_config['module_kwargs'])
     logger.summary({'vocab_size': len(tokenizer),
-                    'train_len': len(train_loader.dataset),
-                    'val_len': len(val_loader.dataset),
-                    'test_len': len(test_loader.dataset) if test_loader is not None else 0,
-                    'train_batches': len(train_loader),
-                    'val_batches': len(val_loader),
-                    'test_batches': len(test_loader) if test_loader is not None else 0
+                    'train_dataset_len': len(train_loader.dataset),
+                    'val_dataset_len': len(val_loader.dataset),
+                    'test_dataset_len': len(test_loader.dataset) if test_loader is not None else 0,
+                    'train_dataloader_len': len(train_loader),
+                    'val_dataloader_len': len(val_loader),
+                    'test_dataloader_len': len(test_loader) if test_loader is not None else 0
                     })
 
     # optimizer
@@ -140,11 +140,11 @@ def train(config:Mapping, logger=None):
 
                 with amp_ctx:
                     logits = model(x)
-                    loss, correct = get_loss(logits, y)
+                    loss, correct, n_samples = get_loss(logits, y)
 
                     loss_sum += loss.item() * len(y)
                     correct_sum += correct.item()
-                    data_count += len(y)
+                    data_count += n_samples
 
                     # Scale the loss to account for gradient accumulation
                     # During gradient accumulation, gradients are summed at each micro step.
