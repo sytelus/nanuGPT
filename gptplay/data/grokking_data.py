@@ -72,12 +72,24 @@ def get_data(operation: str, prime: int, training_fraction: float, val_fraction:
     train_loader_gen = torch.Generator().manual_seed(train_loader_seed)
     val_loader_gen = torch.Generator().manual_seed(val_loader_seed)
 
-    train_loader = DataLoader(train_dataset, batch_size=min(train_batch_size, len(train_dataset)) , shuffle=True, generator=train_loader_gen)
-    val_loader = DataLoader(val_dataset, batch_size=min(eval_batch_size, len(val_dataset)) , shuffle=False, generator=val_loader_gen)
+    train_loader = DataLoader(train_dataset,
+                              batch_size=min(train_batch_size, len(train_dataset)) ,
+                              shuffle=True,
+                              num_workers=1, # don't use main process as worker
+                              generator=train_loader_gen)
+    val_loader = DataLoader(val_dataset,
+                            batch_size=min(eval_batch_size, len(val_dataset)) ,
+                            shuffle=False,
+                            num_workers=1, # don't use main process as worker
+                            generator=val_loader_gen)
 
     if len(test_dataset):
         test_loader_gen = torch.Generator().manual_seed(test_loader_seed)
-        test_loader = DataLoader(test_dataset, batch_size=min(eval_batch_size, len(test_dataset)) , shuffle=False, generator=test_loader_gen)
+        test_loader = DataLoader(test_dataset,
+                                 batch_size=min(eval_batch_size, len(test_dataset)) ,
+                                 shuffle=False,
+                                 num_workers=1, # don't use main process as worker
+                                 generator=test_loader_gen)
     else:
         test_loader = None
 

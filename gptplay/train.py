@@ -99,16 +99,17 @@ def train(config:Mapping, logger=None):
     scheduler = get_scheduler(optimizer, **scheduler_config['module_kwargs'])
 
     # initialize a GradScaler. If enabled=False scaler is a no-op
+    # we need loss scaling only for fp16 due to reduced precision, not bf16 or fp32
     scaler = torch.cuda.amp.GradScaler(enabled=(torch_info.pt_dtype == torch.float16))
 
     if torch_info.is_master:
         out_dir = utils.full_path(out_dir, create=True)
         logger.summary({'out_dir': out_dir})
 
-    step, eval_count, iters_since_eval, token_count = 0, 0, 0, 0
+    step, eval_count, iters_since_eval, sample_count, token_count = 0, 0, 0, 0, 0
     epoch, epoch_step = 0, 0 # epoch steps is useful to know how many epochs we did
     best_train_loss, best_val_loss = float('inf'), float('inf')
-    best_train_loss_step, best_val_loss_step = -1, -1
+    best_train_loss_step, best_val_loss_step, last_checkpoint_step = -1, -1, -1
     checkpoint_log = []
     loop_start_time, last_eval_time = datetime.now(), datetime.now()
 
@@ -129,6 +130,7 @@ def train(config:Mapping, logger=None):
             model.train()
             loss_sum, correct_sum, total_preds, total_samples = 0., 0, 0, 0
             metrics = {} # add metrics here if any
+            step_sample_count = 0
 
             for micro_step in range(gradient_accumulation_steps):
                 x, y = x.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else x.to(device), \
@@ -139,7 +141,12 @@ def train(config:Mapping, logger=None):
                     # On last step, flag model to require backward grad sync
                     model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
 
-                token_count += x.numel()
+                # note that we don't take context length into account here
+                # if we have N tokens in dataset, we move window N times and do
+                # N iterations per epoch. So, token count in traditional sense is
+                # number of samples, not number of tokens.
+                step_sample_count += step_sample_count+len(x)
+                token_count += token_count+x.numel()
 
                 with amp_ctx:
                     logits = model(x)
@@ -166,8 +173,12 @@ def train(config:Mapping, logger=None):
                 # backward pass, with gradient scaling if training in fp16
                 scaler.scale(loss).backward()
 
+                # if we run out of data, break out of the micro steps loop
+                # this means last batch is partial
                 if batch_iter_done:
-                    break # if we run out of data, break out of the micro steps loop
+                    break
+
+            # --- end of gradient accumulation loop ---
 
             # clip the gradient
             if grad_clip != 0.0:
@@ -184,28 +195,36 @@ def train(config:Mapping, logger=None):
             iters_since_eval += 1
 
             if torch_info.is_distributed:
+                # reduce tensors to rank 0 to get numbers from all ranks
                 loss_sum_dist = torch.tensor(loss_sum, dtype=torch.float32, device=device)
-                correct_sum_dist = torch.tensor(correct_sum, dtype=torch.float32, device=device)
-                data_count_dist = torch.tensor(total_samples, dtype=torch.float32, device=device)
-                token_count_dist = torch.tensor(token_count, dtype=torch.float32, device=device)
-                dist.reduce(loss_sum_dist, 0)
-                dist.reduce(correct_sum_dist, 0)
-                dist.reduce(data_count_dist, 0)
-                dist.reduce(token_count_dist, 0)
+                counts_dist = torch.tensor([correct_sum, total_samples, total_preds, step_sample_count], dtype=torch.int64, device=device)
+                dist.reduce(loss_sum_dist, dst=0, op=dist.ReduceOp.SUM)
+                dist.reduce(counts_dist, dst=0,op=dist.ReduceOp.SUM)
                 if torch_info.is_master:
-                    loss_sum, correct_sum, total_samples, token_count = \
-                        loss_sum_dist.item(), correct_sum_dist.item(), data_count_dist.item(), token_count_dist.item()
+                    loss_sum = loss_sum_dist.item()
+                    correct_sum, total_samples, total_preds, step_sample_count = tuple(counts_dist.tolist())
+
+            sample_count += step_sample_count
+            train_loss = loss_sum / total_samples
+            train_acc = correct_sum / total_preds
+            if train_loss < best_train_loss:
+                best_train_loss = train_loss
+                best_train_loss_step = step
 
             if enable_train_log and torch_info.is_master and (step % train_log_every == 0 or step+1 >= num_steps):
                 metrics.update({
                     "train/step": step,
-                    "train/loss": loss_sum / total_samples,
-                    "train/acc": correct_sum / total_preds,
-                    "train/ppl": math.exp(loss_sum / total_samples),
+                    "train/loss": train_loss,
+                    "train/acc": train_acc,
+                    "train/ppl": math.exp(train_loss),
+                    "train/best_loss": best_train_loss,
+                    "train/best_loss_step": best_train_loss_step,
                     "train/epoch": epoch,
                     "train/epoch_step": epoch_step,
                     "train/step_interval": (datetime.now() - step_start_time).total_seconds(),
-                    "train/tokens": token_count,
+                    "train/samples": sample_count,
+                    "train/step_samples": step_sample_count,
+                    "train/token_count": token_count,
                     "train/tokens_per_sec": token_count / (datetime.now() - loop_start_time).total_seconds(),
                     "lr": optimizer.param_groups[0]['lr'],
                 })
@@ -223,10 +242,16 @@ def train(config:Mapping, logger=None):
 
                 val_loss, val_acc = estimate_loss(model, get_loss, val_loader, eval_iters,
                                                 amp_ctx, torch_info.is_cuda, device)
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    best_val_loss_step = step
+
                 metrics.update({
                     "val/loss": val_loss,
-                    "val/ppl": math.exp(val_loss),
                     "val/acc": val_acc,
+                    "val/ppl": math.exp(val_loss),
+                    "val/best_loss": best_val_loss,
+                    "val/best_loss_step": best_val_loss_step,
                     "w_norm": utils.weight_norm(model),
                     "val/interval": eval_interval,
                     "transformer_tflops": transformer_tflops
@@ -242,19 +267,20 @@ def train(config:Mapping, logger=None):
                 last_eval_time, iters_since_eval = datetime.now(), 0
 
                 # if this is the best model so far, save it
-                if save_checkpoint and val_loss <= best_val_loss and \
+                if save_checkpoint and last_checkpoint_step < best_val_loss_step and \
                         ((step+1 >= num_steps) or \
                             (step > checkoint_after and (eval_count+1) % checkpoint_every_eval == 0)
                         ):
-                    best_val_loss = val_loss
                     checkpoint_filename = project_name + \
                         (f"_{run_name}" if run_name else "") + \
                         f"_{step}" if not checkpoint_keep_best else "_best"
                     checkpoint_filepath = utils.save_checkpoint(out_dir, checkpoint_filename,
                                           model.module if torch_info.is_distributed else model,
                                           optimizer, scheduler, step, best_val_loss)
-                    checkpoint_log.append({'train/step':step, 'val/best_loss':best_val_loss, 'checkpoint_filepath': checkpoint_filepath})
-                    logger.info(checkpoint_log[-1])
+
+                    metrics.update({"checkpoint_filepath": checkpoint_filepath})
+
+                    checkpoint_log.append(metrics)
 
             if len(metrics) > 0:
                 logger.info(metrics)

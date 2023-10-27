@@ -105,16 +105,28 @@ def get_data(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
         train_tokenizer = tokenizer_factory()
         train_dataset.set_transform(lambda x: train_tokenizer.batch_encode(x[text_column]))
         train_loader_gen = torch.Generator().manual_seed(data_loader_seed)
-        train_loader = DataLoader(train_dataset, batch_size=min(train_batch_size, len(train_dataset)), shuffle=True, generator=train_loader_gen)
+        train_loader = DataLoader(train_dataset,
+                                  batch_size=min(train_batch_size, len(train_dataset)),
+                                  shuffle=True,
+                                  num_workers=1, # don't use main process as worker
+                                  generator=train_loader_gen)
     if val_dataset is not None:
         val_tokenizer = tokenizer_factory()
         val_dataset.set_transform(lambda x: val_tokenizer.batch_encode(x[text_column]))
         val_loader_gen = torch.Generator().manual_seed(data_loader_seed)
-        val_loader = DataLoader(val_dataset, batch_size=min(eval_batch_size, len(val_dataset)) , shuffle=False, generator=val_loader_gen)
+        val_loader = DataLoader(val_dataset,
+                                batch_size=min(eval_batch_size, len(val_dataset)) ,
+                                shuffle=False,
+                                num_workers=1, # don't use main process as worker
+                                generator=val_loader_gen)
     if test_dataset is not None:
         test_tokenizer = tokenizer_factory()
         test_dataset.set_transform(lambda x: test_tokenizer.batch_encode(x[text_column]))
         test_loader_gen = torch.Generator().manual_seed(data_loader_seed)
-        test_loader = DataLoader(test_dataset, batch_size=min(eval_batch_size, len(test_dataset)) , shuffle=False, generator=test_loader_gen)
+        test_loader = DataLoader(test_dataset,
+                                 batch_size=min(eval_batch_size, len(test_dataset)) ,
+                                 shuffle=False,
+                                 num_workers=1, # don't use main process as worker
+                                 generator=test_loader_gen)
 
     return train_loader, val_loader, test_loader
