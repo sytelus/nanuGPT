@@ -1,0 +1,1 @@
+torchrun --standalone --nproc_per_node=$(python -c "import torch; print(torch.cuda.device_count())") gptplay/train.py configs/train_llm/tinyshakespeare.yaml

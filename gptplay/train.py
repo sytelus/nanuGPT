@@ -146,7 +146,7 @@ def train(config:Mapping, logger=None):
                 # N iterations per epoch. So, token count in traditional sense is
                 # number of samples, not number of tokens.
                 step_sample_count += step_sample_count+len(x)
-                token_count += token_count+x.numel()
+                token_count += x.numel()
 
                 with amp_ctx:
                     logits = model(x)
@@ -294,7 +294,9 @@ def train(config:Mapping, logger=None):
 
 
     if torch_info.is_master:
-        utils.save_yaml(checkpoint_log, os.path.join(out_dir, "checkpoint_log.yaml"))
+        checkpoint_log_filepath = os.path.join(out_dir, "checkpoint_log.yaml")
+        utils.save_yaml(checkpoint_log, checkpoint_log_filepath)
+        logger.log_artifact('checkpoint_log', 'file', file_or_dir=checkpoint_log_filepath)
 
         if torch_info.is_distributed:
             dist.destroy_process_group()

@@ -79,10 +79,11 @@ std_metrics = {}
 std_metrics['default'] = [
                             {"name": "train/step"},
                             {"name": "train/samples", "step_metric":"train/step", "summary":"max"},
-                            {"name": "train/step_samples", "step_metric":"train/step", "summary":"avg"},
+                            {"name": "train/step_samples", "step_metric":"train/step", "summary":"mean"},
 
                             {"name": "train/token_count", "step_metric":"train/step", "summary":"max", "goal":"max"},
                             {"name": "train/loss", "step_metric":"train/samples", "summary":"min", "goal":"min"},
+                            {"name": "train/loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
                             {"name": "train/best_loss", "step_metric":"train/samples", "summary":"min", "goal":"min"},
                             {"name": "train/ppl", "step_metric":"train/samples", "summary":"min", "goal":"min"},
                             {"name": "train/step_interval", "step_metric":"train/step", "summary":"mean"},
@@ -96,6 +97,7 @@ std_metrics['default'] = [
 
                             {"name": "val/best_loss", "step_metric":"train/samples", "summary":"min", "goal":"min"},
                             {"name": "val/loss", "step_metric":"train/samples", "summary":"min", "goal":"min"},
+                            {"name": "val/loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
                             {"name": "val/ppl", "step_metric":"train/samples", "summary":"min", "goal":"min"},
                             {"name": "val/interval", "step_metric":"train/samples", "summary":"mean"},
 
@@ -173,7 +175,7 @@ class Logger:
 
         self.start_time = time.time()
         self._py_logger = None
-        self._run = None
+        self._wandb_logger = None
         self.enable_wandb = enable_wandb
         self.master_process = master_process
         self.enable_summaries = enable_summaries
@@ -193,7 +195,7 @@ class Logger:
             if is_debugging():
                 self._py_logger.warn('Wandb logging is disabled in debug mode.')
             else:
-                self._run = create_wandb_logger(project_name, run_name,
+                self._wandb_logger = create_wandb_logger(project_name, run_name,
                                                 std_metrics[metrics_type],
                                                 run_description)
         # else leave things to None
@@ -203,8 +205,8 @@ class Logger:
             return
         if self._py_logger is not None:
             self._py_logger.info(_dict2msg({'project_config': config}))
-        if self.enable_wandb and self._run is not None:
-            self._run.config.update(config)
+        if self.enable_wandb and self._wandb_logger is not None:
+            self._wandb_logger.config.update(config)
 
     def info(self, d:Union[str, Mapping[str,Any]], py_logger_only:bool=False):
         if self._py_logger is not None:
@@ -212,7 +214,7 @@ class Logger:
                 msg = _dict2msg(d)
                 self._py_logger.info(msg)
 
-        if not py_logger_only and self.enable_wandb and self._run is not None:
+        if not py_logger_only and self.enable_wandb and self._wandb_logger is not None:
             if isinstance(d, str):
                 wandb.alert(title=d[:64], text=d, level=wandb.AlertLevel.INFO)
             else:
@@ -226,7 +228,7 @@ class Logger:
         if self._py_logger is not None:
             self._py_logger.warn(d, exc_info=exception_instance, stack_info=stack_info)
 
-        if not py_logger_only and self.enable_wandb and self._run is not None:
+        if not py_logger_only and self.enable_wandb and self._wandb_logger is not None:
             ex_msg = d
             if exception_instance is not None:
                 ex_msg = f'{d}\n{exception_instance}'
@@ -242,7 +244,7 @@ class Logger:
         if self._py_logger is not None:
             self._py_logger.error(d, exc_info=exception_instance, stack_info=stack_info)
 
-        if not py_logger_only and self.enable_wandb and self._run is not None:
+        if not py_logger_only and self.enable_wandb and self._wandb_logger is not None:
             ex_msg = d
             if exception_instance is not None:
                 ex_msg = f'{d}\n{exception_instance}'
@@ -254,10 +256,23 @@ class Logger:
         if self._py_logger is not None:
             self.info(d, py_logger_only=True)
 
-        if not py_logger_only and self.enable_wandb and self._run is not None:
+        if not py_logger_only and self.enable_wandb and self._wandb_logger is not None:
             for k, v in d.items():
-                self._run.summary[k] = v
+                self._wandb_logger.summary[k] = v
         # else do nothing
+
+    def log_artifact(self, name:str, type:str, file_or_dir:Optional[str], desc_markdown:Optional[str]=None, py_logger_only:bool=False):
+        if self._py_logger is not None:
+            self._py_logger.info(f'Artifact {type} {name}: path={file_or_dir}, desc={desc_markdown}')
+
+        if not py_logger_only and self.enable_wandb and self._wandb_logger is not None:
+            artifact = wandb.Artifact(name=name, type=type, description=desc_markdown)
+            if file_or_dir:
+                if os.path.isdir(file_or_dir):
+                    artifact.add_dir(file_or_dir)
+                else:
+                    artifact.add_file(file_or_dir)
+            self._wandb_logger.log_artifact(artifact)
 
     def log_sys_info(self):
         self.summary({
@@ -295,8 +310,8 @@ class Logger:
                         })
 
     def finish(self):
-        if self._run is not None:
-            self._run.finish()
+        if self._wandb_logger is not None:
+            self._wandb_logger.finish()
         if self._py_logger is not None:
             py_logging.shutdown()
 

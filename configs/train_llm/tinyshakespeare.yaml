@@ -34,13 +34,13 @@ data:
 
 training:
   train_batch_size: 64
-  num_steps: 5000
+  num_steps: 5000 # divide the number of steps by number of GPUs
   gradient_accumulation_steps: 4 # will be automatically divided by GPU count
 
 optimizer:
   module: 'gptplay.optimizers.adamw_nanogpt.get_optim'
   module_kwargs:
-    learning_rate: 1.0E-3
+    learning_rate: 1.0E-3 # multiply LR by number of GPUs
     weight_decay: 0.1
     beta1: 0.9
     beta2: 0.99
