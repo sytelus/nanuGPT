@@ -36,6 +36,7 @@ def estimate_loss(model:torch.nn.Module, get_loss:Callable,
 
 def train(config:Mapping, logger=None):
     gradient_accumulation_steps = config['training']['gradient_accumulation_steps']
+    adj_grad_acc_gpu_count = config['training']['adj_grad_acc_gpu_count']
     project_name = config['logging']['project_name']
     run_name = config['logging']['run_name']
     train_batch_size = config['training']['train_batch_size']
@@ -65,6 +66,11 @@ def train(config:Mapping, logger=None):
     # setup system, device, logger, torch
     own_logger = logger is None
     device, amp_ctx, logger, torch_info = common.setup_device(config, logger)
+
+    # adjust gradient accumulation steps if we are doing distributed training
+    if torch_info.is_distributed and adj_grad_acc_gpu_count:
+        assert gradient_accumulation_steps % torch_info.world_size == 0, f'gradient_accumulation_steps ({gradient_accumulation_steps}) must be divisible by ddp_world_size ({torch_info.world_size})'
+        gradient_accumulation_steps = gradient_accumulation_steps // torch_info.world_size
 
     logger.summary({"global_batch_size": gradient_accumulation_steps * train_batch_size * torch_info.world_size,
                     "local_batch_size": gradient_accumulation_steps * torch_info.world_size,

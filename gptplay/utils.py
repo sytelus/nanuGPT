@@ -228,7 +228,6 @@ class TorchInfo:
     world_size: int
     is_master: bool
     seed_offset: int
-    gradient_accumulation_steps: int
     pt_dtype: torch.dtype
 
 def setup_torch(seed:int,
@@ -237,8 +236,7 @@ def setup_torch(seed:int,
     enable_distributed:bool,
     distributed_backend:str, # ex 'nccl
     distributed_init_method:str, # ex 'env://'
-    print_precision:int=10,
-    gradient_accumulation_steps_1gpu:int=1)->TorchInfo:
+    print_precision:int=10)->TorchInfo:
 
     # below is currently disabled because of this bug: https://github.com/pytorch/pytorch/issues/110331
     # show Tensor shape first for tensor's rpresentation
@@ -275,9 +273,6 @@ def setup_torch(seed:int,
         is_master = rank == 0
         seed_offset = rank
 
-        assert gradient_accumulation_steps_1gpu % world_size == 0, f'gradient_accumulation_steps ({gradient_accumulation_steps_1gpu}) must be divisible by ddp_world_size ({ddp_world_size})'
-        gradient_accumulation_steps = gradient_accumulation_steps_1gpu // world_size
-
         if is_cuda:
             torch.cuda.set_device(local_rank)
             device_name = f'cuda:{local_rank}'
@@ -288,8 +283,6 @@ def setup_torch(seed:int,
         world_size = 1
         is_master = True
         seed_offset = 0
-        gradient_accumulation_steps = gradient_accumulation_steps_1gpu
-
 
     if is_cuda:
         torch.cuda.manual_seed(seed+seed_offset)
@@ -301,7 +294,6 @@ def setup_torch(seed:int,
                      device_type=device_type, dtype=dtype, device_name=device_name,
                      rank=rank, local_rank=local_rank, world_size=world_size,
                      is_master=is_master, seed_offset=seed_offset,
-                     gradient_accumulation_steps=gradient_accumulation_steps,
                      pt_dtype=pt_dtype)
 
 def save_checkpoint(out_dir:str, name:str, model, optimizer, scheduler,

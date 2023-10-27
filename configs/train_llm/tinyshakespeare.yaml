@@ -35,7 +35,8 @@ data:
 training:
   train_batch_size: 64
   num_steps: 5000 # divide the number of steps by number of GPUs
-  gradient_accumulation_steps: 1 # # multiply this by number of GPUs
+  gradient_accumulation_steps: 1
+  adj_grad_acc_gpu_count: false # adjust gradient accumulation steps for number of GPUs
 
 optimizer:
   module: 'gptplay.optimizers.adamw_nanogpt.get_optim'

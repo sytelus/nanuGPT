@@ -19,7 +19,6 @@ def setup_device(config:Mapping, logger:Optional[logging.Logger])->Tuple[torch.d
     enable_distributed = config['general']['enable_distributed']
     distributed_backend = config['general']['distributed_backend']
     distributed_init_method = config['general']['distributed_init_method']
-    gradient_accumulation_steps = config['training']['gradient_accumulation_steps']
     logging_config = config['logging']
 
     if enable_distributed is None and int(os.environ.get('WORLD_SIZE', '1')) > 1:
@@ -29,8 +28,7 @@ def setup_device(config:Mapping, logger:Optional[logging.Logger])->Tuple[torch.d
                 device_type=device_type, dtype=dtype,
                 enable_distributed=enable_distributed,
                 distributed_backend=distributed_backend,
-                distributed_init_method=distributed_init_method,
-                gradient_accumulation_steps_1gpu=gradient_accumulation_steps)
+                distributed_init_method=distributed_init_method)
 
     utils.setup_sys(seed + torch_info.seed_offset)
 
