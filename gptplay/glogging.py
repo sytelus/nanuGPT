@@ -80,8 +80,8 @@ std_metrics['default'] = [
                             {"name": "train/step"},
                             {"name": "train/tokens", "step_metric":"train/step", "summary":"max"},
 
-                            {"name": "val/best_loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
                             {"name": "train/loss", "step_metric":"train/tokens", "summary":"min", "goal":"min"},
+                            {"name": "train/best_loss", "step_metric":"train/tokens", "summary":"min", "goal":"min"},
                             {"name": "train/ppl", "step_metric":"train/tokens", "summary":"min", "goal":"min"},
                             {"name": "train/step_interval", "step_metric":"train/step", "summary":"mean"},
 
@@ -92,6 +92,7 @@ std_metrics['default'] = [
                             {"name": "train/step_loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
                             {"name": "train/step_ppl", "step_metric":"train/step", "summary":"min", "goal":"min"},
 
+                            {"name": "val/best_loss", "step_metric":"train/tokens", "summary":"min", "goal":"min"},
                             {"name": "val/loss", "step_metric":"train/tokens", "summary":"min", "goal":"min"},
                             {"name": "val/ppl", "step_metric":"train/tokens", "summary":"min", "goal":"min"},
                             {"name": "val/interval", "step_metric":"train/tokens", "summary":"mean"},
