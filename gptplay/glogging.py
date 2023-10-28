@@ -5,7 +5,7 @@ from functools import partial
 import logging as py_logging
 import psutil
 import os
-import time
+import timeit
 
 import wandb
 import torch
@@ -77,8 +77,9 @@ def create_py_logger(filepath:Optional[str]=None,
 
 std_metrics = {}
 std_metrics['default'] = [
-                            {"name": "train/step"},
-                            {"name": "train/samples", "step_metric":"train/step", "summary":"max"},
+                            {"name": "elapsed_s", "summary":"max"},
+                            {"name": "train/step", "step_metric":"elapsed_s", "summary":"max"},
+                            {"name": "train/samples", "step_metric":"elapsed_s", "summary":"max"},
                             {"name": "train/step_samples", "step_metric":"train/step", "summary":"mean"},
 
                             {"name": "train/token_count", "step_metric":"train/step", "summary":"max", "goal":"max"},
@@ -173,7 +174,7 @@ class Logger:
             all_done = partial(Logger.all_done, _logger)
             flush = partial(Logger.flush, _logger)
 
-        self.start_time = time.time()
+        self.start_time = timeit.defeult_timer()
         self._py_logger = None
         self._wandb_logger = None
         self.enable_wandb = enable_wandb
@@ -317,7 +318,7 @@ class Logger:
 
     def all_done(self, exit_code:int=0, write_total_time:bool=True):
         if write_total_time:
-            self.summary({'start_time': self.start_time, 'total_time': time.time() - self.start_time})
+            self.summary({'start_time': self.start_time, 'total_time': timeit.defeult_timer() - self.start_time})
 
         self.finish()
         exit(exit_code)
