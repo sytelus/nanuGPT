@@ -16,7 +16,7 @@ def estimate_loss(model:torch.nn.Module, get_loss:Callable,
                   data_loader, eval_iters:Optional[int],
                   amp_ctx, is_cuda:bool, device)->Tuple[float, float]:
     model.eval()
-    loss_sum, correct_sum, total_preds, total_samples = 0., 0, 0, 0
+    loss_sum, correct_sum, preds_count, sample_count = 0., 0, 0, 0
     for i, (x, y) in enumerate(data_loader):
         if eval_iters is not None and i >= eval_iters: # eval_iters is None means eval the whole dataset
             break
@@ -28,10 +28,10 @@ def estimate_loss(model:torch.nn.Module, get_loss:Callable,
             n_samples = len(y)
             loss_sum += loss.item() * n_samples # loss is average so we need to multiply by n_samples to get total loss over batch
             correct_sum += correct.item()
-            total_preds += n_preds
-            total_samples += n_samples
+            preds_count += n_preds
+            sample_count += n_samples
     model.train()
-    return loss_sum / total_samples, correct_sum / total_preds
+    return loss_sum / sample_count, correct_sum / preds_count
 
 
 def train(config:Mapping, logger=None):
@@ -112,7 +112,7 @@ def train(config:Mapping, logger=None):
         out_dir = utils.full_path(out_dir, create=True)
         logger.summary({'out_dir': out_dir})
 
-    step, eval_count, iters_since_eval, sample_count, token_count = 0, 0, 0, 0, 0
+    step, eval_count, iters_since_eval, total_samples, token_count = 0, 0, 0, 0, 0
     epoch, epoch_step = 0, 0 # epoch steps is useful to know how many epochs we did
     best_train_loss, best_val_loss = float('inf'), float('inf')
     best_train_loss_step, best_val_loss_step, last_checkpoint_step = -1, -1, -1
@@ -134,7 +134,7 @@ def train(config:Mapping, logger=None):
         # Loop over the training set
         while not batch_iter_done:
             model.train()
-            loss_sum, correct_sum, total_preds, total_samples = 0., 0, 0, 0
+            loss_sum, correct_sum, step_preds_count = 0., 0, 0
             metrics = {} # add metrics here if any
             step_sample_count = 0
 
@@ -151,18 +151,17 @@ def train(config:Mapping, logger=None):
                 # if we have N tokens in dataset, we move window N times and do
                 # N iterations per epoch. So, token count in traditional sense is
                 # number of samples, not number of tokens.
-                step_sample_count += step_sample_count+len(x)
+                n_samples = len(x)
+                step_sample_count += n_samples
                 token_count += x.numel()
 
                 with amp_ctx:
                     logits = model(x)
                     loss, correct, n_preds = get_loss(logits, y)
 
-                    n_samples = len(y)
                     loss_sum += loss.item() * n_samples
-                    total_samples += n_samples
                     correct_sum += correct.item()
-                    total_preds += n_preds
+                    step_preds_count += n_preds
 
                     # Scale the loss to account for gradient accumulation
                     # During gradient accumulation, gradients are summed at each micro step.
@@ -203,16 +202,16 @@ def train(config:Mapping, logger=None):
             if torch_info.is_distributed:
                 # reduce tensors to rank 0 to get numbers from all ranks
                 loss_sum_dist = torch.tensor(loss_sum, dtype=torch.float32, device=device)
-                counts_dist = torch.tensor([correct_sum, total_samples, total_preds, step_sample_count], dtype=torch.int64, device=device)
+                counts_dist = torch.tensor([correct_sum, step_preds_count, step_sample_count], dtype=torch.int64, device=device)
                 dist.reduce(loss_sum_dist, dst=0, op=dist.ReduceOp.SUM)
                 dist.reduce(counts_dist, dst=0,op=dist.ReduceOp.SUM)
                 if torch_info.is_master:
                     loss_sum = loss_sum_dist.item()
-                    correct_sum, total_samples, total_preds, step_sample_count = tuple(counts_dist.tolist())
+                    correct_sum, step_preds_count, step_sample_count = tuple(counts_dist.tolist())
 
-            sample_count += step_sample_count
-            train_loss = loss_sum / total_samples
-            train_acc = correct_sum / total_preds
+            total_samples += step_sample_count
+            train_loss = loss_sum / step_sample_count
+            train_acc = correct_sum / step_preds_count
             if train_loss < best_train_loss:
                 best_train_loss = train_loss
                 best_train_loss_step = step
@@ -228,7 +227,7 @@ def train(config:Mapping, logger=None):
                     "train/epoch": epoch,
                     "train/epoch_step": epoch_step,
                     "train/step_interval": (datetime.now() - step_start_time).total_seconds(),
-                    "train/samples": sample_count,
+                    "train/samples": total_samples,
                     "train/step_samples": step_sample_count,
                     "train/token_count": token_count,
                     "train/tokens_per_sec": token_count / (datetime.now() - loop_start_time).total_seconds(),
