@@ -49,7 +49,7 @@ def setup_device(config:Mapping, logger:Optional[logging.Logger])->Tuple[torch.d
 def compile_torch_model(model:torch.nn.Module, logger:logging.Logger)->torch.nn.Module:
     python_version = sys.version_info
     pytorch_version = version.parse(torch.__version__)
-    if python_version >= (3,11) and pytorch_version <= version.parse('2.1.0'):
+    if python_version >= (3,11) and pytorch_version < version.parse('2.1.0'):
         logger.warn(f"PyTorch {pytorch_version} does not support Python {python_version} for model compilation.")
     elif utils.is_windows() and pytorch_version <= version.parse('2.2.0'):
         logger.warn(f"PyTorch {pytorch_version} does not support Windows for model compilation.")
