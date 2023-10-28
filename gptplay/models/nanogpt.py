@@ -10,6 +10,7 @@ https://github.com/huggingface/transformers/blob/main/src/transformers/models/gp
 import math
 import inspect
 from dataclasses import dataclass
+import logging
 
 import torch
 import torch.nn as nn
@@ -18,19 +19,26 @@ from torch.nn import functional as F
 class LayerNorm(nn.Module):
     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
 
-    def __init__(self, ndim, bias):
+    def __init__(self, ndim, bias, eps=1e-05):
+        # batch normalization computes avg across batch of data for normalizing but
+        # this doesn't work if batch is too small. LayerNorm normalizes across the
+        # feature dimension instead (n_embd) and is independent of batch size.
         super().__init__()
         self.weight = nn.Parameter(torch.ones(ndim))
         self.bias = nn.Parameter(torch.zeros(ndim)) if bias else None
+        self.eps = eps
 
     def forward(self, input):
-        return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
+        return F.layer_norm(input, self.weight.shape, self.weight, self.bias, self.eps)
 
 class CausalSelfAttention(nn.Module):
 
     def __init__(self, config):
         super().__init__()
+
+        # ensure each head gets same bits of the embedding dim
         assert config.n_embd % config.n_head == 0
+
         # key, query, value projections for all heads, but in a batch
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.attn_kv_bias)
         # output projection
@@ -44,32 +52,56 @@ class CausalSelfAttention(nn.Module):
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
         if not self.flash:
-            print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
+            logging.warning("Using slow attention. Flash Attention requires PyTorch >= 2.0")
             # causal mask to ensure that attention is only applied to the left in the input sequence
             self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
                                         .view(1, 1, config.block_size, config.block_size))
 
     def forward(self, x):
-        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+        batch_size, seq_len, n_embd = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
+        # self.c_attn(x): (batch_size, seq_len, n_embd) -> (batch_size, seq_len, 3 * n_embd)
+        # .split(self.n_embd, dim=2): (batch_size, seq_len, 3 * n_embd) -> (batch_size, seq_len, n_embd), (batch_size, seq_len, n_embd), (batch_size, seq_len, n_embd)
         q, k, v  = self.c_attn(x).split(self.n_embd, dim=2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        k = k.view(batch_size, seq_len, self.n_head, n_embd // self.n_head).transpose(1, 2) # (batch_size, n_heads, seq_len, head_size)
+        q = q.view(batch_size, seq_len, self.n_head, n_embd // self.n_head).transpose(1, 2) # (batch_size, n_heads, seq_len, head_size)
+        v = v.view(batch_size, seq_len, self.n_head, n_embd // self.n_head).transpose(1, 2) # (batch_size, n_heads, seq_len, head_size)
 
-        # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
+        # causal self-attention; Self-attend: (batch_size, n_heads, seq_len, head_size) x (batch_size, n_heads, head_size, seq_len) -> (batch_size, n_heads, seq_len, seq_len)
         if self.flash:
             # efficient attention using Flash Attention CUDA kernels
             y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.flash_attn_dropout_val if self.training else 0, is_causal=True)
         else:
             # manual implementation of attention
-            att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-            att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
-            att = F.softmax(att, dim=-1)
+
+            # q, k, v: (batch_size, n_heads, seq_len, head_size)
+            # q @ k.transpose(-2, -1): (batch_size, n_heads, seq_len, head_size) x (batch_size, n_heads, head_size, seq_len) -> (batch_size, n_heads, seq_len, seq_len)
+            # product of q and k produces matrix where each element (i, j) contains the dot product of sequence i with sequence j.
+            # This dot product is across all embeddings of those two sequences.
+            # @ is matrix multiplication
+            att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))  # (batch_size, n_heads, seq_len, seq_len)
+            att = att.masked_fill(self.bias[:,:,:seq_len,:seq_len] == 0, float('-inf'))
+
+            # softmax on last axis (seq_len) so that values in each row sum to 1
+            # The way this works is, we sum up exponents of values in each row and divide each value by that sum.
+            # So, the output of softmax has same shape as input, and each row sums to 1 because we set dim=-1 which means
+            # each value exponent in column gets divided by sum of exponents of all values in that column.
+            # At this point each row in attn contains float in each column indicating importance of that column for that row.
+            att = F.softmax(att, dim=-1) # (batch_size, n_heads, seq_len, seq_len)
+            # attn dropout will most likely turn off noisy values and therefore strenghten the signal
             att = self.attn_dropout(att)
-            y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
-        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
+
+            # now that each row sums upto 1, we can multiply row with column to get weighted sum of values in each column
+            # The way tensor multiplication works is that you just pretend there are only last two dimentions and
+            # produce same shape as normal multiplication to replace last two dimentions. Other way to think is that
+            # each batch and each head has a matrix which gets multiplied independently.
+            # Each column in v is sequence embedding for one head. We do weighted sum of that sequence for that head as per
+            # the attention.
+            y = att @ v # (batch_size, n_heads, seq_len, seq_len) x (batch_size, n_heads, seq_len, head_size) -> (batch_size, n_heads, seq_len, head_size)
+
+        # put back the head dimension together at the last and join them to produce n_embd
+        y = y.transpose(1, 2).contiguous().view(batch_size, seq_len, n_embd) # re-assemble all head outputs side by side
 
         # output projection
         y = self.resid_dropout(self.c_proj(y))
@@ -95,6 +127,12 @@ class Block(nn.Module):
 
     def __init__(self, config):
         super().__init__()
+        # Original transformer had two layer norms, one after self-attention and one after MLP.
+        # It also had two residual connections, one after self-attention and one after MLP.
+        # GPT2 has two layer norms per block, one at the start and other before MLP.
+        # So the layer norms in GPT are moved to start of sub-blocks instead of end.
+        # GPT2 also has two residual connections, one after self-attention and other after MLP.
+        # Residual connections applied before layer norms are applied so input travels intact.
         self.ln_1 = LayerNorm(config.n_embd, bias=config.layer_norm_bias)
         self.attn = CausalSelfAttention(config)
         self.ln_2 = LayerNorm(config.n_embd, bias=config.layer_norm_bias)
@@ -136,7 +174,7 @@ class GPT(nn.Module):
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             ln_f = LayerNorm(config.n_embd, bias=config.layer_norm_bias),
         ))
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=config.mlp_bias)
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
         # This behavior is deprecated and will be an error in future versions"
@@ -145,6 +183,7 @@ class GPT(nn.Module):
 
         # init all weights
         self.apply(self._init_weights)
+
         # apply special scaled init to the residual projections, per GPT-2 paper
         for pn, p in self.named_parameters():
             if pn.endswith('c_proj.weight'):
@@ -152,32 +191,41 @@ class GPT(nn.Module):
 
 
     def _init_weights(self, module):
+        # overall it seems that Karpathy's init choses smaller weights than PyTorch default
+
+        # default init for linear layer in Pytorch is kaiming_uniform_ which is 1/sqrt(fan_in)
+        # for fan_in=768, default stddev would be 0.036.
+        # TODO: not sure if below is good idea and is independent of the size of the model
         if isinstance(module, nn.Linear):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
+        # default init for embedding layer in Pytorch is init.normal_ which is N(0, 1)
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
     def forward(self, idx, only_last=False):
         device = idx.device
-        b, t = idx.size()
-        assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
-        pos = torch.arange(0, t, dtype=torch.long, device=device) # shape (t)
+        batch_size, seq_len = idx.size()
+        assert seq_len <= self.config.block_size, f"Cannot forward sequence of length {seq_len} but context_len is only {self.config.block_size}"
+
+        # create pos vector of same size as input seq
+        pos = torch.arange(0, seq_len, dtype=torch.long, device=device) # shape (seq_len)
 
         # forward the GPT model itself
-        tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
-        pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
+        tok_emb = self.transformer.wte(idx) # token embeddings of shape (batch_size, seq_len, n_embd)
+        pos_emb = self.transformer.wpe(pos) # position embeddings of shape (seq_len, n_embd)
         x = self.transformer.embed_dropout(tok_emb + pos_emb)
         for block in self.transformer.h:
             x = block(x)
-        x = self.transformer.ln_f(x)
+        x = self.transformer.ln_f(x) # [batch, seq_len, emb_dim]
 
         if not only_last:
-            logits = self.lm_head(x)
+            logits = self.lm_head(x) # [batch, seq_len, vocab_size]
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
-            logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
+             # note: using list [-1] to preserve the time dim
+            logits = self.lm_head(x[:, [-1], :]) # [batch, 1, vocab_size]
 
         return logits
 

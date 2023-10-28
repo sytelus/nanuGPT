@@ -240,8 +240,9 @@ def setup_torch(seed:int,
 
     # below is currently disabled because of this bug: https://github.com/pytorch/pytorch/issues/110331
     # show Tensor shape first for tensor's rpresentation
-    # normal_repr = torch.Tensor.__repr__
-    # torch.Tensor.__repr__ = lambda self: f"{tuple(self.shape)}:{normal_repr(self)}" # type: ignore
+    if is_debugging():
+        normal_repr = torch.Tensor.__repr__
+        torch.Tensor.__repr__ = lambda self, *args, **kwargs: f"{tuple(self.shape)}:{normal_repr(self, *args, **kwargs)}" # type: ignore
     torch.set_printoptions(precision=print_precision)
     #torch._dynamo.config.log_level = logging.WARN
 
