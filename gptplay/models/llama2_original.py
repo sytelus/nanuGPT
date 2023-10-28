@@ -60,6 +60,10 @@ class RMSNorm(torch.nn.Module):
             torch.Tensor: The normalized tensor.
 
         """
+        # .mean(-1) means mean over columns, so there is one mean for each row.
+        # .mean(-1, keepdim=True) means output has same number of dimentions but last one has value of 1.
+        # So, .mean(-1, keepdim=True) is a column vector with one mean for each row.
+        # rsqrt is reciprocal square root.
         return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
 
     def forward(self, x):
@@ -73,6 +77,7 @@ class RMSNorm(torch.nn.Module):
             torch.Tensor: The output tensor after applying RMSNorm.
 
         """
+        # convert to float32 for numerical stability (squaring large values can cause overflow in float16)
         output = self._norm(x.float()).type_as(x)
         return output * self.weight
 
