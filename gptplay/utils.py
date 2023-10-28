@@ -9,6 +9,7 @@ from typing import Callable, Mapping, MutableMapping, Optional, Tuple, Dict, Lis
 from itertools import groupby, chain
 from collections import OrderedDict, defaultdict
 import os
+import requests
 import sys
 import numpy as np
 from collections import defaultdict
@@ -623,3 +624,54 @@ def set_env_vars(env_vars:Dict[str, Tuple[Optional[str], Optional[str]]], raise_
                 # else ignore
             else:
                 os.environ[k] = v[0]
+
+def is_directory_empty(path):
+    path = full_path(path)
+    if not os.path.isdir(path):
+        return True
+    return not bool(os.listdir(path))
+
+def download_file(url, filename):
+    """
+    Download a file from a given URL and save it as the specified filename.
+
+    Parameters:
+    - url (str): The URL of the file to be downloaded.
+    - filename (str): The name with which the file should be saved.
+    """
+
+    # Make a GET request to fetch the raw HTML content
+    response = requests.get(url, stream=True)
+    response.raise_for_status()
+
+    with open(filename, 'wb') as file:
+        for chunk in response.iter_content(chunk_size=8192):
+            file.write(chunk)
+
+def setup_logger(name:Optional[str]=None, log_file:Optional[str]=None,
+                 level=logging.INFO, format=None, include_process:bool=False)->logging.Logger:
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+
+    if format is None:
+        format = '%(asctime)s [%(levelname)s]'
+        if include_process:
+            format += '[%(processName)s]'
+        if name is not None:
+            format = f'{name}: ' + format
+        format += ' %(message)s'
+
+    formatter = logging.Formatter(format)
+
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
+    if log_file is not None:
+        file_handler = logging.handlers.TimedRotatingFileHandler(log_file, delay=True, when="midnight", encoding="utf-8")
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
+    logger.propagate = False
+
+    return logger

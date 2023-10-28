@@ -174,7 +174,7 @@ class Logger:
             all_done = partial(Logger.all_done, _logger)
             flush = partial(Logger.flush, _logger)
 
-        self.start_time = timeit.defeult_timer()
+        self.start_time = timeit.default_timer()
         self._py_logger = None
         self._wandb_logger = None
         self.enable_wandb = enable_wandb
@@ -318,7 +318,7 @@ class Logger:
 
     def all_done(self, exit_code:int=0, write_total_time:bool=True):
         if write_total_time:
-            self.summary({'start_time': self.start_time, 'total_time': timeit.defeult_timer() - self.start_time})
+            self.summary({'start_time': self.start_time, 'total_time': timeit.default_timer() - self.start_time})
 
         self.finish()
         exit(exit_code)

@@ -117,11 +117,11 @@ def train(config:Mapping, logger=None):
     best_train_loss, best_val_loss = float('inf'), float('inf')
     best_train_loss_step, best_val_loss_step, last_checkpoint_step = -1, -1, -1
     checkpoint_log = []
-    loop_start_time = last_eval_time = timeit.defeult_timer()
+    loop_start_time = last_eval_time = timeit.default_timer()
 
     # run steps
     while step < num_steps:
-        step_start_time = timeit.defeult_timer()
+        step_start_time = timeit.default_timer()
         epoch_step = 0 # step within the epoch
 
         batch_iter = iter(train_loader) # restart iterator
@@ -226,19 +226,19 @@ def train(config:Mapping, logger=None):
                     "train/best_loss_step": best_train_loss_step,
                     "train/epoch": epoch,
                     "train/epoch_step": epoch_step,
-                    "train/step_interval": timeit.defeult_timer() - step_start_time,
+                    "train/step_interval": timeit.default_timer() - step_start_time,
                     "train/samples": total_samples,
                     "train/step_samples": step_sample_count,
                     "train/token_count": token_count,
-                    "train/tokens_per_sec": token_count / (timeit.defeult_timer() - loop_start_time),
+                    "train/tokens_per_sec": token_count / (timeit.default_timer() - loop_start_time),
                     "lr": optimizer.param_groups[0]['lr'],
-                    "elapsed_s": timeit.defeult_timer() - loop_start_time
+                    "elapsed_s": timeit.default_timer() - loop_start_time
                 })
 
             # is it time to evaluate? We evaluate after 1st step to get initial loss.
             if torch_info.is_master and (step % eval_every == 0 or step+1 >= num_steps):
                 eval_count += 1
-                eval_interval = timeit.defeult_timer() - last_eval_time
+                eval_interval = timeit.default_timer() - last_eval_time
 
                 model_kwargs = model_config['module_kwargs']
                 transformer_tflops = utils.transformer_tflops(batch_size=train_batch_size,
@@ -270,7 +270,7 @@ def train(config:Mapping, logger=None):
                         "test/ppl": math.exp(test_loss),
                         "test/acc": test_acc,
                     })
-                last_eval_time, iters_since_eval = timeit.defeult_timer(), 0
+                last_eval_time, iters_since_eval = timeit.default_timer(), 0
 
                 # if this is the best model so far, save it
                 if save_checkpoint and last_checkpoint_step < best_val_loss_step and \
