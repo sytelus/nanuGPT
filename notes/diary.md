@@ -138,8 +138,15 @@ Best val ppl=22.6 @ 4k steps, 22hr run
 
 OpenWebText: 9B train tokens (54GB text in 8M files)
 Initial times 124M model:
-    256 A100/40GB hours (768 hours without optimizations, 533 hr with NVidia Megatron June 2021 code)
-    500K iterations
+    256 A100/40GB / 533 hr with NVidia Megatron June 2021 code?
+    Karpathy
+        500K iterations  / 8 GPUs / 8*5 microsteps / batch=12
+        30M samples/GPU, 240M samples total / 3.7 epochs/GPU (8M docs in dataset)
+        30.7B tokens for training
+        theoratical time on 8xA100 with flash attn = 1.8 days
+        250ms/step without compile, 135ms/step with compile
+
+
     65B total training tokens (7 epochs)
 
 ### Summary of various reference runs
