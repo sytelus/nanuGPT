@@ -1,4 +1,5 @@
-import utils
+from gptplay import utils
+from gptplay import glogging as logging
 
 
 def get_model(
@@ -12,6 +13,7 @@ def get_model(
               bos_token_id: int, # 1
               eos_token_id: int, # 2
               pad_token_id: int, # 0
+              use_flash_Attn2: bool,
               ):
 
     model_config_cls = utils.import_fn(config_class_name)
@@ -30,6 +32,11 @@ def get_model(
         eos_token_id = eos_token_id,
         pad_token_id = pad_token_id,
     )
+
+    flash_attn_used = use_flash_Attn2 and utils.flash_attn_supported()
+    logging.info(f'flash_attn_used: flash_attn_used')
+    if flash_attn_used:
+        model_config._flash_attn_2_enabled = True
 
     model_cls = utils.import_fn(model_class_name)
     model = model_cls(config=model_config)

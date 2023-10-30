@@ -675,3 +675,13 @@ def setup_logger(name:Optional[str]=None, log_file:Optional[str]=None,
     logger.propagate = False
 
     return logger
+
+def nvidia_sm():
+    """Returns the SM version of the first GPU"""
+    if not torch.cuda.is_available():
+        return -1, -1
+    return torch.cuda.get_device_capability(0)
+
+def flash_attn_supported():
+    """Returns True if the first GPU is NVIDIA Ampere"""
+    return nvidia_sm()[0] >= 8
