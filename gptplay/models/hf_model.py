@@ -1,99 +1,37 @@
-from einops import rearrange, repeat
-import torch
-from torch import nn, Tensor
-
-class DecoderBlock(torch.nn.Module):
-  def __init__(self, n_embd: int, n_heads: int,
-               ffn_bias, attn_proj_bias, attn_kv_bias,
-               attn_dropout, ffn_dropout):
-    super().__init__()
-
-    self.self_attn = nn.MultiheadAttention(n_embd, n_heads, dropout=attn_dropout,
-                                           bias=attn_proj_bias, add_bias_kv=attn_kv_bias)
-    self.self_attn_norm = nn.LayerNorm(n_embd)
-    self.ffn = nn.Sequential(
-        nn.Linear(n_embd, n_embd * 4, bias=ffn_bias),
-        nn.GELU(),
-        nn.Linear(n_embd * 4, n_embd, bias=ffn_bias),
-        nn.Dropout(ffn_dropout)
-    )
-    self.ffn_norm = nn.LayerNorm(n_embd)
-
-  def forward(self, x: Tensor):
-    # x: (context_len, batch_size, n_embd)
-    # attn_mask: (context_len, context_len)
-    # attn_mask = torch.full(
-    #     (len(x), len(x)), -float("Inf"), device=x.device, dtype=x.dtype
-    # )
-    # attn_mask = torch.triu(attn_mask, diagonal=1)
-
-    attn_mask = nn.Transformer.generate_square_subsequent_mask(x.shape[0], device=x.device)
-
-    # a1: (context_len, batch_size, n_embd)
-    a1, _ = self.self_attn(x, x, x, attn_mask=attn_mask)
-    a1 = self.self_attn_norm (x + a1)
-    # a1: (context_len, batch_size, n_embd)
-    a2 = self.ffn(a1)
-    a2 = self.ffn_norm(a1 + a2)
-
-    return a2
-
-class TinyTransformer(torch.nn.Module):
-    def __init__(self, n_layer: int, n_embd: int, n_head: int,
-                vocab_size: int, context_len: int,
-                mlp_bias: bool, attn_proj_bias: float, attn_kv_bias: float,
-                attn_dropout: float, mlp_dropout: float):
-        super().__init__()
-
-        self.token_embeddings = nn.Embedding(vocab_size, n_embd)
-        self.position_embeddings = nn.Embedding(context_len, n_embd)
-        self.model = nn.Sequential(
-            *[DecoderBlock(n_embd, n_head, mlp_bias, attn_proj_bias, attn_kv_bias, attn_dropout, mlp_dropout) \
-            for _ in range(n_layer)],
-            # decoder: (context_len, batch_size, n_embd)
-            nn.LayerNorm(n_embd),
-            # logits: (context_len, batch_size, vocab_size)
-            nn.Linear(n_embd, vocab_size, bias=mlp_bias)
-        )
-
-    def forward(self, inputs: Tensor):
-        # inputs: (batch_size, context_len)
-
-        batch_size, context_len = inputs.shape
-        # token_embedding: (batch_size, context_len, n_embd)
-        token_embedding = self.token_embeddings(inputs)
-        # positions: (batch_size, context_len)
-        positions = repeat(torch.arange(context_len, device=inputs.device), "p -> b p", b = batch_size)
-        # position_embedding: (batch_size, context_len, n_embd)
-        position_embedding = self.position_embeddings(positions)
-        # embedding: (batch_size, context_len, n_embd)
-        embedding = token_embedding + position_embedding
-        # embedding: (context_len, batch_size, n_embd)
-        embedding = rearrange(embedding, 'b s d -> s b d')
-        #embedding = embedding.permute(1, 0, 2)
-        # output: (context_len, batch_size, vocab_size)
-        return self.model(embedding)
+import utils
 
 
 def get_model(
               n_layer: int, n_embd: int, n_head: int,
               vocab_size: int, context_length: int,
-              mlp_bias: bool,
-              attn_proj_bias: bool, # for projection layers in attention
-              attn_kv_bias: bool, # for kv in attention
-              attn_dropout: float, # dropout for attention layer
-              mlp_dropout: float, # dropout for feedforward layer
-              layer_norm_bias:bool,
-              resid_dropout: float, # dropout for residual connection
-              embed_dropout: float, # dropout for embedding layer
-              config_class_name: str,
-              model_class_name: str,
+              config_class_name: str, # 'transformers.models.llama.LlamaConfig'
+              model_class_name: str,  # 'transformers.models.llama.LlamaForCausalLM'
+              use_gqa: bool, # False for  < 13B
+              tie_word_embeddings: bool, # kept false for supporting parallelization
+              rope_theta: float, # theta for RoPE, 10000.0 but should be 10*contex_len
+              bos_token_id: int, # 1
+              eos_token_id: int, # 2
+              pad_token_id: int, # 0
               ):
 
+    model_config_cls = utils.import_fn(config_class_name)
+    model_config = model_config_cls(
+        vocab_size=vocab_size,
+        hidden_size=n_embd,
+        num_hidden_layers=n_layer,
+        num_attention_heads=n_head,
+        intermediate_size=n_embd * 4,
+        num_key_value_heads=n_head if not use_gqa else 1,
+        max_position_embeddings = context_length,
+        use_cache=True,
+        tie_word_embeddings = tie_word_embeddings,
+        rope_theta = rope_theta,
+        bos_token_id = bos_token_id,
+        eos_token_id = eos_token_id,
+        pad_token_id = pad_token_id,
+    )
 
+    model_cls = utils.import_fn(model_class_name)
+    model = model_cls(config=model_config)
 
-    return HfModel(n_layer=n_layer, n_embd=n_embd, n_head=n_head,
-              vocab_size=vocab_size, context_len=context_length,
-              mlp_bias=mlp_bias, attn_proj_bias=attn_proj_bias,
-              attn_kv_bias=attn_kv_bias, attn_dropout=attn_dropout,
-              mlp_dropout=mlp_dropout)
+    return model

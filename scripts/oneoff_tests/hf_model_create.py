@@ -1,7 +1,12 @@
 import utils
 
-cls = utils.import_fn('transormers.models.llama.LlamaConfig')
+model_config_cls = utils.import_fn('transformers.models.llama.LlamaConfig')
+model_config = model_config_cls()
 
-model_config = cls()
+model_cls = utils.import_fn('transformers.models.llama.LlamaForCausalLM')
+model = model_cls(config=model_config)
 
-print(model_config)
+
+print(model)
+
+
