@@ -61,9 +61,15 @@ python nanugpt/generate.py cconfigs/train_llm/tinyshakespeare.yaml
 
 For lucky people with more compute, there are configs available to replicate benchmarks on WikiText103, TinyStories and OpenWebText.
 
-### Looging
+### Config
 
-NanuGPT vastly improves on logging, i.e., we log everything we can! The idea is that once run is done, you can examine the log to lot of post-hoc debugging. You can also enable Weights and Biases (wandb). The consol logs are colors for quick glances.
+All config files can be found in `configs/` and things are self-explanatory. Sometime you might notice the top line with `__include__:` to specify the base config that you can inherit from. This is a custom feature implemented in this repo so we can share the base config across many experiments. The `base_config.yaml` serves as defaults that can be overriden in your yaml.
+
+### Logging
+
+NanuGPT vastly improves on logging, i.e., we log everything we can! The idea is that once run is done, you can examine the log to do lot of post-hoc debugging. You can also enable Weights and Biases (wandb) by enabling in config and creating environment variable for `WANDB_API_KEY`.
+
+The consol logs are colored for quick glances.
 
 ### Debugging
 
