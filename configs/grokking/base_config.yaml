@@ -64,6 +64,7 @@ training:
   log_every: 20
   grad_clip: 0.0 # disabled if 0.0
   gradient_accumulation_steps: 1 # will be automatically divided by GPU count
+  adj_grad_acc_gpu_count: true # adjust gradient accumulation steps by GPU count
 
 optimizer:
   module: 'nanugpt.optimizers.adamw.get_optim'

@@ -216,7 +216,7 @@ def train(config:Mapping, logger=None):
                 best_train_loss = train_loss
                 best_train_loss_step = step
 
-            if enable_train_log and torch_info.is_master and (step % train_log_every == 0 or step+1 >= num_steps):
+            if torch_info.is_master:
                 metrics.update({
                     "train/step": step,
                     "train/loss": train_loss,
@@ -236,7 +236,9 @@ def train(config:Mapping, logger=None):
                 })
 
             # is it time to evaluate? We evaluate after 1st step to get initial loss.
+            eval_performed = False
             if torch_info.is_master and (step % eval_every == 0 or step+1 >= num_steps):
+                eval_performed = True
                 eval_count += 1
                 eval_interval = timeit.default_timer() - last_eval_time
 
@@ -288,7 +290,12 @@ def train(config:Mapping, logger=None):
 
                     checkpoint_log.append(metrics)
 
-            if len(metrics) > 0:
+            # training log might be disabled if it is too noisy
+            can_log = len(metrics) > 0 and torch_info.is_master and (
+                            (enable_train_log and (
+                                step % train_log_every == 0 or step+1 >= num_steps)
+                            ) or eval_performed)
+            if can_log:
                 logger.info(metrics)
 
             step += 1

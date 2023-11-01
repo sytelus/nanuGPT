@@ -10,7 +10,7 @@ install_requires=[
     'einops', 'tiktoken',
     'wandb', 'mlflow',
     'sentencepiece', 'tokenizers', 'transformers', 'datasets',
-    'tqdm', 'matplotlib'
+    'tqdm', 'matplotlib', 'rich'
 ]
 
 setuptools.setup(

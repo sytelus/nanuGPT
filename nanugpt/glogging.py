@@ -7,6 +7,7 @@ import psutil
 import os
 import timeit
 
+from rich.logging import RichHandler
 import wandb
 import torch
 
@@ -47,9 +48,16 @@ def create_py_logger(filepath:Optional[str]=None,
     logger.setLevel(level)
 
     if enable_stdout:
-        ch = py_logging.StreamHandler()
-        ch.setLevel(level)
-        ch.setFormatter(py_logging.Formatter('%(asctime)s %(message)s', '%H:%M'))
+        ch = RichHandler(
+            level = level,
+            show_time = True,
+            show_level = False,
+            log_time_format = '%H:%M',
+            show_path = False,
+            keywords = highlight_metric_keywords,
+        )
+        # ch.setLevel(level)
+        # ch.setFormatter(py_logging.Formatter('%(asctime)s %(message)s', '%H:%M'))
         logger.addHandler(ch)
 
     logger.propagate = False # otherwise root logger prints things again
@@ -117,6 +125,8 @@ std_metrics['classification'] = std_metrics['default'] +[
                         {"name": "test/acc", "step_metric":"train/samples", "summary":"max", "goal":"max"},
                         {"name": "val/acc", "step_metric":"train/samples", "summary":"max", "goal":"max"},
                     ]
+highlight_metric_keywords = ['train/loss=', 'val/loss=', 'train/step=']
+
 
 def create_wandb_logger(project_name, run_name,
                         metrics:List[Dict[str, Any]],
