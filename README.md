@@ -34,11 +34,15 @@ wget -P $DATA_ROOT/datasets/tinyshakespeare https://raw.githubusercontent.com/ka
 
 ## How to Use
 
-As an example, you can reproduce [Grokking](https://arxiv.org/abs/2201.02177) phenomenon in just 10 minutes of training on a single RTX 3080. Here, we train a tiny transformer that can learn to compute a simple math expression reaching train and eventually val loss of ~0. Synthetic dataset is generated and tokenized on the fly. To try this, run:
+### Synthetic Arithmatic Dataset
+
+You can reproduce [Grokking](https://arxiv.org/abs/2201.02177) phenomenon in just 10 minutes of training on a single RTX 3080. Here, we train a tiny transformer that can learn to compute a simple math expression reaching train and eventually val loss of ~0. Synthetic dataset is generated and tokenized on the fly. To try this, run:
 
 ```python
 python nanugpt/train.py configs/grokking/prime223.yaml
 ```
+
+### TinyShakespear Dataset
 
 You can also train a language model using all the works of Shakespear as data in 5 minutes on single RTX 3080 just like in original NanoGPT using this:
 
@@ -53,9 +57,17 @@ python nanugpt/train.py configs/train_llm/tinyshakespeare.yaml
 python nanugpt/generate.py cconfigs/train_llm/tinyshakespeare.yaml
 ```
 
+### Other Datasets
+
 For lucky people with more compute, there are configs available to replicate benchmarks on WikiText103, TinyStories and OpenWebText.
 
-If you are using VSCode, please do take advantage of dropdown next to play button run any config in debug mode, set breakpoints, look at variable and enjoy!
+### Looging
+
+NanuGPT vastly improves on logging, i.e., we log everything we can! The idea is that once run is done, you can examine the log to lot of post-hoc debugging. You can also enable Weights and Biases (wandb). The consol logs are colors for quick glances.
+
+### Debugging
+
+If you are using VSCode, please do take advantage of dropdown next to play button run any config in debug mode, set breakpoints, look at variables and enjoy!
 
 ## Credits
 
