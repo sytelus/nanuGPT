@@ -1,10 +1,10 @@
 import random
 from datetime import datetime
 
-from gptplay.config import Config
-from gptplay.train import train
+from nanugpt.config import Config
+from nanugpt.train import train
 
-from gptplay import glogging as logging
+from nanugpt import glogging as logging
 
 if __name__ == "__main__":
     config = Config(default_config_filepath='configs/grokking/prime223.yaml')

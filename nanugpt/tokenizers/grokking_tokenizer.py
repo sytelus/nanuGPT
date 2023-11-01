@@ -2,7 +2,7 @@ from typing import List, Union, Optional, Callable, Mapping
 
 import torch
 
-from gptplay.tokenizers.tokenizer_base import TokenizerBase
+from nanugpt.tokenizers.tokenizer_base import TokenizerBase
 
 
 TokenType = Union[int, str]

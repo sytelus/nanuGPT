@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from gptplay import utils
+from nanugpt import utils
 
 class MemmapDataset(Dataset):
     """Wraps memmap array as a torch Dataset so that we can access sequence starting at any index"""

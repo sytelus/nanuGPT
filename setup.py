@@ -14,13 +14,13 @@ install_requires=[
 ]
 
 setuptools.setup(
-    name="gptplay",
+    name="nanugpt",
     version="0.2.8",
     author="Shital Shah",
-    description="Playground for autoregresive models",
+    description="Simple, reliable and well tested training code for quick experiments with transformer based models",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/sytelus/gptplay",
+    url="https://github.com/sytelus/nanugpt",
     #packages=setuptools.find_packages(),
     packages=setuptools.find_packages(),
 	license='MIT',

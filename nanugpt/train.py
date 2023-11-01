@@ -7,9 +7,9 @@ import torch
 from torch.nn.parallel import DistributedDataParallel
 from torch import distributed as dist
 
-from gptplay import utils
-from gptplay.config import Config
-from gptplay import common
+from nanugpt import utils
+from nanugpt.config import Config
+from nanugpt import common
 
 @torch.no_grad()
 def estimate_loss(model:torch.nn.Module, get_loss:Callable,

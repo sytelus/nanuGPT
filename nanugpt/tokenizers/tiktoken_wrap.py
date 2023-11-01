@@ -2,7 +2,7 @@ from typing import List, Mapping, Optional, Callable
 
 import tiktoken
 
-from gptplay.tokenizers.tokenizer_base import TokenizerBase
+from nanugpt.tokenizers.tokenizer_base import TokenizerBase
 
 class TiktokenWrap(TokenizerBase):
     def __init__(self, encoding_name:str):

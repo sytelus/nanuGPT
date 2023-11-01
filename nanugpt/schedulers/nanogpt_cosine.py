@@ -3,7 +3,7 @@ import numpy as np
 
 from torch.optim.lr_scheduler import LRScheduler
 
-from gptplay import glogging as logging
+from nanugpt import glogging as logging
 
 class NanoGptCosineScheduler(LRScheduler):
     def __init__(self, optimizer, warmup_iters: int, lr_decay_iters: int, min_lr: float,

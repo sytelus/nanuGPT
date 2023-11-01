@@ -7,9 +7,9 @@ from packaging import version
 
 import torch
 
-from gptplay import utils
-from gptplay import glogging as logging
-from gptplay.tokenizers.tokenizer_base import TokenizerBase
+from nanugpt import utils
+from nanugpt import glogging as logging
+from nanugpt.tokenizers.tokenizer_base import TokenizerBase
 
 
 def setup_device(config:Mapping, logger:Optional[logging.Logger])->Tuple[torch.device, AbstractContextManager, logging.Logger, utils.TorchInfo]:

@@ -10,7 +10,7 @@ import timeit
 import wandb
 import torch
 
-from gptplay.utils import full_path, is_debugging
+from nanugpt.utils import full_path, is_debugging
 
 INFO=py_logging.INFO
 WARN=py_logging.WARN

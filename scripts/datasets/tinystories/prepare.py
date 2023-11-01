@@ -1,7 +1,7 @@
 import os
 
-from gptplay import tokenize_dataset
-from gptplay import utils
+from nanugpt import tokenize_dataset
+from nanugpt import utils
 
 if __name__ == '__main__':
     tokenized_out_dir = os.environ.get('DATA_ROOT', os.path.dirname(__file__))

@@ -20,7 +20,7 @@ logging:
   metrics_type: 'classification'
 
 model:
-  module: 'gptplay.models.tiny_transformer.get_model'
+  module: 'nanugpt.models.tiny_transformer.get_model'
   module_kwargs:
     n_layer: 2
     n_embd: 128
@@ -38,10 +38,10 @@ model:
     embed_dropout: 0.0 # dropout for embedding layer
 
 loss:
-  module: 'gptplay.losses.grokking_loss.get_loss'
+  module: 'nanugpt.losses.grokking_loss.get_loss'
 
 data:
-  module: 'gptplay.data.grokking_data.get_data'
+  module: 'nanugpt.data.grokking_data.get_data'
   module_kwargs:
     operation: 'x/y'
     training_fraction: 0.5
@@ -53,7 +53,7 @@ data:
     prime: &prime nil # to be set by overriden config
 
 tokenizer:
-  module: 'gptplay.tokenizers.grokking_tokenizer.get_tokenizer_factory'
+  module: 'nanugpt.tokenizers.grokking_tokenizer.get_tokenizer_factory'
   module_kwargs:
     prime: *prime
 
@@ -66,7 +66,7 @@ training:
   gradient_accumulation_steps: 1 # will be automatically divided by GPU count
 
 optimizer:
-  module: 'gptplay.optimizers.adamw.get_optim'
+  module: 'nanugpt.optimizers.adamw.get_optim'
   module_kwargs:
     learning_rate: 1.0E-3
     weight_decay: 0.1     # weight_decay=1 makes convergence much faster and original graph is not reproducible
@@ -75,7 +75,7 @@ optimizer:
     eps: 1.0E-8 # pytorch default
 
 scheduler:
-  module: 'gptplay.schedulers.linear.get_scheduler'
+  module: 'nanugpt.schedulers.linear.get_scheduler'
   module_kwargs:
     start_factor: 1.0E-8
     total_iters: 10

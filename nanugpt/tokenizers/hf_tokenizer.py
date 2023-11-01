@@ -2,7 +2,7 @@ from typing import List, Mapping, Optional, Callable
 
 from transformers import AutoTokenizer
 
-from gptplay.tokenizers.tokenizer_base import TokenizerBase
+from nanugpt.tokenizers.tokenizer_base import TokenizerBase
 
 class HfTokenizer(TokenizerBase):
     def __init__(self, hf_path:str, name:str, cache_dir:str, fix_pad_token:bool,

@@ -4,10 +4,10 @@ import os
 
 import torch
 
-from gptplay import utils
-from gptplay.config import Config
-from gptplay import common
-from gptplay import glogging as logging
+from nanugpt import utils
+from nanugpt.config import Config
+from nanugpt import common
+from nanugpt import glogging as logging
 
 class Generator:
     def __init__(self, config:Mapping, logger) -> None:

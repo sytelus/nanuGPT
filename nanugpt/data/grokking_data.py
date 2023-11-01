@@ -3,7 +3,7 @@ import torch
 
 from torch.utils.data import DataLoader
 
-from gptplay.tokenizers.grokking_tokenizer import GrokkingTokenizer, get_tokenizer_factory, DIVISION_MODULO_OPERATIONS, ALL_OPERATIONS
+from nanugpt.tokenizers.grokking_tokenizer import GrokkingTokenizer, get_tokenizer_factory, DIVISION_MODULO_OPERATIONS, ALL_OPERATIONS
 
 def operation_mod_p_data(operation: str, p: int, tokenizer: GrokkingTokenizer):
     """

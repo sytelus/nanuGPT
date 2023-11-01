@@ -21,7 +21,7 @@ logging:
   enable_summaries: true
 
 model:
-  module: 'gptplay.models.nanogpt.get_model'
+  module: 'nanugpt.models.nanogpt.get_model'
   module_kwargs:
     n_layer: 12
     n_embd: 768
@@ -38,10 +38,10 @@ model:
     embed_dropout: 0.0 # dropout for embedding layer
 
 loss:
-  module: 'gptplay.losses.autoregressive_loss.get_loss'
+  module: 'nanugpt.losses.autoregressive_loss.get_loss'
 
 data:
-  module: 'gptplay.data.tokenized_data.get_data'
+  module: 'nanugpt.data.tokenized_data.get_data'
   module_kwargs:
     dtype: 'uint16'
     train_batch_size: '_copy: /training/train_batch_size'
@@ -53,7 +53,7 @@ data:
     tokenized_test_path: null
 
 tokenizer:
-  module: 'gptplay.tokenizers.tiktoken_wrap.get_tokenizer_factory'
+  module: 'nanugpt.tokenizers.tiktoken_wrap.get_tokenizer_factory'
   module_kwargs:
     encoding_name: 'gpt2'
 
@@ -67,7 +67,7 @@ training:
   adj_grad_acc_gpu_count: true # adjust gradient accumulation steps for number of GPUs
 
 optimizer:
-  module: 'gptplay.optimizers.adamw_nanogpt.get_optim'
+  module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
   module_kwargs:
     learning_rate: 6.0E-4
     weight_decay: 0.1
@@ -80,7 +80,7 @@ generate:
   checkpoint_name: 'checkpoint_best.pt'
 
 scheduler:
-  module: 'gptplay.schedulers.nanogpt_cosine.get_scheduler'
+  module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
   module_kwargs:
     warmup_iters: 2000
     lr_decay_iters: '_copy: /training/num_steps'

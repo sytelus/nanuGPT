@@ -8,7 +8,7 @@
             "name": "Tokenize TinyShakespear",
             "type": "python",
             "request": "launch",
-            "program": "gptplay/tokenize_dataset.py",
+            "program": "nanugpt/tokenize_dataset.py",
             "console": "integratedTerminal",
             "args": ["configs/tokenize/tinyshakespeare.yaml"]
         },
@@ -16,7 +16,7 @@
             "name": "Train GPT2-Shakespear",
             "type": "python",
             "request": "launch",
-            "program": "gptplay/train.py",
+            "program": "nanugpt/train.py",
             "console": "integratedTerminal",
             "args": ["configs/train_llm/tinyshakespeare.yaml"]
         },
@@ -24,7 +24,7 @@
             "name": "Tokenize OWT",
             "type": "python",
             "request": "launch",
-            "program": "gptplay/tokenize_dataset.py",
+            "program": "nanugpt/tokenize_dataset.py",
             "console": "integratedTerminal",
             "args": ["configs/tokenize/openwebtext.yaml"]
         },
@@ -32,7 +32,7 @@
             "name": "Train OWT",
             "type": "python",
             "request": "launch",
-            "program": "gptplay/train.py",
+            "program": "nanugpt/train.py",
             "console": "integratedTerminal",
             "args": ["configs/train_llm/tinyshakespeare.yaml"]
         },
@@ -40,7 +40,7 @@
             "name": "Generate GPT2-Shakespear",
             "type": "python",
             "request": "launch",
-            "module": "gptplay.generate",
+            "module": "nanugpt.generate",
             "console": "integratedTerminal",
             "args": ["configs/train_llm/tinyshakespeare.yaml"]
         },
@@ -48,7 +48,7 @@
             "name": "Grokking-Prime223",
             "type": "python",
             "request": "launch",
-            "module": "gptplay.train",
+            "module": "nanugpt.train",
             "console": "integratedTerminal",
             "args": ["configs/grokking/prime223.yaml"]
         },
@@ -56,7 +56,7 @@
             "name": "Grokking-baseline",
             "type": "python",
             "request": "launch",
-            "module": "gptplay.train",
+            "module": "nanugpt.train",
             "console": "integratedTerminal",
             "args": ["configs/grokking/baseline.yaml"]
         },
@@ -64,7 +64,7 @@
             "name": "Grokking-50k",
             "type": "python",
             "request": "launch",
-            "module": "gptplay.train",
+            "module": "nanugpt.train",
             "console": "integratedTerminal",
             "args": ["configs/grokking/prime50k.yaml"]
         },
@@ -72,7 +72,7 @@
             "name": "Grokking-SeedSearch",
             "type": "python",
             "request": "launch",
-            "module": "gptplay.seed_search",
+            "module": "nanugpt.seed_search",
             "console": "integratedTerminal",
             "args": ["configs/grokking/prime223.yaml"]
         },

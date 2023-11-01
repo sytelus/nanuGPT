@@ -19,7 +19,7 @@ logging:
   enable_summaries: true
 
 model:
-  module: 'gptplay.models.tiny_transformer.get_model'
+  module: 'nanugpt.models.tiny_transformer.get_model'
   n_layer: 12
   n_embd: 768
   n_head: 12
@@ -33,10 +33,10 @@ model:
   ffn_dropout: 0.0 # dropout for feedforward layer
 
 loss:
-  module: 'gptplay.losses.autoregressive_loss.get_loss'
+  module: 'nanugpt.losses.autoregressive_loss.get_loss'
 
 data:
-  module: 'gptplay.data.tokenized_data.get_data'
+  module: 'nanugpt.data.tokenized_data.get_data'
   tokenized_train_path: $DATA_DIR/tokenized/tinystories_v2/tiktoken/train.bin
   tokenized_val_path: $DATA_DIR/tokenized/tinystories_v2/tiktoken/validation.bin
   tokenized_test_path: null
@@ -47,7 +47,7 @@ data:
   context_len: *context_len
 
 tokenizer:
-  module: 'gptplay.tokenizers.tiktoken.get_tokenizer'
+  module: 'nanugpt.tokenizers.tiktoken.get_tokenizer'
   encoding_name: 'gpt2'
 
 training:
@@ -58,7 +58,7 @@ training:
   gradient_accumulation_steps: 40 # will be automatically divided by GPU count
 
 optimizer:
-  module: 'gptplay.optimizers.adamw_wd.get_optim'
+  module: 'nanugpt.optimizers.adamw_wd.get_optim'
   learning_rate: 6.0E-4
   weight_decay: 0.1     # weight_decay=1 makes convergence much faster and original graph is not reproducible
   beta1: 0.9
@@ -66,7 +66,7 @@ optimizer:
   eps: 1.0E-8 # pytorch default
 
 scheduler:
-  module: 'gptplay.schedulers.nanogpt_cosine.get_scheduler'
+  module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
   warmup_iters: 2000
   lr_decay_iters: 600000
   min_lr: 6.0E-5

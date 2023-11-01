@@ -2,7 +2,7 @@ from typing import List, Mapping, Optional, Callable
 
 import numpy as np
 
-from gptplay.tokenizers.tokenizer_base import TokenizerBase
+from nanugpt.tokenizers.tokenizer_base import TokenizerBase
 
 class ByteTokenizer(TokenizerBase):
     def __init__(self, encoding_name='utf-8', append_eot=True):

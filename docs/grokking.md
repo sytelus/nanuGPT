@@ -1,0 +1,1 @@
+. You can get training loss of `0` (memorization) and eventually validation of loss of `0` as well (generalization)! It's beatiful to see but more importantly you can train it anywhere any time in matter of minutes. You can hack around and try out your hypothesis. To try this run,

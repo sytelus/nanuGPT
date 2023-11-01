@@ -6,9 +6,9 @@ from datasets import DatasetDict, load_dataset, load_from_disk
 import torch
 from torch.utils.data import DataLoader
 
-from gptplay.tokenizers.tokenizer_base import TokenizerBase
-from gptplay import utils
-from gptplay import glogging as logging
+from nanugpt.tokenizers.tokenizer_base import TokenizerBase
+from nanugpt import utils
+from nanugpt import glogging as logging
 
 
 def get_datasets(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Optional[str], hf_data_files:Optional[str], hf_revision:Optional[str],

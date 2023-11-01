@@ -2,7 +2,7 @@ import inspect
 
 import torch
 
-from gptplay import glogging as logging
+from nanugpt import glogging as logging
 
 def get_optim(model, learning_rate, weight_decay,
               beta1, beta2, eps, enable_fused):

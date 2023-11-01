@@ -11,7 +11,7 @@ logging:
   project_name: gpt2_tinyshakespeare
 
 model:
-  module: 'gptplay.models.nanogpt.get_model'
+  module: 'nanugpt.models.nanogpt.get_model'
   module_kwargs:
     n_layer: 6
     n_embd: 384
@@ -23,7 +23,7 @@ model:
     embed_dropout: 0.2 # dropout for embedding layer
 
 tokenizer:
-  module: 'gptplay.tokenizers.byte_tokenizer.get_tokenizer_factory'
+  module: 'nanugpt.tokenizers.byte_tokenizer.get_tokenizer_factory'
   module_kwargs:
     encoding_name: 'utf-8'
 
@@ -39,7 +39,7 @@ training:
   adj_grad_acc_gpu_count: false # adjust gradient accumulation steps for number of GPUs
 
 optimizer:
-  module: 'gptplay.optimizers.adamw_nanogpt.get_optim'
+  module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
   module_kwargs:
     learning_rate: 1.0E-3 # multiply LR by number of GPUs
     weight_decay: 0.1
@@ -47,7 +47,7 @@ optimizer:
     beta2: 0.99
 
 scheduler:
-  module: 'gptplay.schedulers.nanogpt_cosine.get_scheduler'
+  module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
   module_kwargs:
     warmup_iters: 100
     lr_decay_iters: '_copy: /training/num_steps'
