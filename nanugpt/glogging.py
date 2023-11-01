@@ -56,8 +56,6 @@ def create_py_logger(filepath:Optional[str]=None,
             show_path = False,
             keywords = highlight_metric_keywords,
         )
-        # ch.setLevel(level)
-        # ch.setFormatter(py_logging.Formatter('%(asctime)s %(message)s', '%H:%M'))
         logger.addHandler(ch)
 
     logger.propagate = False # otherwise root logger prints things again
