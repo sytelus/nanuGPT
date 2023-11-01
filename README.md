@@ -16,6 +16,22 @@ cd nanuGPT
 pip install -e .
 ```
 
+## Setting Up Data and Output Directories
+
+To use many of the config files as-is, you should create environment variables for your data and output directories:
+
+```bash
+export DATA_ROOT=<my data dir>
+export OUT_DIR=<my output dir>
+```
+
+Tiny shakespear is good quick test dataset. You can download it as follows:
+
+```bash
+mkdir -p $DATA_ROOT/datasets/tinyshakespeare
+wget -P $DATA_ROOT/datasets/tinyshakespeare https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt
+```
+
 ## How to Use
 
 As an example, you can reproduce [Grokking](https://arxiv.org/abs/2201.02177) phenomenon in just 10 minutes of training on a single RTX 3080. Here, we train a tiny transformer that can learn to compute a simple math expression reaching train and eventually val loss of ~0. Synthetic dataset is generated and tokenized on the fly. To try this, run:
