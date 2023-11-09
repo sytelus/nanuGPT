@@ -39,10 +39,6 @@ data:
   data_loader_seed: 8
   context_length: *context_length
 
-tokenizer:
-  module: 'nanugpt.tokenizers.tiktoken.get_tokenizer'
-  encoding_name: 'gpt2'
-
 training:
   num_steps: 600000    # 1e5 is not enough when weight_decay=0.0
   enable_train_log: false

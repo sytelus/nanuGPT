@@ -69,7 +69,7 @@ class Generator:
 
 if __name__ == "__main__":
     # specify config file to use as first argument in commandline
-    config = Config(default_config_filepath='configs/train_llm/tinyshakespeare.yaml')
+    config = Config(default_config_filepath='configs/train_gpt2/tinyshakespeare.yaml')
     logging_config = config['logging']
     logger = logging.Logger(master_process=True, **logging_config)
 

@@ -1,6 +1,11 @@
-__include__: ['byte_gpt2.yaml']
+__include__: ['base_config.yaml']
 
-tokenization:
+tokenizer:
+  module: 'nanugpt.tokenizers.hf_tokenizer.get_tokenizer_factory'
+  module_kwargs:
+    hf_path: 'meta-llama/Llama-2-7b'
+
+data:
   hf_name_path: 'text'
   hf_data_files: {train: ['$DATA_ROOT/datasets/tinyshakespeare/input.txt']}
   tokenized_out_dir: '$DATA_ROOT/tokenized/tinyshakespeare/byte/'
@@ -8,5 +13,3 @@ tokenization:
 
   val_fraction: 0.1
   text_column: null
-
-

@@ -18,7 +18,7 @@
             "request": "launch",
             "program": "nanugpt/train.py",
             "console": "integratedTerminal",
-            "args": ["configs/train_llm/tinyshakespeare.yaml"]
+            "args": ["configs/train_gpt2/tinyshakespeare.yaml"]
         },
         {
             "name": "Tokenize OWT",
@@ -34,7 +34,7 @@
             "request": "launch",
             "program": "nanugpt/train.py",
             "console": "integratedTerminal",
-            "args": ["configs/train_llm/tinyshakespeare.yaml"]
+            "args": ["configs/train_gpt2/tinyshakespeare.yaml"]
         },
         {
             "name": "Generate GPT2-Shakespear",
@@ -42,7 +42,7 @@
             "request": "launch",
             "module": "nanugpt.generate",
             "console": "integratedTerminal",
-            "args": ["configs/train_llm/tinyshakespeare.yaml"]
+            "args": ["configs/train_gpt2/tinyshakespeare.yaml"]
         },
         {
             "name": "Grokking-Prime223",

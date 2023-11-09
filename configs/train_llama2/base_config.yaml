@@ -1,0 +1,89 @@
+# base config is designed for GPT2/OpenWebText with NanoGPT defaults
+general:
+  device_type: 'cuda'            # auto select if blank or cpu, cuda
+  distributed_backend: 'nccl'       # nccl, gloo, mpi, horovod)
+  distributed_init_method: 'env://' # for horovod, use 'tcp://localhost:23456'
+  torch_compile: true # will not compile if Python > 3.11, torch < 2.1.0 or Windows
+  seed: 42
+  dtype: 'bfloat16'         # float32, float16, bfloat16
+  enable_distributed: null # automatically set to true if RANK is set
+  out_dir: '~/out_dir/train_llama2'
+
+logging:
+  enable_wandb: false
+  project_name: train_llama2
+  run_name: nil  # select random name
+  run_description: nil
+  log_dir: '_copy: /general/out_dir'
+  log_filename: 'log.txt'
+  allow_overwrite_log: true
+  metrics_type: 'classification'
+  enable_summaries: true
+
+model:
+  module: 'nanugpt.models.hf_llama.get_model'
+  module_kwargs:
+    n_layer: 24 # 345M param config
+    n_embd: 1024
+    n_head: 16
+    context_length: 1024
+
+tokenizer:
+  module: 'nanugpt.tokenizers.hf_tokenizer.get_tokenizer_factory'
+  module_kwargs:
+    hf_path: 'meta-llama/Llama-2-7b'
+    model_max_length: '_copy: /model/module_kwargs/context_length'
+
+
+loss:
+  module: 'nanugpt.losses.autoregressive_loss.get_loss'
+
+data:
+  module: 'nanugpt.data.tokenized_data.get_data'
+  module_kwargs:
+    dtype: 'uint16'
+    train_batch_size: '_copy: /training/train_batch_size'
+    eval_batch_size: 32 # 2^15=32768
+    data_loader_seed: 8
+    context_length: '_copy: /model/module_kwargs/context_length'
+    tokenized_train_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/train.bin'
+    tokenized_val_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/validation.bin'
+    tokenized_test_path: null
+
+training:
+  train_batch_size: 12
+  num_steps: 600000    # for OpenWebText/9B tokens
+  enable_train_log: true
+  log_every: 100
+  grad_clip: 1.0 # disabled if 0.0
+  gradient_accumulation_steps: 40
+  adj_grad_acc_gpu_count: true # adjust gradient accumulation steps for number of GPUs
+
+optimizer:
+  module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
+  module_kwargs:
+    learning_rate: 6.0E-4
+    weight_decay: 0.1
+    beta1: 0.9
+    beta2: 0.95
+    eps: 1.0E-8 # pytorch default
+
+generate:
+  checkpoint_path: '_copy: /general/out_dir'
+  checkpoint_name: 'checkpoint_best.pt'
+
+scheduler:
+  module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
+  module_kwargs:
+    warmup_iters: 2000
+    lr_decay_iters: '_copy: /training/num_steps'
+    min_lr: 6.0E-5
+
+eval:
+  eval_every: 1000
+  eval_iters: 200 # number of samples to evaluate for dataset
+  save_checkpoint: true
+  checkoint_after: 500000 # starts saving checkpoint after these steps
+  checkpoint_every_eval: 10 # multiple of eval_every, save checkpoint after these steps from last checkpoint when val loss is better
+  checkpoint_keep_best: false # keep only the best checkpoint, otherwise keep all with  _{step}.pt
+

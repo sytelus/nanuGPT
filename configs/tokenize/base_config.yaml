@@ -9,19 +9,24 @@ logging:
   allow_overwrite_log: true
   metrics_type: null
 
-tokenization:
-  hf_name_path: null #'$DATA_ROOT/datasets/tinystories_v2/'
+data:
+  # dataset settings
+  hf_name_path: null # dataset path, '$DATA_ROOT/datasets/tinystories_v2/'
   hf_dataset_name: null
   hf_data_dir: null
   hf_data_files: null
   hf_sample_by: null
   hf_revision: null
+  hf_cache_dir: null
+  text_column: 'text'
+
+  # splits to tokenize
   train_split: 'train'
   val_split: 'val'
   test_split: null
-  hf_cache_dir: null
   val_fraction: null
   test_fraction: null
-  text_column: 'text'
+
   data_loader_seed: 8
+
   tokenized_out_dir: null # '$DATA_ROOT/datasets/tokenized/tinystories_v2/tiktoken/'

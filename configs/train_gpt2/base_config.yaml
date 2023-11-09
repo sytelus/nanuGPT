@@ -7,11 +7,11 @@ general:
   seed: 42
   dtype: 'bfloat16'         # float32, float16, bfloat16
   enable_distributed: null # automatically set to true if RANK is set
-  out_dir: '~/out_dir/train_llm'
+  out_dir: '~/out_dir/train_gpt2'
 
 logging:
   enable_wandb: false
-  project_name: train_llm
+  project_name: train_gpt2
   run_name: nil  # select random name
   run_description: nil
   log_dir: '_copy: /general/out_dir'
@@ -28,6 +28,11 @@ model:
     n_head: 12
     context_length: 1024
 
+tokenizer:
+  module: 'nanugpt.tokenizers.tiktoken_wrap.get_tokenizer_factory'
+  module_kwargs:
+    encoding_name: 'gpt2'
+
 loss:
   module: 'nanugpt.losses.autoregressive_loss.get_loss'
 
@@ -42,11 +47,6 @@ data:
     tokenized_train_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/train.bin'
     tokenized_val_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/validation.bin'
     tokenized_test_path: null
-
-tokenizer:
-  module: 'nanugpt.tokenizers.tiktoken_wrap.get_tokenizer_factory'
-  module_kwargs:
-    encoding_name: 'gpt2'
 
 training:
   train_batch_size: 12

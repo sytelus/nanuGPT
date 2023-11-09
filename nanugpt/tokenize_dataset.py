@@ -103,18 +103,18 @@ if __name__ == "__main__":
 
     # setup output dirs and logging
     logging_config = config['logging']
-    out_dir = config['tokenization']['tokenized_out_dir']
+    out_dir = config['data']['tokenized_out_dir']
     if not logging_config['log_dir']:
         logging_config['log_dir'] = utils.full_path(out_dir, create=True)
 
     logger = logging.Logger(master_process=True,  **logging_config)
 
-    tokenization_config = config['tokenization']
+    data_config = config['data']
     tokenizer_config = config['tokenizer']
 
     get_tokenizer_factory = utils.import_fn(tokenizer_config['module'])
     tokenizer_factory = get_tokenizer_factory(**tokenizer_config['module_kwargs'])
 
-    tokenize(tokenizer_factory=tokenizer_factory, **tokenization_config)
+    tokenize(tokenizer_factory=tokenizer_factory, **data_config)
 
     logging.all_done()

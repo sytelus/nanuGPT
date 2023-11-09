@@ -51,10 +51,10 @@ You can also train a language model using all the works of Shakespear as data in
 python nanugpt/tokenize_dataset.py configs/tokenize/tinyshakespeare.yaml
 
 # run training using GPT2 124M model
-python nanugpt/train.py configs/train_llm/tinyshakespeare.yaml
+python nanugpt/train.py configs/train_gpt2/tinyshakespeare.yaml
 
 # generate completitions for the prompt
-python nanugpt/generate.py cconfigs/train_llm/tinyshakespeare.yaml
+python nanugpt/generate.py cconfigs/train_gpt2/tinyshakespeare.yaml
 ```
 
 ### Other Datasets
