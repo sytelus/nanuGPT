@@ -77,14 +77,12 @@ class TinyTransformer(torch.nn.Module):
 
 def get_model(n_layer: int, n_embd: int, n_head: int,
               vocab_size: int, context_length: int,
-              mlp_bias: bool,
-              attn_proj_bias: bool, # for projection layers in attention
-              attn_kv_bias: bool, # for kv in attention
-              attn_dropout: float, # dropout for attention layer
-              mlp_dropout: float, # dropout for feedforward layer
-              layer_norm_bias:bool,
-              resid_dropout: float, # dropout for residual connection
-              embed_dropout: float, # dropout for embedding layer
+
+              mlp_bias: bool=True,
+              attn_proj_bias: bool=True, # for projection layers in attention
+              attn_kv_bias: bool=False, # for kv in attention
+              attn_dropout: float = 0.0, # dropout for attention layer
+              mlp_dropout: float = 0.0, # dropout for feedforward layer
               ):
     return TinyTransformer(n_layer=n_layer, n_embd=n_embd, n_head=n_head,
               vocab_size=vocab_size, context_len=context_length,

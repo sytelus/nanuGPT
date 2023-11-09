@@ -1,4 +1,7 @@
-from typing import List
+from typing import List, Optional
+
+from transformers.models.llama import LlamaConfig, LlamaForCausalLM
+
 from nanugpt import utils
 from nanugpt import glogging as logging
 
@@ -7,26 +10,24 @@ def compute_intermediate_size(n, ffn_dim_multiplier=1, multiple_of=256):
 
 # for llama: sample values are at https://huggingface.co/EleutherAI/llemma_7b/blob/main/config.json
 def get_model(
-              config_class_name: str, # 'transformers.models.llama.LlamaConfig'
-              model_class_name: str,  # 'transformers.models.llama.LlamaForCausalLM'
-              n_layer: int, n_embd: int, n_head: int,
-              vocab_size: int, context_length: int,
-              use_gqa: bool, # False for  < 13B
-              tie_word_embeddings: bool, # kept false for supporting parallelization
-              rope_theta: float, # theta for RoPE, 10000.0 but should be 10*contex_len
-              bos_token_id: int, # 1
-              eos_token_id: int, # 2
-              pad_token_id: int, # 0
-              use_flash_Attn2: bool,
-              torch_dtype: str, # 'float16'
+                n_layer: int, n_embd: int, n_head: int,
+                vocab_size: int, context_length: int,
 
-              # below two are probably not needed
-              architectures: List[str], # ["LlamaForCausalLM"]
-              model_type: str, # 'llama'
+                use_gqa: bool, # False for  < 13B
+                rope_theta: Optional[float]=10000.0, # theta for RoPE, 10000.0 but should be 10*contex_len
+                enable_flash_attn2: Optional[bool]=True,
+
+                use_cache: Optional[bool]=True, # defaults to True, Whether or not the model should return the last key/values attentions (not used by all models)
+
+                # passed to PretrainedConfig
+                tie_word_embeddings: Optional[bool]=False, # kept false for supporting parallelization
+                bos_token_id: Optional[int]=1, # 1
+                eos_token_id: Optional[int]=2, # 2
+                pad_token_id: Optional[int]=None, # 0
+                torch_dtype: Optional[str]=None, # 'float16'
               ):
 
-    model_config_cls = utils.import_fn(config_class_name)
-    model_config = model_config_cls(
+    model_config = LlamaConfig(
         vocab_size=vocab_size,
         hidden_size=n_embd,
         num_hidden_layers=n_layer,
@@ -34,22 +35,24 @@ def get_model(
         intermediate_size=compute_intermediate_size(n_embd),
         num_key_value_heads=n_head if not use_gqa else 1,
         max_position_embeddings = context_length,
-        use_cache=True,
-        tie_word_embeddings = tie_word_embeddings,
+        use_cache=use_cache, # type: ignore
         rope_theta = rope_theta,
-        bos_token_id = bos_token_id,
-        eos_token_id = eos_token_id,
-        pad_token_id = pad_token_id,
+
+        # passed to PretrainedConfig
+        tie_word_embeddings = tie_word_embeddings, # type: ignore
+        bos_token_id = bos_token_id, # type: ignore
+        eos_token_id = eos_token_id, # type: ignore
+        pad_token_id = pad_token_id, # type: ignore
         torch_dtype = torch_dtype,
-        model_type = model_type,
+        model_type = 'llama',
+        architectures = ["LlamaForCausalLM"],
     )
 
-    flash_attn_used = use_flash_Attn2 and utils.flash_attn_supported()
+    flash_attn_used = enable_flash_attn2 and utils.flash_attn_supported()
     logging.info(f'flash_attn_used: flash_attn_used')
     if flash_attn_used:
         model_config._flash_attn_2_enabled = True
 
-    model_cls = utils.import_fn(model_class_name)
-    model = model_cls(config=model_config)
+    model = LlamaForCausalLM(config=model_config)
 
     return model

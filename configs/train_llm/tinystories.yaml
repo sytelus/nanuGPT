@@ -23,14 +23,7 @@ model:
   n_layer: 12
   n_embd: 768
   n_head: 12
-  context_len: &context_len 1024
-  # set bias to 0.0 for pre-training, 0.1+ for finetuning
-  # PyTorch default for bias is true
-  ffn_bias: true # pytorch default
-  attn_proj_bias: true # for projection layers in attention
-  attn_kv_bias: false # for kv in attention
-  attn_dropout: 0.0 # dropout for attention layer
-  ffn_dropout: 0.0 # dropout for feedforward layer
+  context_length: &context_length 1024
 
 loss:
   module: 'nanugpt.losses.autoregressive_loss.get_loss'
@@ -44,7 +37,7 @@ data:
   train_batch_size: 12
   eval_batch_size: 32768 # 2^15=32768
   data_loader_seed: 8
-  context_len: *context_len
+  context_length: *context_length
 
 tokenizer:
   module: 'nanugpt.tokenizers.tiktoken.get_tokenizer'

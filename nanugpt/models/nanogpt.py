@@ -7,6 +7,8 @@ https://github.com/openai/gpt-2/blob/master/src/model.py
 https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/modeling_gpt2.py
 """
 
+from typing import Optional
+
 import math
 import inspect
 from dataclasses import dataclass
@@ -159,10 +161,11 @@ class GPTConfig:
     mlp_dropout: float = 0.0
     resid_dropout: float = 0.0
     embed_dropout: float = 0.0
+    initializer_range: float = 0.02
 
 class GPT(nn.Module):
 
-    def __init__(self, config):
+    def __init__(self, config: GPTConfig):
         super().__init__()
         assert config.vocab_size is not None
         assert config.block_size is not None
@@ -188,7 +191,7 @@ class GPT(nn.Module):
         # apply special scaled init to the residual projections, per GPT-2 paper
         for pn, p in self.named_parameters():
             if pn.endswith('c_proj.weight'):
-                torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * config.n_layer))
+                torch.nn.init.normal_(p, mean=0.0, std=self.config.initializer_range/math.sqrt(2 * config.n_layer))
 
 
     def _init_weights(self, module):
@@ -198,12 +201,12 @@ class GPT(nn.Module):
         # for fan_in=768, default stddev would be 0.036.
         # TODO: not sure if below is good idea and is independent of the size of the model
         if isinstance(module, nn.Linear):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            torch.nn.init.normal_(module.weight, mean=0.0, std=self.config.initializer_range)
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
         # default init for embedding layer in Pytorch is init.normal_ which is N(0, 1)
         elif isinstance(module, nn.Embedding):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            torch.nn.init.normal_(module.weight, mean=0.0, std=self.config.initializer_range)
 
     def forward(self, idx, only_last=False):
         device = idx.device
@@ -298,19 +301,25 @@ class GPT(nn.Module):
 
         return model
 
-def get_model(n_layer: int, n_embd: int, n_head: int,
-              vocab_size: int, context_length: int,
-              mlp_bias: bool,
-              attn_proj_bias: bool, # for projection layers in attention
-              attn_kv_bias: bool, # for kv in attention
-              attn_dropout: float, # dropout for attention layer
-              mlp_dropout: float, # dropout for feedforward layer
-              layer_norm_bias: bool, # for layer norm
-              resid_dropout: float, # dropout for residual in attention
-              embed_dropout: float # dropout for embedding layer
+def get_model(
+                n_layer: int, n_embd: int, n_head: int,
+                vocab_size: int, context_length: int,
+
+                mlp_bias=False,
+                attn_proj_bias=False, # for projection layers in attention
+                attn_kv_bias=False, # for kv in attention
+                layer_norm_bias=False, # for layer norm
+
+                resid_dropout=0.0, # dropout for residual in attention
+                embed_dropout=0.0, # dropout for embedding layer
+                attn_dropout=0.0, # dropout for attention layer
+                mlp_dropout=0.0, # dropout for feedforward layer
+
+                initializer_range=0.02, # defaults to 0.02, The standard deviation of the truncated_normal_initializer for initializing all weight matrices
               ):
 
-    gpt_config = GPTConfig(block_size=context_length,
+    gpt_config = GPTConfig(
+                            block_size=context_length,
                             vocab_size=vocab_size,
                             n_layer=n_layer,
                             n_head=n_head,
@@ -319,9 +328,11 @@ def get_model(n_layer: int, n_embd: int, n_head: int,
                             attn_proj_bias=attn_proj_bias,
                             attn_kv_bias=attn_kv_bias,
                             layer_norm_bias=layer_norm_bias,
+                            initializer_range=initializer_range,
                             attn_dropout=attn_dropout,
                             mlp_dropout=mlp_dropout,
                             resid_dropout=resid_dropout,
-                            embed_dropout=embed_dropout)
+                            embed_dropout=embed_dropout
+                            )
 
     return GPT(gpt_config)

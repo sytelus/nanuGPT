@@ -17,6 +17,7 @@ model:
     n_embd: 384
     n_head: 6
     context_length: 256
+
     mlp_dropout: 0.2 # dropout for feedforward layer
     attn_dropout: 0.2 # dropout for attention layer
     resid_dropout: 0.2 # dropout for residual connection
