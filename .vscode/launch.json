@@ -5,12 +5,28 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Tokenize TinyShakespear",
+            "name": "Tokenize TinyShakespear/byte",
             "type": "python",
             "request": "launch",
             "program": "nanugpt/tokenize_dataset.py",
             "console": "integratedTerminal",
-            "args": ["configs/tokenize/tinyshakespeare.yaml"]
+            "args": ["configs/tokenize/tinyshakespeare_byte.yaml"]
+        },
+        {
+            "name": "Tokenize TinyShakespear/llama2",
+            "type": "python",
+            "request": "launch",
+            "program": "nanugpt/tokenize_dataset.py",
+            "console": "integratedTerminal",
+            "args": ["configs/tokenize/tinyshakespeare_llama2.yaml"]
+        },
+        {
+            "name": "Tokenize OWT/Tiktoen-gpt2",
+            "type": "python",
+            "request": "launch",
+            "program": "nanugpt/tokenize_dataset.py",
+            "console": "integratedTerminal",
+            "args": ["configs/tokenize/openwebtext_tiktoken_gpt2.yaml"]
         },
         {
             "name": "Train GPT2-Shakespear",
@@ -19,14 +35,6 @@
             "program": "nanugpt/train.py",
             "console": "integratedTerminal",
             "args": ["configs/train_gpt2/tinyshakespeare.yaml"]
-        },
-        {
-            "name": "Tokenize OWT",
-            "type": "python",
-            "request": "launch",
-            "program": "nanugpt/tokenize_dataset.py",
-            "console": "integratedTerminal",
-            "args": ["configs/tokenize/openwebtext.yaml"]
         },
         {
             "name": "Train OWT",
