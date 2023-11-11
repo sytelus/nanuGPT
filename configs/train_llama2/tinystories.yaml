@@ -16,7 +16,7 @@ data:
     tokenized_val_path: '$DATA_ROOT/tokenized/tinystories_v2/llama2/validation.bin'
 
 training:
-  train_batch_size: 128 # scaled up from 64 along with LR
+  train_batch_size: 64 # scaled up from 64 along with LR
   num_steps: 300000
   gradient_accumulation_steps: 8
   adj_grad_acc_gpu_count: true # adjust gradient accumulation steps for number of GPUs
@@ -24,7 +24,7 @@ training:
 optimizer:
   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
   module_kwargs:
-    learning_rate: 1.2E-3
+    learning_rate: 6.0E-4
     weight_decay: 0.1
     beta1: 0.9
     beta2: 0.95
@@ -35,4 +35,4 @@ scheduler:
   module_kwargs:
     warmup_iters: 2000
     lr_decay_iters: '_copy: /training/num_steps'
-    min_lr: 1.2E-4
+    min_lr: 6.0E-5
