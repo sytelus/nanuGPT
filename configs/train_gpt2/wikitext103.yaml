@@ -7,14 +7,14 @@ logging:
   project_name: 'gpt2_124m_wikitext-103'
   enable_wandb: true
   enable_summaries: true
-  run_name: 'nanogpt_baseline_bloat16'  # select random name
-  run_description: 'Reproduce NanoGPT baseline for GPT2 124M on WikiText-103'
+  run_name: 'gpt124m_wikitext103_byte_bloat16'  # select random name
+  run_description: 'GPT124M WikiText-103 using byte tokenizer and bfloat16 with 4X context length and steps'
 
 data:
   module_kwargs:
-    tokenized_train_path: '$DATA_ROOT/tokenized/wikipedia/tiktoken/train.bin'
-    tokenized_val_path: '$DATA_ROOT/tokenized/wikipedia/tiktoken/validation.bin'
-    tokenized_test_path: '$DATA_ROOT/tokenized/wikipedia/tiktoken/test.bin'
+    tokenized_train_path: '$DATA_ROOT/tokenized/wikipedia/byte/train.bin'
+    tokenized_val_path: '$DATA_ROOT/tokenized/wikipedia/byte/validation.bin'
+    tokenized_test_path: '$DATA_ROOT/tokenized/wikipedia/byte/test.bin'
 
 model:
   module: 'nanugpt.models.nanogpt.get_model'
@@ -22,11 +22,11 @@ model:
     n_layer: 24
     n_embd: 1024
     n_head: 16
-    context_length: 1024
+    context_length: 4096
 
 training:
   train_batch_size: 64
-  num_steps: 300000
+  num_steps: 12000000
   gradient_accumulation_steps: 8
   adj_grad_acc_gpu_count: true # adjust gradient accumulation steps for number of GPUs
 
