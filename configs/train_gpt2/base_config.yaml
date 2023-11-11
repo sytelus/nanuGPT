@@ -49,12 +49,12 @@ data:
     tokenized_test_path: null
 
 training:
-  train_batch_size: 12
+  train_batch_size: 60
   num_steps: 600000    # for OpenWebText/9B tokens
   enable_train_log: true
   log_every: 100
   grad_clip: 1.0 # disabled if 0.0
-  gradient_accumulation_steps: 40
+  gradient_accumulation_steps: 8
   adj_grad_acc_gpu_count: true # adjust gradient accumulation steps for number of GPUs
 
 optimizer:
