@@ -12,9 +12,9 @@ logging:
 
 data:
   module_kwargs:
-    tokenized_train_path: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/bin/train.bin'
-    tokenized_val_path: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/bin/validation.bin'
-    tokenized_test_path: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/bin/test.bin'
+    tokenized_train_path: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/byte/train.bin'
+    tokenized_val_path: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/byte/validation.bin'
+    tokenized_test_path: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/byte/test.bin'
 
 model:
   module: 'nanugpt.models.nanogpt.get_model'
