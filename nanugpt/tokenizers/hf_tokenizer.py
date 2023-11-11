@@ -1,5 +1,6 @@
 from typing import List, Mapping, Optional, Callable, Any
 
+import tokenizers
 from transformers import AutoTokenizer
 
 from nanugpt.tokenizers.tokenizer_base import TokenizerBase

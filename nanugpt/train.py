@@ -1,4 +1,4 @@
-from typing import Mapping, Tuple, Optional, Dict, List, Callable, MutableMapping, Mapping
+from typing import Mapping, Tuple, Optional, Callable, Mapping
 import os
 import timeit
 import math
@@ -8,7 +8,6 @@ from torch.nn.parallel import DistributedDataParallel
 from torch import distributed as dist
 
 from nanugpt import utils
-from nanugpt.config import Config
 from nanugpt import common
 
 @torch.no_grad()
@@ -319,9 +318,3 @@ def train(config:Mapping, logger=None):
 
         if own_logger:
             logger.all_done()
-
-
-if __name__ == "__main__":
-    # specify config file to use as first argument in commandline
-    config = Config(default_config_filepath='configs/grokking/prime223.yaml')
-    train(config)
