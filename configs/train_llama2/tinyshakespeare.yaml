@@ -32,17 +32,17 @@ training:
 optimizer:
   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
   module_kwargs:
-    learning_rate: 3.0E-5 # multiply LR by number of GPUs
+    learning_rate: 1.0E-5 # multiply LR by number of GPUs
     weight_decay: 0.1
     beta1: 0.9
-    beta2: 0.99
+    beta2: 0.95
 
 scheduler:
   module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
   module_kwargs:
-    warmup_iters: 100
+    warmup_iters: 250
     lr_decay_iters: '_copy: /training/num_steps'
-    min_lr: 3.0E-6
+    min_lr: 1.0E-6
 
 eval:
   eval_every: 250
