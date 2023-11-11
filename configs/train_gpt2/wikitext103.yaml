@@ -12,9 +12,9 @@ logging:
 
 data:
   module_kwargs:
-    tokenized_train_path: '$DATA_ROOT/tokenized/wikipedia/tiktoken/train.bin'
-    tokenized_val_path: '$DATA_ROOT/tokenized/wikipedia/tiktoken/validation.bin'
-    tokenized_test_path: '$DATA_ROOT/tokenized/wikipedia/tiktoken/test.bin'
+    tokenized_train_path: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/tiktoken/train.bin'
+    tokenized_val_path: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/tiktoken/validation.bin'
+    tokenized_test_path: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/tiktoken/test.bin'
 
 model:
   module: 'nanugpt.models.nanogpt.get_model'
@@ -25,9 +25,9 @@ model:
     context_length: 1024
 
 training:
-  train_batch_size: 64
+  train_batch_size: 8
   num_steps: 300000
-  gradient_accumulation_steps: 8
+  gradient_accumulation_steps: 64
   adj_grad_acc_gpu_count: true # adjust gradient accumulation steps for number of GPUs
 
 optimizer:
