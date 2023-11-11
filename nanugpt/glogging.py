@@ -220,9 +220,10 @@ class Logger:
 
     def info(self, d:Union[str, Mapping[str,Any]], py_logger_only:bool=False):
         if self._py_logger is not None:
+            msg = d # use separate variable to avoid changing d for wandb
             if isinstance(d, Mapping):
-                d = _dict2msg(d)
-            self._py_logger.info(d)
+                msg = _dict2msg(d)
+            self._py_logger.info(msg)
 
         if not py_logger_only and self.enable_wandb and self._wandb_logger is not None:
             if isinstance(d, str):
