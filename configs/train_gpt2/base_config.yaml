@@ -70,7 +70,7 @@ scheduler:
   module: 'nanugpt.schedulers.constant.get_scheduler'
   module_kwargs:
     warmup_iters: 100
-    lr_const_iters: '_copy: /training/num_steps'
+    num_steps: '_copy: /training/num_steps'
     const_lr: 6.0E-4
     cooldown_iters: 1000
 
