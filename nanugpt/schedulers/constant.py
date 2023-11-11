@@ -30,7 +30,7 @@ class ConstantWithCooldownScheduler(LRScheduler):
 
         # 2) if it > num_steps, return cooldown learning rate
         if self.last_epoch > (self.num_steps - self.cooldown_iters):
-            cooldown_start = self.num_steps - self.last_epoch
+            cooldown_start = self.num_steps - self.last_epoch - 1
             return (init_lrs * (cooldown_start / self.cooldown_iters)).tolist()
 
         # 3) in between, use constant learning rate
