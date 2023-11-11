@@ -31,9 +31,9 @@ model:
 tokenizer:
   module: 'nanugpt.tokenizers.hf_tokenizer.get_tokenizer_factory'
   module_kwargs:
-    hf_path: 'meta-llama/Llama-2-7b'
-    model_max_length: '_copy: /model/module_kwargs/context_length'
-
+    hf_path: 'NousResearch/Llama-2-7b-hf'
+    token: '$HF_AUTH_TOKEN'
+    fix_pad_token: false
 
 loss:
   module: 'nanugpt.losses.autoregressive_loss.get_loss'
@@ -68,16 +68,16 @@ optimizer:
     beta2: 0.95
     eps: 1.0E-8 # pytorch default
 
-generate:
-  checkpoint_path: '_copy: /general/out_dir'
-  checkpoint_name: 'checkpoint_best.pt'
-
 scheduler:
   module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
   module_kwargs:
     warmup_iters: 2000
     lr_decay_iters: '_copy: /training/num_steps'
     min_lr: 6.0E-5
+
+generate:
+  checkpoint_path: '_copy: /general/out_dir'
+  checkpoint_name: 'checkpoint_best.pt'
 
 eval:
   eval_every: 1000
