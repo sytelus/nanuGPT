@@ -28,6 +28,9 @@ import logging
 
 import yaml
 
+import matplotlib
+# below is needed to avoid message ""Backend TkAgg is interactive backend. Turning interactive mode on"
+matplotlib.use('TkAgg',force=True)
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.cm as cm
@@ -686,5 +689,9 @@ def flash_attn_supported():
     """Returns True if the first GPU is NVIDIA Ampere"""
     return nvidia_sm()[0] >= 8
 
-def is_master_node()->bool:
-    return os.environ.get('LOCAL_RANK', '0') == '0'
+def is_master_process()->bool:
+    return os.environ.get('RANK', '0') == '0'
+
+def free_disk_space()->int:
+    """Returns free disk space in bytes"""
+    return psutil.disk_usage('/').free

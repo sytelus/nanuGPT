@@ -49,12 +49,12 @@ data:
     tokenized_test_path: null
 
 training:
-  train_batch_size: 12
+  train_batch_size: 60
   num_steps: 600000    # for OpenWebText/9B tokens
   enable_train_log: true
   log_every: 100
   grad_clip: 1.0 # disabled if 0.0
-  gradient_accumulation_steps: 40
+  gradient_accumulation_steps: 8
   adj_grad_acc_gpu_count: true # adjust gradient accumulation steps for number of GPUs
 
 optimizer:
@@ -66,16 +66,16 @@ optimizer:
     beta2: 0.95
     eps: 1.0E-8 # pytorch default
 
-generate:
-  checkpoint_path: '_copy: /general/out_dir'
-  checkpoint_name: 'checkpoint_best.pt'
-
 scheduler:
   module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
   module_kwargs:
     warmup_iters: 2000
     lr_decay_iters: '_copy: /training/num_steps'
     min_lr: 6.0E-5
+
+generate:
+  checkpoint_path: '_copy: /general/out_dir'
+  checkpoint_name: 'checkpoint_best.pt'
 
 eval:
   eval_every: 1000

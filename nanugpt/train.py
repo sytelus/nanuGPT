@@ -1,4 +1,4 @@
-from typing import Mapping, Tuple, Optional, Dict, List, Callable, MutableMapping, Mapping
+from typing import Mapping, Tuple, Optional, Callable, Mapping
 import os
 import timeit
 import math
@@ -8,7 +8,6 @@ from torch.nn.parallel import DistributedDataParallel
 from torch import distributed as dist
 
 from nanugpt import utils
-from nanugpt.config import Config
 from nanugpt import common
 
 @torch.no_grad()
@@ -65,18 +64,21 @@ def train(config:Mapping, logger=None):
 
     # setup system, device, logger, torch
     own_logger = logger is None
-    logger = common.setup_logger(utils.is_master_node(), config, logger)
+    logger = common.setup_logger(utils.is_master_process(), config, logger)
 
     device, amp_ctx, torch_info = common.setup_device(config, logger)
-    assert torch_info.is_master == utils.is_master_node(), "torch_info.is_master != utils.is_master_node()"
+    assert torch_info.is_master == utils.is_master_process(), "torch_info.is_master != utils.is_master_process()"
 
     # adjust gradient accumulation steps if we are doing distributed training
     if torch_info.is_distributed and adj_grad_acc_gpu_count:
         assert gradient_accumulation_steps % torch_info.world_size == 0, f'gradient_accumulation_steps ({gradient_accumulation_steps}) must be divisible by ddp_world_size ({torch_info.world_size})'
         gradient_accumulation_steps = gradient_accumulation_steps // torch_info.world_size
 
-    logger.summary({"global_batch_size": gradient_accumulation_steps * train_batch_size * torch_info.world_size,
-                    "local_batch_size": gradient_accumulation_steps * torch_info.world_size,
+    logger.summary({
+                    "gradient_accumulation_steps": gradient_accumulation_steps,
+                    "gpu_batch_size": train_batch_size,
+                    "global_batch_size": gradient_accumulation_steps * train_batch_size * torch_info.world_size,
+                    "local_batch_size": gradient_accumulation_steps * train_batch_size,
                     "tokens_per_iter": gradient_accumulation_steps * train_batch_size * torch_info.world_size * context_length
                     })
 
@@ -319,9 +321,3 @@ def train(config:Mapping, logger=None):
 
         if own_logger:
             logger.all_done()
-
-
-if __name__ == "__main__":
-    # specify config file to use as first argument in commandline
-    config = Config(default_config_filepath='configs/grokking/prime223.yaml')
-    train(config)

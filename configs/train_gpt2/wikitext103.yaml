@@ -7,6 +7,7 @@ logging:
   project_name: 'gpt2_124m_wikitext-103'
   enable_wandb: true
   enable_summaries: true
+
   run_name: 'gpt124m_wikitext103_byte_bloat16'  # select random name
   run_description: 'GPT124M WikiText-103 using byte tokenizer and bfloat16 with 4X context length and steps'
 
@@ -30,9 +31,9 @@ model:
     context_length: 4096
 
 training:
-  train_batch_size: 64
+  train_batch_size: 32
   num_steps: 12000000
-  gradient_accumulation_steps: 8
+  gradient_accumulation_steps: 16
   adj_grad_acc_gpu_count: true # adjust gradient accumulation steps for number of GPUs
 
 optimizer:

@@ -11,7 +11,7 @@ from rich.logging import RichHandler
 import wandb
 import torch
 
-from nanugpt.utils import full_path, is_debugging
+from nanugpt.utils import full_path, is_debugging, is_master_process, free_disk_space
 
 INFO=py_logging.INFO
 WARN=py_logging.WARN
@@ -83,7 +83,7 @@ def create_py_logger(filepath:Optional[str]=None,
 
 std_metrics = {}
 std_metrics['default'] = [
-                            {"name": "elapsed_s", "summary":"max"},
+                            {"name": "elapsed_s", "step_metric":"train/step", "summary":"max"},
                             {"name": "train/step", "step_metric":"elapsed_s", "summary":"max"},
                             {"name": "train/samples", "step_metric":"elapsed_s", "summary":"max"},
                             {"name": "train/step_samples", "step_metric":"train/step", "summary":"mean"},
@@ -92,6 +92,7 @@ std_metrics['default'] = [
                             {"name": "train/loss", "step_metric":"train/samples", "summary":"min", "goal":"min"},
                             {"name": "train/loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
                             {"name": "train/best_loss", "step_metric":"train/samples", "summary":"min", "goal":"min"},
+                            {"name": "train/best_loss_step", "step_metric":"train/step", "summary":"max", "goal":"max"},
                             {"name": "train/ppl", "step_metric":"train/samples", "summary":"min", "goal":"min"},
                             {"name": "train/step_interval", "step_metric":"train/step", "summary":"mean"},
 
@@ -103,6 +104,7 @@ std_metrics['default'] = [
                             {"name": "train/step_ppl", "step_metric":"train/step", "summary":"min", "goal":"min"},
 
                             {"name": "val/best_loss", "step_metric":"train/samples", "summary":"min", "goal":"min"},
+                            {"name": "val/best_loss_step", "step_metric":"train/step", "summary":"max", "goal":"max"},
                             {"name": "val/loss", "step_metric":"train/samples", "summary":"min", "goal":"min"},
                             {"name": "val/loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
                             {"name": "val/ppl", "step_metric":"train/samples", "summary":"min", "goal":"min"},
@@ -130,6 +132,7 @@ def create_wandb_logger(project_name, run_name,
                         metrics:List[Dict[str, Any]],
                         description:Optional[str]=None):
 
+    print(f"Initializing WandB on LOCAL_RANK: {os.environ.get('LOCAL_RANK', '-1')}, RANK {os.environ.get('RANK', '-1')},  utils.is_master_process={is_master_process()}")
     wandb.login() # use API key from WANDB_API_KEY env variable
 
     run = wandb.init(project=project_name, name=run_name,
@@ -219,9 +222,10 @@ class Logger:
 
     def info(self, d:Union[str, Mapping[str,Any]], py_logger_only:bool=False):
         if self._py_logger is not None:
+            msg = d # use separate variable to avoid changing d for wandb
             if isinstance(d, Mapping):
-                d = _dict2msg(d)
-            self._py_logger.info(d)
+                msg = _dict2msg(d)
+            self._py_logger.info(msg)
 
         if not py_logger_only and self.enable_wandb and self._wandb_logger is not None:
             if isinstance(d, str):
@@ -317,6 +321,7 @@ class Logger:
 
                         'memory_gb': psutil.virtual_memory().available / (1024.0 ** 3),
                         'cpu_count': psutil.cpu_count(),
+                        'free_disk_space': free_disk_space(),
                         })
 
     def finish(self):

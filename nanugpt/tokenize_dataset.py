@@ -1,25 +1,18 @@
 # saves the openwebtext dataset to a binary file for training. following was helpful:
 # https://github.com/HazyResearch/flash-attention/blob/main/training/src/datamodules/language_modeling_hf.py
 
-from typing import Optional, Tuple, List, Dict, Mapping, Callable, MutableMapping
+from typing import Optional, Mapping, Callable
 import math
 import os
-from multiprocessing import cpu_count, Pool
 import numpy as np
 from functools import partial
 
 from tqdm.auto import tqdm
 
-from datasets import DatasetDict, load_dataset, load_from_disk
-
-import torch
-from torch.utils.data import DataLoader
-
 from nanugpt import glogging as logging
 from nanugpt import common
 from nanugpt.tokenizers.tokenizer_base import TokenizerBase
 from nanugpt import utils
-from nanugpt.config import Config
 from nanugpt.data.hf_dataset import get_datasets
 
 
@@ -36,6 +29,12 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
                            val_fraction=val_fraction, test_fraction=test_fraction, data_loader_seed=data_loader_seed,
                            hf_sample_by=hf_sample_by, hf_revision=hf_revision)
 
+    # create instance so any downloading can be done before we start the tokenization
+    tok = tokenizer_factory()
+    vocab_size = len(tok)
+    logging.summary({'vocab_size': vocab_size})
+    np_dtype = np.uint16 if vocab_size < 2**16 else np.uint32
+    logging.summary({'np_dtype': str(np_dtype)})
 
     class TokenizerPerThread:
         def __init__(self, tokenizer_factory):
@@ -64,13 +63,6 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
         num_proc=utils.work_cpu_count(),
     )
 
-    tok = tokenizer_factory()
-    vocab_size = len(tok)
-    logging.summary({'vocab_size': vocab_size})
-    np_dtype = np.uint16 if vocab_size < 2**16 else np.uint32
-    logging.summary({'np_dtype': str(np_dtype)})
-
-
     # concatenate all the ids in each dataset into one large file we can use for training
     for split in [train_split, val_split, test_split]:
         if split not in tokenized:
@@ -97,20 +89,3 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
         arr.flush()
 
     logging.info(f'Tokenized dataset saved to {tokenized_out_dir}')
-
-
-if __name__ == "__main__":
-    # specify config file to use as first argument in commandline
-    config = Config(default_config_filepath='configs/tokenize/tiktoken_gpt2.yaml')
-
-    logger = common.setup_logger(config=config, is_master=utils.is_master_node())
-
-    data_config = config['data']
-    tokenizer_config = config['tokenizer']
-
-    get_tokenizer_factory = utils.import_fn(tokenizer_config['module'])
-    tokenizer_factory = get_tokenizer_factory(**tokenizer_config['module_kwargs'])
-
-    tokenize(tokenizer_factory=tokenizer_factory, **data_config)
-
-    logging.all_done()

@@ -1,23 +1,23 @@
 __include__: ['base_config.yaml']
 
 general:
-  out_dir: '~/out_dir/gpt2_124m_tinystories'
+  out_dir: '~/out_dir/llama2_124m_tinystories'
 
 logging:
-  project_name: 'gpt2_124m_tinystories'
+  project_name: 'llama2_124m_tinystories'
   enable_wandb: true
   enable_summaries: true
-  run_name: 'gpt124m_tinystories_tiktoken_bloat16'  # null -> select random name
-  run_description: 'GPT124M tinystories using gpt2 tokenizer and bfloat16'
+  run_name: 'Llama2-124m_tinystories_llama2_bloat16'  # null -> select random name
+  run_description: 'Llama2-124m tinystories using llama2 tokenizer and bfloat16'
 
 data:
   module_kwargs:
-    tokenized_train_path: '$DATA_ROOT/tokenized/tinystories_v2/tiktoken/train.bin'
-    tokenized_val_path: '$DATA_ROOT/tokenized/tinystories_v2/tiktoken/validation.bin'
+    tokenized_train_path: '$DATA_ROOT/tokenized/tinystories_v2/llama2/train.bin'
+    tokenized_val_path: '$DATA_ROOT/tokenized/tinystories_v2/llama2/validation.bin'
 
 training:
-  train_batch_size: 60
-  num_steps: 300000
+  train_batch_size: 64 # scaled up from 64 along with LR
+  num_steps: 500000
   gradient_accumulation_steps: 8
   adj_grad_acc_gpu_count: true # adjust gradient accumulation steps for number of GPUs
 

@@ -31,9 +31,9 @@ model:
 tokenizer:
   module: 'nanugpt.tokenizers.hf_tokenizer.get_tokenizer_factory'
   module_kwargs:
-    hf_path: 'meta-llama/Llama-2-7b'
-    model_max_length: '_copy: /model/module_kwargs/context_length'
-
+    hf_path: 'NousResearch/Llama-2-7b-hf'
+    token: '$HF_AUTH_TOKEN'
+    fix_pad_token: false
 
 loss:
   module: 'nanugpt.losses.autoregressive_loss.get_loss'
@@ -51,33 +51,33 @@ data:
     tokenized_test_path: null
 
 training:
-  train_batch_size: 12
-  num_steps: 600000    # for OpenWebText/9B tokens
+  train_batch_size: 60
+  num_steps: 1000000    # for OpenWebText/9B tokens
   enable_train_log: true
   log_every: 100
   grad_clip: 1.0 # disabled if 0.0
-  gradient_accumulation_steps: 40
+  gradient_accumulation_steps: 8
   adj_grad_acc_gpu_count: true # adjust gradient accumulation steps for number of GPUs
 
 optimizer:
   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
   module_kwargs:
-    learning_rate: 6.0E-4
+    learning_rate: 3.0E-4
     weight_decay: 0.1
     beta1: 0.9
     beta2: 0.95
     eps: 1.0E-8 # pytorch default
-
-generate:
-  checkpoint_path: '_copy: /general/out_dir'
-  checkpoint_name: 'checkpoint_best.pt'
 
 scheduler:
   module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
   module_kwargs:
     warmup_iters: 2000
     lr_decay_iters: '_copy: /training/num_steps'
-    min_lr: 6.0E-5
+    min_lr: 3.0E-5
+
+generate:
+  checkpoint_path: '_copy: /general/out_dir'
+  checkpoint_name: 'checkpoint_best.pt'
 
 eval:
   eval_every: 1000
