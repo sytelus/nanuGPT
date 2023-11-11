@@ -80,7 +80,8 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
         arr_len = np.sum(dset['len'], dtype=np.uint64)
         logging.summary({f'{split}_tokens': arr_len})
 
-        filename = os.path.join(utils.full_path(tokenized_out_dir, create=True) , f'{split}.bin')
+        tokenized_out_dir = utils.full_path(tokenized_out_dir, create=True)
+        filename = os.path.join(tokenized_out_dir, f'{split}.bin')
         arr = np.memmap(filename, dtype=np_dtype, mode='w+', shape=(arr_len,))
         # each shard has 8192 samples, so we need to calculate how many shards we need
         total_batches = 2**math.ceil(math.log2((len(dset) // 8192) + 1))

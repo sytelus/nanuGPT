@@ -82,7 +82,7 @@ def get_datasets(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Op
         for split in usual_test_split_names:
             if split in dataset:
                 found_test_split = split
-                logging.info(f'test_split is None, using the name "{test_split}" for the split')
+                logging.info(f'test_split is None, using the name "{found_test_split}" for the split')
                 break
         # if test frac is specified but if test split already exist then its mistake
         if test_fraction:
