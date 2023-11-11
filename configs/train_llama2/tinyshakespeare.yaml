@@ -3,6 +3,7 @@ __include__: ['base_config.yaml']
 general:
   dtype: 'bfloat16'         # float32, float16, bfloat16
   out_dir: '$OUT_DIR/llama2_tinyshakespeare'
+  torch_compile: false # will not compile if Python > 3.11, torch < 2.1.0 or Windows
 
 logging:
   enable_wandb: true
@@ -24,9 +25,9 @@ data:
     tokenized_val_path: '$DATA_ROOT/tokenized/tinyshakespeare/llama2/val.bin'
 
 training:
-  train_batch_size: 32
+  train_batch_size: 16
   num_steps: 8000 # divide the number of steps by number of GPUs
-  gradient_accumulation_steps: 2
+  gradient_accumulation_steps: 4
   adj_grad_acc_gpu_count: false # adjust gradient accumulation steps for number of GPUs
 
 optimizer:
