@@ -83,7 +83,7 @@ def create_py_logger(filepath:Optional[str]=None,
 
 std_metrics = {}
 std_metrics['default'] = [
-                            {"name": "elapsed_s", "summary":"max"},
+                            {"name": "elapsed_s", "step_metric":"train/step", "summary":"max"},
                             {"name": "train/step", "step_metric":"elapsed_s", "summary":"max"},
                             {"name": "train/samples", "step_metric":"elapsed_s", "summary":"max"},
                             {"name": "train/step_samples", "step_metric":"train/step", "summary":"mean"},
@@ -92,6 +92,7 @@ std_metrics['default'] = [
                             {"name": "train/loss", "step_metric":"train/samples", "summary":"min", "goal":"min"},
                             {"name": "train/loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
                             {"name": "train/best_loss", "step_metric":"train/samples", "summary":"min", "goal":"min"},
+                            {"name": "train/best_loss_step", "step_metric":"train/step", "summary":"max", "goal":"max"},
                             {"name": "train/ppl", "step_metric":"train/samples", "summary":"min", "goal":"min"},
                             {"name": "train/step_interval", "step_metric":"train/step", "summary":"mean"},
 
@@ -103,6 +104,7 @@ std_metrics['default'] = [
                             {"name": "train/step_ppl", "step_metric":"train/step", "summary":"min", "goal":"min"},
 
                             {"name": "val/best_loss", "step_metric":"train/samples", "summary":"min", "goal":"min"},
+                            {"name": "val/best_loss_step", "step_metric":"train/step", "summary":"max", "goal":"max"},
                             {"name": "val/loss", "step_metric":"train/samples", "summary":"min", "goal":"min"},
                             {"name": "val/loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
                             {"name": "val/ppl", "step_metric":"train/samples", "summary":"min", "goal":"min"},
