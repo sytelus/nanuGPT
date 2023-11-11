@@ -63,7 +63,7 @@ def get_datasets(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Op
         for split in usual_val_split_names:
             if split in dataset:
                 found_val_split = split
-                logging.info(f'val_split is None, using the name "{val_split}" for the split')
+                logging.info(f'val_split is None, using the name "{found_val_split}" for the split')
                 break
         # if val frac is specified but if val split already exist then its mistake
         if val_fraction:
@@ -72,6 +72,8 @@ def get_datasets(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Op
             else:
                 # we need to create a val split
                 val_split = (dataset_split_names.intersection(usual_val_split_names) or {'validation'}).pop()
+        else:
+            val_split = found_val_split
 
     if test_split is None:
         # detect test split
@@ -89,6 +91,8 @@ def get_datasets(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Op
             else:
                 # we need to create a test split
                 test_split = (dataset_split_names.intersection(usual_test_split_names) or {'test'}).pop()
+        else:
+            test_split = found_test_split
 
     if test_fraction: # simplify code
         assert val_fraction > 0, 'test_fraction can only be used if val_fraction > 0'
