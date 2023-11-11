@@ -687,4 +687,4 @@ def flash_attn_supported():
     return nvidia_sm()[0] >= 8
 
 def is_master_node()->bool:
-    return os.environ.get('LOCAL_RANK', '0') == '0'
+    return os.environ.get('RANK', '0') == '0'

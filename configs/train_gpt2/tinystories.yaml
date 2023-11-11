@@ -1,68 +1,42 @@
+__include__: ['base_config.yaml']
+
 general:
-  device_type: 'cuda'            # auto select if blank or cpu, cuda
-  backend: 'nccl'       # nccl, gloo, mpi, horovod)
-  dtype: 'bfloat16'         # float32, float16, bfloat16
-  torch_compile: false
-  seed: 42
-  enable_distributed: false
-  out_dir: '~/out_dir/gpyplay/tinystories'
+  out_dir: '~/out_dir/gpt2_124m_wikitext-103'
 
 logging:
-  enable_wandb: false
-  project_name: tinystories
-  run_name: nil  # select random name
-  run_description: nil
-  log_dir: '~/out_dir/gpyplay/tinystories'
-  log_filename: 'log.txt'
-  allow_overwrite_log: true
-  metrics_type: 'classification'
+  project_name: 'gpt2_124m_wikitext-103'
+  enable_wandb: true
   enable_summaries: true
-
-model:
-  module: 'nanugpt.models.tiny_transformer.get_model'
-  n_layer: 12
-  n_embd: 768
-  n_head: 12
-  context_length: &context_length 1024
-
-loss:
-  module: 'nanugpt.losses.autoregressive_loss.get_loss'
+  run_name: 'gpt124m_wikitext103_tiktoken_bloat16'  # select random name
+  run_description: 'GPT124M WikiText-103 using gpt2 tokenizer and bfloat16'
 
 data:
-  module: 'nanugpt.data.tokenized_data.get_data'
-  tokenized_train_path: $DATA_DIR/tokenized/tinystories_v2/tiktoken/train.bin
-  tokenized_val_path: $DATA_DIR/tokenized/tinystories_v2/tiktoken/validation.bin
-  tokenized_test_path: null
-  dtype: 'uint16'
-  train_batch_size: 12
-  eval_batch_size: 32768 # 2^15=32768
-  data_loader_seed: 8
-  context_length: *context_length
+  module_kwargs:
+    tokenized_train_path: '$DATA_ROOT/tokenized/wikipedia/tiktoken/train.bin'
+    tokenized_val_path: '$DATA_ROOT/tokenized/wikipedia/tiktoken/validation.bin'
+    tokenized_test_path: '$DATA_ROOT/tokenized/wikipedia/tiktoken/test.bin'
+
+model:
+  module: 'nanugpt.models.nanogpt.get_model'
+  module_kwargs:
+    n_layer: 24
+    n_embd: 1024
+    n_head: 16
+    context_length: 1024
 
 training:
-  num_steps: 600000    # 1e5 is not enough when weight_decay=0.0
-  enable_train_log: false
-  log_every: 100
-  grad_clip: 1.0 # disabled if 0.0
-  gradient_accumulation_steps: 40 # will be automatically divided by GPU count
+  train_batch_size: 64
+  num_steps: 300000
+  gradient_accumulation_steps: 8
+  adj_grad_acc_gpu_count: true # adjust gradient accumulation steps for number of GPUs
 
 optimizer:
-  module: 'nanugpt.optimizers.adamw_wd.get_optim'
-  learning_rate: 6.0E-4
-  weight_decay: 0.1     # weight_decay=1 makes convergence much faster and original graph is not reproducible
-  beta1: 0.9
-  beta2: 0.95
-  eps: 1.0E-8 # pytorch default
+  module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
+  module_kwargs:
+    learning_rate: 1.5E-4
 
 scheduler:
   module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
-  warmup_iters: 2000
-  lr_decay_iters: 600000
-  min_lr: 6.0E-5
-
-eval:
-  eval_every: 500
-  eval_iters: 200 # number of samples to evaluate for dataset
-  save_checkpoint: true
-  checkoint_after: 100000 # starts saving checkpoint after these steps
-  checkpoint_every: 1000 # multiple of eval_iters, save checkpoint after these steps from last checkpoint when val loss is better
+  module_kwargs:
+    warmup_iters: 3000
+    min_lr: 1.0E-5
