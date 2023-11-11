@@ -1,0 +1,15 @@
+__include__: ['base_config.yaml']
+
+tokenizer:
+  module: 'nanugpt.tokenizers.tiktoken_wrap.get_tokenizer_factory'
+  module_kwargs:
+    encoding_name: 'cl100k_base'
+
+data:
+  hf_name_path: '$DATA_ROOT/datasets/wikitext-103-raw-v1'
+  tokenized_out_dir: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/tiktoken_gpt4/'
+
+
+
+
+

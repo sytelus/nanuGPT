@@ -1,5 +1,6 @@
 from typing import List, Mapping, Optional, Callable, Any
 
+import tokenizers
 from transformers import AutoTokenizer
 
 from nanugpt.tokenizers.tokenizer_base import TokenizerBase
@@ -29,6 +30,7 @@ class HfTokenizer(TokenizerBase):
                                                 padding_side=padding_side,
                                                 truncation_side=truncation_side,
                                                 model_max_length=model_max_length,
+                                                use_fast=True,
                                                 **kwargs)
 
         # pad token is required for unequal sequences. If tokenizer is not trained with
@@ -40,10 +42,12 @@ class HfTokenizer(TokenizerBase):
                 self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
 
     def batch_encode(self, texts:List[str])->Mapping:
+        padding = self.padding if len(texts) > 1 else False
+        trucate = self.trucate if len(texts) > 1 else False
         return self.tokenizer(texts,
-                                padding=self.padding, # type: ignore
-                                truncation=self.trucate, # type: ignore
-                                return_tensors='pt')
+                                padding=padding, # type: ignore
+                                truncation=trucate, # type: ignore
+                                return_tensors=None)
 
     def batch_decode(self, ids:List[List[int]])->List[str]:
         return self.tokenizer.batch_decode(ids,

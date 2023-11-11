@@ -1,13 +1,10 @@
-import math
-from typing import List, Optional, Mapping, Tuple
+from typing import List, Optional, Mapping
 import os
 
 import torch
 
 from nanugpt import utils
-from nanugpt.config import Config
 from nanugpt import common
-from nanugpt import glogging as logging
 
 class Generator:
     def __init__(self, config:Mapping, logger) -> None:
@@ -66,15 +63,3 @@ class Generator:
                 idx = torch.cat((idx, idx_next), dim=1)
             results.append(idx.squeeze(0).tolist())
         return self.tokenizer.batch_decode(results)
-
-if __name__ == "__main__":
-    # specify config file to use as first argument in commandline
-    config = Config(default_config_filepath='configs/train_gpt2/tinyshakespeare.yaml')
-    logging_config = config['logging']
-    logger = logging.Logger(master_process=True, **logging_config)
-
-    gen = Generator(config, logger)
-    results = gen.generate(['\n'], 200)
-    print(results)
-
-    logger.all_done()

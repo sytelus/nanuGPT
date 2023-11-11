@@ -8,11 +8,12 @@ tokenizer:
     fix_pad_token: false
 
 data:
-  hf_name_path: 'text'
-  hf_data_files: {train: ['$DATA_ROOT/datasets/tinyshakespeare/input.txt']}
-  tokenized_out_dir: '$DATA_ROOT/tokenized/tinyshakespeare/llama2/'
-  hf_sample_by: 'paragraph'
+  hf_name_path: '$DATA_ROOT/datasets/openwebtext'
+  tokenized_out_dir: '$DATA_ROOT/tokenized/openwebtext/llama2/'
 
-  val_fraction: 0.1
+  val_fraction: 0.0005
   text_column: null
-  val_split: 'val'
+
+
+
+

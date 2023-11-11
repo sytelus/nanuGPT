@@ -1,14 +1,14 @@
 __include__: ['base_config.yaml']
 
 general:
-  out_dir: '~/out_dir/gpt2_124m_wikitext-103'
+  out_dir: '~/out_dir/llama2_124m_wikitext103'
 
 logging:
-  project_name: 'gpt2_124m_wikitext-103'
+  project_name: 'llama2_124m_wikitext103'
   enable_wandb: true
   enable_summaries: true
-  run_name: 'gpt124m_wikitext103_tiktoken_bloat16'  # select random name
-  run_description: 'GPT124M WikiText-103 using gpt2 tokenizer and bfloat16'
+  run_name: 'llama2-124m_wikitext103_llama2_bloat16'  # select random name
+  run_description: 'Llama2-124M WikiText-103 using llama2 tokenizer and bfloat16'
 
 data:
   module_kwargs:
@@ -26,7 +26,7 @@ model:
 
 training:
   train_batch_size: 32
-  num_steps: 300000
+  num_steps: 500000
   gradient_accumulation_steps: 16
   adj_grad_acc_gpu_count: true # adjust gradient accumulation steps for number of GPUs
 

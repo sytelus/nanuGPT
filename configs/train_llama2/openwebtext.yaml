@@ -1,17 +1,17 @@
 __include__: ['base_config.yaml']
 
 general:
-  out_dir: '~/out_dir/gpt2_124m_owt'
+  out_dir: '~/out_dir/llama2_124m_owt'
 
 logging:
-  project_name: 'gpt2_124m_owt'
+  project_name: 'llama2_124m_owt'
   enable_wandb: true
   enable_summaries: true
-  run_name: 'nanogpt_baseline'  # select random name
-  run_description: 'Reproduce NanoGPT baseline for GPT2 124M on OpenWebText'
+  run_name: 'llama2_124m_owt'  # select random name
+  run_description: 'Llama2 124M baseline on OpenWebText'
 
 data:
   module_kwargs:
-    tokenized_train_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/train.bin'
-    tokenized_val_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/val.bin'
+    tokenized_train_path: '$DATA_ROOT/tokenized/openwebtext/llama2/train.bin'
+    tokenized_val_path: '$DATA_ROOT/tokenized/openwebtext/llama2/val.bin'
 
