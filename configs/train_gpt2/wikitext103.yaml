@@ -1,20 +1,20 @@
 __include__: ['base_config.yaml']
 
 general:
-  out_dir: '~/out_dir/gpt2_124m_wikitext-103'
+  out_dir: '~/out_dir/gpt2_124m_wikitext-103_byte'
 
 logging:
-  project_name: 'gpt2_124m_wikitext-103'
+  project_name: 'gpt2_124m_wikitext-103_byte'
   enable_wandb: true
   enable_summaries: true
-  run_name: 'gpt124m_wikitext103_tiktoken_bloat16'  # select random name
+  run_name: 'gpt124m_wikitext103_byte_bloat16'  # select random name
   run_description: 'GPT124M WikiText-103 using gpt2 tokenizer and bfloat16'
 
 data:
   module_kwargs:
-    tokenized_train_path: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/tiktoken/train.bin'
-    tokenized_val_path: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/tiktoken/validation.bin'
-    tokenized_test_path: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/tiktoken/test.bin'
+    tokenized_train_path: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/bin/train.bin'
+    tokenized_val_path: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/bin/validation.bin'
+    tokenized_test_path: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/bin/test.bin'
 
 model:
   module: 'nanugpt.models.nanogpt.get_model'
@@ -22,12 +22,12 @@ model:
     n_layer: 24
     n_embd: 1024
     n_head: 16
-    context_length: 1024
+    context_length: 2048
 
 training:
-  train_batch_size: 32
-  num_steps: 300000
-  gradient_accumulation_steps: 16
+  train_batch_size: 16
+  num_steps: 12000000
+  gradient_accumulation_steps: 32
   adj_grad_acc_gpu_count: true # adjust gradient accumulation steps for number of GPUs
 
 optimizer:
