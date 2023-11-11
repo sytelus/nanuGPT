@@ -11,7 +11,7 @@ from rich.logging import RichHandler
 import wandb
 import torch
 
-from nanugpt.utils import full_path, is_debugging
+from nanugpt.utils import full_path, is_debugging, is_master_process
 
 INFO=py_logging.INFO
 WARN=py_logging.WARN
@@ -130,6 +130,7 @@ def create_wandb_logger(project_name, run_name,
                         metrics:List[Dict[str, Any]],
                         description:Optional[str]=None):
 
+    print(f"Initializing WandB on LOCAL_RANK: {os.environ.get('LOCAL_RANK', '-1')}, RANK {os.environ.get('RANK', '-1')},  utils.is_master_process={is_master_process()}")
     wandb.login() # use API key from WANDB_API_KEY env variable
 
     run = wandb.init(project=project_name, name=run_name,

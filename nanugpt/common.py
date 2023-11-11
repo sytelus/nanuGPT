@@ -42,7 +42,7 @@ def setup_device(config:Mapping, logger:logging.Logger)->Tuple[torch.device, Abs
 
 def setup_logger(is_master:bool,config:Optional[Mapping]=None, logger:Optional[logging.Logger]=None)->logging.Logger:
     if logger is None:
-        print(f"Creating logger on LOCAL_RANK: {os.environ.get('LOCAL_RANK', '-1')}, RANK {os.environ.get('RANK', '-1')}")
+        print(f"Creating logger on LOCAL_RANK: {os.environ.get('LOCAL_RANK', '-1')}, RANK {os.environ.get('RANK', '-1')}, is_master={is_master}, utils.is_master_process={utils.is_master_process()}")
         assert config is not None, "Either config or logger must be provided but both are None."
         logging_config = config['logging']
         if not logging_config['log_dir']:

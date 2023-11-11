@@ -65,10 +65,10 @@ def train(config:Mapping, logger=None):
 
     # setup system, device, logger, torch
     own_logger = logger is None
-    logger = common.setup_logger(utils.is_master_node(), config, logger)
+    logger = common.setup_logger(utils.is_master_process(), config, logger)
 
     device, amp_ctx, torch_info = common.setup_device(config, logger)
-    assert torch_info.is_master == utils.is_master_node(), "torch_info.is_master != utils.is_master_node()"
+    assert torch_info.is_master == utils.is_master_process(), "torch_info.is_master != utils.is_master_process()"
 
     # adjust gradient accumulation steps if we are doing distributed training
     if torch_info.is_distributed and adj_grad_acc_gpu_count:

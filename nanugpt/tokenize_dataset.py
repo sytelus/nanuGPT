@@ -103,7 +103,7 @@ if __name__ == "__main__":
     # specify config file to use as first argument in commandline
     config = Config(default_config_filepath='configs/tokenize/tiktoken_gpt2.yaml')
 
-    logger = common.setup_logger(config=config, is_master=utils.is_master_node())
+    logger = common.setup_logger(config=config, is_master=utils.is_master_process())
 
     data_config = config['data']
     tokenizer_config = config['tokenizer']
