@@ -12,14 +12,13 @@ from nanugpt import glogging as logging
 from nanugpt.tokenizers.tokenizer_base import TokenizerBase
 
 
-def setup_device(config:Mapping, logger:Optional[logging.Logger])->Tuple[torch.device, AbstractContextManager, logging.Logger, utils.TorchInfo]:
+def setup_device(config:Mapping, logger:logging.Logger)->Tuple[torch.device, AbstractContextManager, utils.TorchInfo]:
     seed = config['general']['seed']
     device_type = config['general']['device_type']
     dtype = config['general']['dtype']
     enable_distributed = config['general']['enable_distributed']
     distributed_backend = config['general']['distributed_backend']
     distributed_init_method = config['general']['distributed_init_method']
-    logging_config = config['logging']
 
     if enable_distributed is None and int(os.environ.get('WORLD_SIZE', '1')) > 1:
         enable_distributed = True
@@ -32,11 +31,6 @@ def setup_device(config:Mapping, logger:Optional[logging.Logger])->Tuple[torch.d
 
     utils.setup_sys(seed + torch_info.seed_offset)
 
-    if logger is None:
-        logger = logging.Logger(master_process=torch_info.is_master, **logging_config)
-
-    logger.log_sys_info()
-    logger.log_config(config)
     d = dataclasses.asdict(torch_info)
     d['pt_dtype'] = str(d['pt_dtype'])  # make it JSON serializable so it can be logged
     logger.summary(d)
@@ -44,7 +38,22 @@ def setup_device(config:Mapping, logger:Optional[logging.Logger])->Tuple[torch.d
     device = torch.device(torch_info.device_name)
     amp_ctx = nullcontext() if torch_info.device_type == 'cpu' else torch.amp.autocast(device_type=torch_info.device_type, dtype=torch_info.pt_dtype)
 
-    return device, amp_ctx, logger, torch_info
+    return device, amp_ctx, torch_info
+
+def setup_logger(is_master:bool,config:Optional[Mapping]=None, logger:Optional[logging.Logger]=None)->logging.Logger:
+    if logger is None:
+        assert config is not None, "Either config or logger must be provided but both are None."
+        logging_config = config['logging']
+        if not logging_config['log_dir']:
+            out_dir = config['data']['tokenized_out_dir']
+            logging_config['log_dir'] = utils.full_path(out_dir, create=True)
+        logger = logging.Logger(master_process=is_master, **logging_config)
+
+    logger.log_sys_info()
+    logger.log_config(config)
+
+    return logger
+
 
 def compile_torch_model(model:torch.nn.Module, logger:logging.Logger)->torch.nn.Module:
     python_version = sys.version_info

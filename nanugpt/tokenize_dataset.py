@@ -101,13 +101,7 @@ if __name__ == "__main__":
     # specify config file to use as first argument in commandline
     config = Config(default_config_filepath='configs/tokenize/tiktoken_gpt2.yaml')
 
-    # setup output dirs and logging
-    logging_config = config['logging']
-    out_dir = config['data']['tokenized_out_dir']
-    if not logging_config['log_dir']:
-        logging_config['log_dir'] = utils.full_path(out_dir, create=True)
-
-    logger = logging.Logger(master_process=True,  **logging_config)
+    logger = common.setup_logger(config=config, is_master=utils.is_master_node())
 
     data_config = config['data']
     tokenizer_config = config['tokenizer']

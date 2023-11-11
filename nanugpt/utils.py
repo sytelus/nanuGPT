@@ -685,3 +685,6 @@ def nvidia_sm():
 def flash_attn_supported():
     """Returns True if the first GPU is NVIDIA Ampere"""
     return nvidia_sm()[0] >= 8
+
+def is_master_node()->bool:
+    return os.environ.get('LOCAL_RANK', '0') == '0'
