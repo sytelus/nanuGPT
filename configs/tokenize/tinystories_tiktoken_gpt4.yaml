@@ -7,7 +7,7 @@ tokenizer:
 
 data:
   hf_name_path: '$DATA_ROOT/datasets/tiny_stories/tinystories_v2'
-  tokenized_out_dir: '$DATA_ROOT/tokenized/tinystories_v2/tiktoken/'
+  tokenized_out_dir: '$DATA_ROOT/tokenized/tinystories_v2/tiktoken_gpt4/'
 
 
 

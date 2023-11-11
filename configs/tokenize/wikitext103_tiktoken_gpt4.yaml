@@ -7,7 +7,7 @@ tokenizer:
 
 data:
   hf_name_path: '$DATA_ROOT/datasets/wikitext-103-raw-v1'
-  tokenized_out_dir: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/tiktoken/'
+  tokenized_out_dir: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/tiktoken_gpt4/'
 
 
 
