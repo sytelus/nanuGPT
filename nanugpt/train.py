@@ -74,7 +74,10 @@ def train(config:Mapping, logger=None):
         assert gradient_accumulation_steps % torch_info.world_size == 0, f'gradient_accumulation_steps ({gradient_accumulation_steps}) must be divisible by ddp_world_size ({torch_info.world_size})'
         gradient_accumulation_steps = gradient_accumulation_steps // torch_info.world_size
 
-    logger.summary({"global_batch_size": gradient_accumulation_steps * train_batch_size * torch_info.world_size,
+    logger.summary({
+                    "gradient_accumulation_steps": gradient_accumulation_steps,
+                    "gpu_batch_size": train_batch_size,
+                    "global_batch_size": gradient_accumulation_steps * train_batch_size * torch_info.world_size,
                     "local_batch_size": gradient_accumulation_steps * train_batch_size,
                     "tokens_per_iter": gradient_accumulation_steps * train_batch_size * torch_info.world_size * context_length
                     })
