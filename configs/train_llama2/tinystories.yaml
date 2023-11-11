@@ -17,7 +17,7 @@ data:
 
 training:
   train_batch_size: 64 # scaled up from 64 along with LR
-  num_steps: 300000
+  num_steps: 500000
   gradient_accumulation_steps: 8
   adj_grad_acc_gpu_count: true # adjust gradient accumulation steps for number of GPUs
 
