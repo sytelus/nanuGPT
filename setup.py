@@ -15,7 +15,7 @@ install_requires=[
 
 setuptools.setup(
     name="nanugpt",
-    version="0.3.0",
+    version="0.3.5",
     author="Shital Shah",
     description="Simple, reliable and well tested training code for quick experiments with transformer based models",
     long_description=long_description,
