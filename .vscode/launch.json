@@ -37,6 +37,14 @@
             "args": ["configs/train_gpt2/tinyshakespeare.yaml"]
         },
         {
+            "name": "Train GPT2-Tinystories",
+            "type": "python",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["configs/train_gpt2/tinystories.yaml"]
+        },
+        {
             "name": "Train Llama2-Shakespear",
             "type": "python",
             "request": "launch",

@@ -75,7 +75,7 @@ def train(config:Mapping, logger=None):
         gradient_accumulation_steps = gradient_accumulation_steps // torch_info.world_size
 
     logger.summary({"global_batch_size": gradient_accumulation_steps * train_batch_size * torch_info.world_size,
-                    "local_batch_size": gradient_accumulation_steps * torch_info.world_size,
+                    "local_batch_size": gradient_accumulation_steps * train_batch_size,
                     "tokens_per_iter": gradient_accumulation_steps * train_batch_size * torch_info.world_size * context_length
                     })
 
