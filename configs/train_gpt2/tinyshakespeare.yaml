@@ -42,14 +42,6 @@ optimizer:
     beta1: 0.9
     beta2: 0.99
 
-scheduler:
-  module: 'nanugpt.schedulers.constant.get_scheduler'
-  module_kwargs:
-    warmup_iters: 100
-    lr_const_iters: '_copy: /training/num_steps'
-    const_lr: 1.0E-4
-    cooldown_iters: 1000
-
 eval:
   eval_every: 250
   eval_iters: 200 # number of samples to evaluate for dataset
