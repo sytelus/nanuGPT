@@ -7,8 +7,8 @@ logging:
   project_name: 'gpt2_124m_owt'
   enable_wandb: true
   enable_summaries: true
-  run_name: 'gpt2_124m_owt'  # select random name
-  run_description: 'GPT2 124M on OpenWebText'
+  run_name: 'gpt2_124m_owt_100k_cooldown_500'  # select random name
+  run_description: 'GPT2 124M on OpenWebText with const LR, cooldown 500, 100k steps'
 
 data:
   module_kwargs:

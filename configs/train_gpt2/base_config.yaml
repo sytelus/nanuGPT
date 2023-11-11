@@ -50,7 +50,7 @@ data:
 
 training:
   train_batch_size: 60
-  num_steps: 600000    # for OpenWebText/9B tokens
+  num_steps: 100000    # for OpenWebText/9B tokens
   enable_train_log: true
   log_every: 100
   grad_clip: 1.0 # disabled if 0.0
@@ -67,11 +67,12 @@ optimizer:
     eps: 1.0E-8 # pytorch default
 
 scheduler:
-  module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
+  module: 'nanugpt.schedulers.constant.get_scheduler'
   module_kwargs:
     warmup_iters: 2000
-    lr_decay_iters: '_copy: /training/num_steps'
-    min_lr: 6.0E-5
+    num_steps: '_copy: /training/num_steps'
+    const_lr: 6.0E-4
+    cooldown_iters: 500
 
 generate:
   checkpoint_path: '_copy: /general/out_dir'
