@@ -1,31 +1,23 @@
 __include__: ['base_config.yaml']
 
 general:
-  out_dir: '~/out_dir/gpt2_124m_wikitext-103'
+  out_dir: '~/out_dir/gpt2_124m_tinystories'
 
 logging:
-  project_name: 'gpt2_124m_wikitext-103'
+  project_name: 'gpt2_124m_tinystories'
   enable_wandb: true
   enable_summaries: true
-  run_name: 'gpt124m_wikitext103_tiktoken_bloat16'  # select random name
-  run_description: 'GPT124M WikiText-103 using gpt2 tokenizer and bfloat16'
+  run_name: 'gpt124m_tinystories_tiktoken_bloat16'  # null -> select random name
+  run_description: 'GPT124M tinystories using gpt2 tokenizer and bfloat16'
 
 data:
   module_kwargs:
-    tokenized_train_path: '$DATA_ROOT/tokenized/wikipedia/tiktoken/train.bin'
-    tokenized_val_path: '$DATA_ROOT/tokenized/wikipedia/tiktoken/validation.bin'
-    tokenized_test_path: '$DATA_ROOT/tokenized/wikipedia/tiktoken/test.bin'
-
-model:
-  module: 'nanugpt.models.nanogpt.get_model'
-  module_kwargs:
-    n_layer: 24
-    n_embd: 1024
-    n_head: 16
-    context_length: 1024
+    tokenized_train_path: '$DATA_ROOT/tokenized/tinystories_v2/tiktoken/train.bin'
+    tokenized_val_path: '$DATA_ROOT/tokenized/tinystories_v2/tiktoken/validation.bin'
+    tokenized_test_path: '$DATA_ROOT/tokenized/tinystories_v2/tiktoken/test.bin'
 
 training:
-  train_batch_size: 64
+  train_batch_size: 512 # scaled up from 64 along with LR
   num_steps: 300000
   gradient_accumulation_steps: 8
   adj_grad_acc_gpu_count: true # adjust gradient accumulation steps for number of GPUs
@@ -33,10 +25,15 @@ training:
 optimizer:
   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
   module_kwargs:
-    learning_rate: 1.5E-4
+    learning_rate: 4.8E-3
+    weight_decay: 0.1
+    beta1: 0.9
+    beta2: 0.95
+    eps: 1.0E-8 # pytorch default
 
 scheduler:
   module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
   module_kwargs:
-    warmup_iters: 3000
-    min_lr: 1.0E-5
+    warmup_iters: 2000
+    lr_decay_iters: '_copy: /training/num_steps'
+    min_lr: 4.8E-4
