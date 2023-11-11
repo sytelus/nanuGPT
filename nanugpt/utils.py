@@ -28,6 +28,8 @@ import logging
 
 import yaml
 
+import matplotlib
+matplotlib.use('TkAgg',force=True)
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.cm as cm

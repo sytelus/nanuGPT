@@ -3,7 +3,9 @@ __include__: ['base_config.yaml']
 tokenizer:
   module: 'nanugpt.tokenizers.hf_tokenizer.get_tokenizer_factory'
   module_kwargs:
-    hf_path: 'meta-llama/Llama-2-7b'
+    hf_path: 'NousResearch/Llama-2-7b-hf'
+    token: '$HF_AUTH_TOKEN'
+    fix_pad_token: false
 
 data:
   hf_name_path: 'text'

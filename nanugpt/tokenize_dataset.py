@@ -29,6 +29,12 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
                            val_fraction=val_fraction, test_fraction=test_fraction, data_loader_seed=data_loader_seed,
                            hf_sample_by=hf_sample_by, hf_revision=hf_revision)
 
+    # create instance so any downloading can be done before we start the tokenization
+    tok = tokenizer_factory()
+    vocab_size = len(tok)
+    logging.summary({'vocab_size': vocab_size})
+    np_dtype = np.uint16 if vocab_size < 2**16 else np.uint32
+    logging.summary({'np_dtype': str(np_dtype)})
 
     class TokenizerPerThread:
         def __init__(self, tokenizer_factory):
@@ -56,13 +62,6 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
         desc="tokenizing the splits",
         num_proc=utils.work_cpu_count(),
     )
-
-    tok = tokenizer_factory()
-    vocab_size = len(tok)
-    logging.summary({'vocab_size': vocab_size})
-    np_dtype = np.uint16 if vocab_size < 2**16 else np.uint32
-    logging.summary({'np_dtype': str(np_dtype)})
-
 
     # concatenate all the ids in each dataset into one large file we can use for training
     for split in [train_split, val_split, test_split]:

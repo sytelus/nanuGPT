@@ -14,7 +14,6 @@ data:
   module_kwargs:
     tokenized_train_path: '$DATA_ROOT/tokenized/tinystories_v2/tiktoken/train.bin'
     tokenized_val_path: '$DATA_ROOT/tokenized/tinystories_v2/tiktoken/validation.bin'
-    tokenized_test_path: '$DATA_ROOT/tokenized/tinystories_v2/tiktoken/test.bin'
 
 training:
   train_batch_size: 512 # scaled up from 64 along with LR

@@ -67,7 +67,7 @@ def compile_torch_model(model:torch.nn.Module, logger:logging.Logger)->torch.nn.
         logger.info("Compiling model...")
         try:
             #torch._dynamo.config.verbose=True # if compile error outs
-            model = torch.compile(model, dynamic=True) # type: ignore
+            model = torch.compile(model) # type: ignore
         except Exception as e:
             logger.error(f"Failed to compile model: {str(e)}")
         logger.info("Compiling done.")
