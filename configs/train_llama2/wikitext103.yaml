@@ -17,7 +17,7 @@ data:
     tokenized_test_path: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/tiktoken/test.bin'
 
 model:
-  module: 'nanugpt.models.nanogpt.get_model'
+  module: 'nanugpt.models.hf_llama.get_model'
   module_kwargs:
     n_layer: 24
     n_embd: 1024
