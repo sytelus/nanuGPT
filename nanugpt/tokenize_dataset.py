@@ -31,10 +31,11 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
 
     common.check_env_vars()
 
-    dataset = get_datasets(hf_name_path=hf_name_path, hf_dataset_name=hf_dataset_name, hf_data_dir=hf_data_dir, hf_data_files=hf_data_files,
+    dataset, train_split, val_split, test_split = get_datasets(hf_name_path=hf_name_path, hf_dataset_name=hf_dataset_name, hf_data_dir=hf_data_dir, hf_data_files=hf_data_files,
                            train_split=train_split, val_split=val_split, test_split=test_split, hf_cache_dir=hf_cache_dir,
                            val_fraction=val_fraction, test_fraction=test_fraction, data_loader_seed=data_loader_seed,
                            hf_sample_by=hf_sample_by, hf_revision=hf_revision)
+
 
     class TokenizerPerThread:
         def __init__(self, tokenizer_factory):

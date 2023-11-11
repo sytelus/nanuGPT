@@ -21,9 +21,9 @@ data:
   text_column: 'text'
 
   # splits to tokenize
-  train_split: 'train'
-  val_split: 'val'
-  test_split: null
+  train_split: null # auto detect 'train'
+  val_split: null # set to '' to ignore existing val split and create a new one
+  test_split: null # auto detect 'train'
   val_fraction: null
   test_fraction: null
 

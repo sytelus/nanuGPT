@@ -15,7 +15,7 @@ def get_datasets(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Op
              train_split:Optional[str], val_split:Optional[str], test_split:Optional[str], hf_cache_dir:Optional[str],
              hf_sample_by:Optional[str],
              val_fraction:Optional[float], test_fraction:Optional[float],
-             data_loader_seed:int)->DatasetDict:
+             data_loader_seed:int)->Tuple[DatasetDict, Optional[str], Optional[str], Optional[str]] :
 
     if hf_name_path != 'text' and os.path.isdir(utils.full_path(hf_name_path)):
         hf_name_path = utils.full_path(hf_name_path)
@@ -39,15 +39,56 @@ def get_datasets(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Op
         dataset = DatasetDict({train_split: dataset})
 
     logging.info(f'Loaded dataset {hf_name_path}')
-    for split in dataset.keys():
+    dataset_split_names = set(dataset.keys())
+    for split in dataset_split_names:
         logging.summary({f'{split}_original_rows': len(dataset[split])})
 
-    # set default values
-    train_split = train_split or 'train'
-    val_split = val_split or 'validation'
-    test_split = test_split or 'test'
+    # Validate split names
+    if train_split is None: # auto-detect
+        if 'train' in dataset:
+            train_split = 'train'
+            logging.info('train_split is None, using the name "train" for the split')
+        else:
+            raise ValueError(f'train_split is None and no "train" split found in dataset {hf_name_path}')
+    if train_split not in dataset:
+        raise ValueError(f'No "{train_split}" split found in dataset {hf_name_path}')
+
     val_fraction = val_fraction or 0.
     test_fraction = test_fraction or 0.
+
+    if val_split is None:
+        # detect val split
+        usual_val_split_names = {'validation', 'valid', 'dev', 'val'}
+        found_val_split = None
+        for split in usual_val_split_names:
+            if split in dataset:
+                found_val_split = split
+                logging.info(f'val_split is None, using the name "{val_split}" for the split')
+                break
+        # if val frac is specified but if val split already exist then its mistake
+        if val_fraction:
+            if found_val_split:
+                raise ValueError(f'val_fraction={val_fraction} > 0, but a possible val split "{found_val_split}" was detected in dataset {hf_name_path}.')
+            else:
+                # we need to create a val split
+                val_split = (dataset_split_names.intersection(usual_val_split_names) or {'validation'}).pop()
+
+    if test_split is None:
+        # detect test split
+        usual_test_split_names = {'test'}
+        found_test_split = None
+        for split in usual_test_split_names:
+            if split in dataset:
+                found_test_split = split
+                logging.info(f'test_split is None, using the name "{test_split}" for the split')
+                break
+        # if test frac is specified but if test split already exist then its mistake
+        if test_fraction:
+            if found_test_split:
+                raise ValueError(f'test_fraction={test_fraction} > 0, but a possible test split "{found_test_split}" was detected in dataset {hf_name_path}.')
+            else:
+                # we need to create a test split
+                test_split = (dataset_split_names.intersection(usual_test_split_names) or {'test'}).pop()
 
     if test_fraction: # simplify code
         assert val_fraction > 0, 'test_fraction can only be used if val_fraction > 0'
@@ -77,10 +118,15 @@ def get_datasets(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Op
         else:
             logging.info(f'Using existing test_split "{test_split}", ignoring test_fraction={test_fraction}')
 
+    assert train_split in dataset
+    assert (val_split and val_split in dataset) or val_fraction == 0
+    assert (test_split and test_split in dataset) or test_fraction == 0
+    assert train_split != val_split and train_split != test_split and val_split != test_split
+
     for split in dataset.keys():
         logging.summary({f'{split}_split_rows': len(dataset[split])})
 
-    return dataset
+    return dataset, train_split, val_split, test_split
 
 
 def get_data(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Optional[str], hf_data_files:Optional[str],
