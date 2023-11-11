@@ -1,8 +1,12 @@
-from typing import Tuple
+from typing import Tuple, Mapping
 
 import torch
 
 def get_loss(model_output, labels)->Tuple[torch.Tensor, torch.Tensor, int]:
+
+    if isinstance(model_output, Mapping):
+        model_output = model_output['logits']
+
     # model output is tensor [5,batch_size,prime+2]
     # [EOS a op b =] is input to model which is 5 tokens
     # output is [a op b = c] which is 5 tokens
