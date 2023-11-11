@@ -1,0 +1,38 @@
+__include__: ['base_config.yaml']
+
+general:
+  out_dir: '~/out_dir/llama2_124m_tinystories'
+
+logging:
+  project_name: 'llama2_124m_tinystories'
+  enable_wandb: true
+  enable_summaries: true
+  run_name: 'Llama2-124m_tinystories_llama2_bloat16'  # null -> select random name
+  run_description: 'Llama2-124m tinystories using llama2 tokenizer and bfloat16'
+
+data:
+  module_kwargs:
+    tokenized_train_path: '$DATA_ROOT/tokenized/tinystories_v2/llama2/train.bin'
+    tokenized_val_path: '$DATA_ROOT/tokenized/tinystories_v2/llama2/validation.bin'
+
+training:
+  train_batch_size: 128 # scaled up from 64 along with LR
+  num_steps: 300000
+  gradient_accumulation_steps: 8
+  adj_grad_acc_gpu_count: true # adjust gradient accumulation steps for number of GPUs
+
+optimizer:
+  module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
+  module_kwargs:
+    learning_rate: 1.2E-3
+    weight_decay: 0.1
+    beta1: 0.9
+    beta2: 0.95
+    eps: 1.0E-8 # pytorch default
+
+scheduler:
+  module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
+  module_kwargs:
+    warmup_iters: 2000
+    lr_decay_iters: '_copy: /training/num_steps'
+    min_lr: 1.2E-4

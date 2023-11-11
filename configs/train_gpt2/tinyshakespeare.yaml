@@ -52,6 +52,6 @@ scheduler:
 eval:
   eval_every: 250
   eval_iters: 200 # number of samples to evaluate for dataset
-  save_checkpoint: true
+  save_checkpoint: false
   checkoint_after: 4000 # starts saving checkpoint after these steps
   checkpoint_every: 10 # multiple of eval_every, save checkpoint after these steps from last checkpoint when val loss is better
