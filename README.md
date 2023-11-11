@@ -65,6 +65,10 @@ For lucky people with more compute, there are configs available to replicate ben
 
 All config files can be found in `configs/` and things are self-explanatory. Sometime you might notice the top line with `__include__:` to specify the base config that you can inherit from. This is a custom feature implemented in this repo so we can share the base config across many experiments. The `base_config.yaml` serves as defaults that can be overriden in your yaml.
 
+### Tokenization
+
+The code uses all cores and achieves 157k tokens/sec/core end-to-end. This corresponds to tokenizing OpenWebText in roughly 0.5hr on 128 core machine.
+
 ### Logging
 
 NanuGPT vastly improves on logging, i.e., we log everything we can! The idea is that once run is done, you can examine the log to do lot of post-hoc debugging. You can also enable Weights and Biases (wandb) by enabling in config and creating environment variable for `WANDB_API_KEY`.
@@ -74,6 +78,7 @@ The consol logs are colored for quick glances.
 ### Debugging
 
 If you are using VSCode, please do take advantage of dropdown next to play button run any config in debug mode, set breakpoints, look at variables and enjoy!
+
 
 ## Credits
 

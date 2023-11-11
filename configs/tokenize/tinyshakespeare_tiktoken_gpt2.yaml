@@ -1,0 +1,18 @@
+__include__: ['base_config.yaml']
+
+tokenizer:
+  module: 'nanugpt.tokenizers.tiktoken_wrap.get_tokenizer_factory'
+  module_kwargs:
+    encoding_name: 'gpt2'
+
+data:
+  hf_name_path: 'text'
+  hf_data_files: {train: ['$DATA_ROOT/datasets/tinyshakespeare/input.txt']}
+  tokenized_out_dir: '$DATA_ROOT/tokenized/tinyshakespeare/tiktoken/'
+  hf_sample_by: 'paragraph'
+
+  val_fraction: 0.1
+  text_column: null
+
+
+
