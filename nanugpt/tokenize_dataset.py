@@ -15,12 +15,12 @@ from datasets import DatasetDict, load_dataset, load_from_disk
 import torch
 from torch.utils.data import DataLoader
 
-from nanugpt.tokenizers.tokenizer_base import TokenizerBase
 from nanugpt import glogging as logging
+from nanugpt import common
+from nanugpt.tokenizers.tokenizer_base import TokenizerBase
 from nanugpt import utils
 from nanugpt.config import Config
 from nanugpt.data.hf_dataset import get_datasets
-from nanugpt import common
 
 
 def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Optional[str], hf_data_files:Optional[str],

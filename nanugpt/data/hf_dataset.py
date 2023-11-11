@@ -23,6 +23,7 @@ def get_datasets(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Op
         dataset = load_from_disk(hf_name_path)
     else:
         if hf_name_path == 'text' and isinstance(hf_data_files, MutableMapping):
+            logging.info(f'Loading text file(s) from disk {hf_name_path}...')
             # dict keys are splits
             hf_data_files = dict(hf_data_files) # HuggingFace doesn't like MutableMapping and must have dict
             for split, filepath in hf_data_files.items():

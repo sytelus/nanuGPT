@@ -220,8 +220,8 @@ class Logger:
     def info(self, d:Union[str, Mapping[str,Any]], py_logger_only:bool=False):
         if self._py_logger is not None:
             if isinstance(d, Mapping):
-                msg = _dict2msg(d)
-                self._py_logger.info(msg)
+                d = _dict2msg(d)
+            self._py_logger.info(d)
 
         if not py_logger_only and self.enable_wandb and self._wandb_logger is not None:
             if isinstance(d, str):
@@ -231,6 +231,7 @@ class Logger:
 
     def warn(self, d:Union[str, Mapping[str,Any]], py_logger_only:bool=False,
              exception_instance:Optional[Exception]=None, stack_info:bool=False):
+
         if isinstance(d, Mapping):
             d = _dict2msg(d)
 
