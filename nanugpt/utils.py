@@ -688,3 +688,7 @@ def flash_attn_supported():
 
 def is_master_process()->bool:
     return os.environ.get('RANK', '0') == '0'
+
+def free_disk_space()->int:
+    """Returns free disk space in bytes"""
+    return psutil.disk_usage('/').free

@@ -11,7 +11,7 @@ from rich.logging import RichHandler
 import wandb
 import torch
 
-from nanugpt.utils import full_path, is_debugging, is_master_process
+from nanugpt.utils import full_path, is_debugging, is_master_process, free_disk_space
 
 INFO=py_logging.INFO
 WARN=py_logging.WARN
@@ -318,6 +318,7 @@ class Logger:
 
                         'memory_gb': psutil.virtual_memory().available / (1024.0 ** 3),
                         'cpu_count': psutil.cpu_count(),
+                        'free_disk_space': free_disk_space(),
                         })
 
     def finish(self):
