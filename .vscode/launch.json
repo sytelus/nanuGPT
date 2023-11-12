@@ -61,6 +61,14 @@
             "args": ["configs/train_llama2/tinyshakespeare.yaml"]
         },
         {
+            "name": "Train Llama2-Tinystories",
+            "type": "python",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["configs/train_llama2/tinystories.yaml"]
+        },
+        {
             "name": "Train OWT",
             "type": "python",
             "request": "launch",
