@@ -361,23 +361,20 @@ def for_parallel(l:list, f:Callable[[Any], Any], num_cpus=multiprocessing.cpu_co
 
     return result
 
-def transformer_tflops(batch_size, iterations, dt,
-                      param_count, n_layer, n_head, n_embd, context_length)->float:
+def transformer_tflops(batch_size:int, dt:float,
+                      forward_iters:int, backward_iters:int,
+                      params_nonembedding_trainable:int,
+                      n_layer:int, n_embd:int, context_length:int)->float:
     """ estimate model flops utilization in TFLOPS """
 
-    # first estimate the number of flops we do per iteration.
-    # see PaLM paper Appendix B as ref: https://arxiv.org/abs/2204.02311
-    N = param_count
-    L, H, Q, T = n_layer, n_head, n_embd//n_head, context_length
+    forward_flops_1sample = 2 * (n_layer * n_embd * context_length + params_nonembedding_trainable)
+    backward_flops_1sample = 2 * forward_flops_1sample
 
-    flops_per_token = 6*N + 12*L*H*Q*T
-
-    flops_per_fwdbwd = flops_per_token * T
-
-    flops = flops_per_fwdbwd * batch_size * iterations
+    forward_flops = forward_flops_1sample * batch_size * forward_iters
+    backward_flops = backward_flops_1sample * batch_size * backward_iters
 
     # express our flops throughput as ratio of A100 bfloat16 peak flops
-    flops_achieved = flops * (1.0/dt) # per second
+    flops_achieved = (forward_flops + backward_flops) / dt
 
     return flops_achieved / 1.0E12 # TFLOPS
 

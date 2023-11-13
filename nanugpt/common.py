@@ -80,27 +80,15 @@ def compile_torch_model(model:torch.nn.Module, logger:logging.Logger)->torch.nn.
     return model
 
 
-def create_model_tokenizer(config:Mapping, logger:logging.Logger, device:torch.device,
-                           state_dict=None)->Tuple[torch.nn.Module, TokenizerBase, Mapping, Mapping]:
+def create_model(config:Mapping, logger:logging.Logger, device:torch.device,
+                           vocab_size:int, state_dict=None)->Tuple[torch.nn.Module, Mapping]:
     model_config = config['model']
-    tokenizer_config = config['tokenizer']
     torch_compile = config['general']['torch_compile']
 
-    get_tokenizer_factory = utils.import_fn(tokenizer_config['module'])
     get_model = utils.import_fn(model_config['module'])
 
-    tokenizer_factory = get_tokenizer_factory(**tokenizer_config['module_kwargs'])
-    tokenizer = tokenizer_factory()
-
-    model = get_model(vocab_size=len(tokenizer),
+    model = get_model(vocab_size=vocab_size,
                       **model_config['module_kwargs']).to(device)
-    n_all, n_trainable, n_embedding, n_non_embedding_trainable = utils.module_params_count(model)
-    logger.summary({'model_params_all': n_all,
-                    'model_params_non_embedding': n_all-n_embedding,
-                    'model_params_embedding': n_embedding,
-                    'model_params_trainable': n_trainable,
-                    'model_params_non_embedding_trainable': n_non_embedding_trainable,
-                   })
 
     if state_dict is not None:
         logger.info("Loading model from state_dict...")
@@ -109,7 +97,15 @@ def create_model_tokenizer(config:Mapping, logger:logging.Logger, device:torch.d
     if torch_compile:
         model = compile_torch_model(model, logger)
 
-    return model, tokenizer, model_config, tokenizer_config
+    return model, model_config
+
+def create_tokenizer(config:Mapping, logger:logging.Logger)->Tuple[TokenizerBase, Mapping]:
+    tokenizer_config = config['tokenizer']
+    get_tokenizer_factory = utils.import_fn(tokenizer_config['module'])
+    tokenizer_factory = get_tokenizer_factory(**tokenizer_config['module_kwargs'])
+    tokenizer = tokenizer_factory()
+
+    return tokenizer, tokenizer_config
 
 def check_env_vars():
     utils.set_env_vars({'OUT_DIR': ('output', None),

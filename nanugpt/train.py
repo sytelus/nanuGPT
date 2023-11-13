@@ -9,6 +9,7 @@ from torch import distributed as dist
 
 from nanugpt import utils
 from nanugpt import common
+from nanugpt import glogging as logging
 
 @torch.no_grad()
 def estimate_loss(model:torch.nn.Module, get_loss:Callable,
@@ -32,8 +33,7 @@ def estimate_loss(model:torch.nn.Module, get_loss:Callable,
     model.train()
     return loss_sum / sample_count, correct_sum / preds_count
 
-
-def train(config:Mapping, logger=None):
+def train(config:Mapping, logger:Optional[logging.Logger]=None):
     gradient_accumulation_steps = config['training']['gradient_accumulation_steps']
     adj_grad_acc_gpu_count = config['training']['adj_grad_acc_gpu_count']
     project_name = config['logging']['project_name']
@@ -82,13 +82,10 @@ def train(config:Mapping, logger=None):
                     "tokens_per_iter": gradient_accumulation_steps * train_batch_size * torch_info.world_size * context_length
                     })
 
-    # create model and tokenizer
-    model, tokenizer, model_config, tokenizer_config = common.create_model_tokenizer(config, logger, device)
-
     # get dataset
     train_loader, val_loader, test_loader = get_data(local_rank=torch_info.local_rank,
                                                      **data_config['module_kwargs'])
-    logger.summary({'vocab_size': len(tokenizer),
+    logger.summary({
                     'train_dataset_len': len(train_loader.dataset),
                     'val_dataset_len': len(val_loader.dataset),
                     'test_dataset_len': len(test_loader.dataset) if test_loader is not None else 0,
@@ -96,6 +93,22 @@ def train(config:Mapping, logger=None):
                     'val_dataloader_len': len(val_loader),
                     'test_dataloader_len': len(test_loader) if test_loader is not None else 0
                     })
+
+    # create tokenizer
+    tokenizer, tokenizer_config = common.create_tokenizer(config, logger)
+    logger.summary({'vocab_size': len(tokenizer)})
+
+    # create model
+    model, model_config = common.create_model(config, logger, device, vocab_size=len(tokenizer))
+    model_kwargs = model_config['module_kwargs']
+
+    n_all, n_trainable, n_embedding, n_non_embedding_trainable = utils.module_params_count(model)
+    logger.summary({'model_params_all': n_all,
+                    'model_params_non_embedding': n_all-n_embedding,
+                    'model_params_embedding': n_embedding,
+                    'model_params_trainable': n_trainable,
+                    'model_params_non_embedding_trainable': n_non_embedding_trainable,
+                   })
 
     # optimizer
     optimizer = get_optim(model,
@@ -117,7 +130,7 @@ def train(config:Mapping, logger=None):
         out_dir = utils.full_path(out_dir, create=True)
         logger.summary({'out_dir': out_dir})
 
-    step, eval_count, iters_since_eval, total_samples, token_count = 0, 0, 0, 0, 0
+    step, eval_count, total_samples, token_count = 0, 0, 0, 0
     epoch, epoch_step = 0, 0 # epoch steps is useful to know how many epochs we did
     best_train_loss, best_val_loss = float('inf'), float('inf')
     best_train_loss_step, best_val_loss_step, last_checkpoint_step = -1, -1, -1
@@ -181,7 +194,7 @@ def train(config:Mapping, logger=None):
                     batch_iter_done = True
 
                 # backward pass, with gradient scaling if training in fp16
-                scaler.scale(loss).backward()
+                scaler.scale(loss).backward() # type: ignore
 
                 # if we run out of data, break out of the micro steps loop
                 # this means last batch is partial
@@ -201,8 +214,7 @@ def train(config:Mapping, logger=None):
             scheduler.step()
             # flush the gradients as soon as we can, no need for this memory anymore
             optimizer.zero_grad(set_to_none=True)
-
-            iters_since_eval += 1
+            step_interval = timeit.default_timer() - step_start_time
 
             if torch_info.is_distributed:
                 # reduce tensors to rank 0 to get numbers from all ranks
@@ -221,6 +233,13 @@ def train(config:Mapping, logger=None):
                 best_train_loss = train_loss
                 best_train_loss_step = step
 
+            transformer_tflops = utils.transformer_tflops(batch_size=train_batch_size,
+                params_nonembedding_trainable=utils.module_params_count(model)[-1],
+                context_length=context_length, dt=step_interval,
+                n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer'],
+                forward_iters=gradient_accumulation_steps, backward_iters=1
+            )
+
             if torch_info.is_master:
                 metrics.update({
                     "train/step": step,
@@ -231,12 +250,13 @@ def train(config:Mapping, logger=None):
                     "train/best_loss_step": best_train_loss_step,
                     "train/epoch": epoch,
                     "train/epoch_step": epoch_step,
-                    "train/step_interval": timeit.default_timer() - step_start_time,
+                    "train/step_interval": step_interval,
                     "train/samples": total_samples,
                     "train/step_samples": step_sample_count,
                     "train/token_count": token_count,
                     "train/tokens_per_sec": token_count / (timeit.default_timer() - loop_start_time),
                     "lr": optimizer.param_groups[0]['lr'],
+                    'tflops': transformer_tflops,
                     "elapsed_s": timeit.default_timer() - loop_start_time
                 })
 
@@ -246,12 +266,6 @@ def train(config:Mapping, logger=None):
                 eval_performed = True
                 eval_count += 1
                 eval_interval = timeit.default_timer() - last_eval_time
-
-                model_kwargs = model_config['module_kwargs']
-                transformer_tflops = utils.transformer_tflops(batch_size=train_batch_size,
-                    param_count=utils.module_params_count(model)[-1],
-                    context_length=context_length, dt=eval_interval, iterations=iters_since_eval,
-                    n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer'], n_head=model_kwargs['n_head'])
 
                 val_loss, val_acc = estimate_loss(model, get_loss, val_loader, eval_iters,
                                                 amp_ctx, torch_info.is_cuda, device)
@@ -277,7 +291,7 @@ def train(config:Mapping, logger=None):
                         "test/ppl": math.exp(test_loss),
                         "test/acc": test_acc,
                     })
-                last_eval_time, iters_since_eval = timeit.default_timer(), 0
+                last_eval_time = timeit.default_timer()
 
                 # if this is the best model so far, save it
                 if save_checkpoint and last_checkpoint_step < best_val_loss_step and \
