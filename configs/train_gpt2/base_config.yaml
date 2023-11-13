@@ -79,7 +79,7 @@ generate:
 
 eval:
   eval_every: 1000
-  eval_iters: 1 # number of samples to evaluate for dataset
+  eval_iters: 20 # number of samples to evaluate for dataset
   save_checkpoint: true
   checkoint_after: 500000 # starts saving checkpoint after these steps
   checkpoint_every_eval: 10 # multiple of eval_every, save checkpoint after these steps from last checkpoint when val loss is better
