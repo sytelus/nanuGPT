@@ -1,0 +1,402 @@
+{
+    "44": {
+        "params_m": 44,
+        "d_model": 512,
+        "ffw_inner": 2048,
+        "head_size": 64,
+        "n_head": 8,
+        "n_layer": 8
+    },
+    "57": {
+        "params_m": 57,
+        "d_model": 576,
+        "ffw_inner": 2304,
+        "head_size": 64,
+        "n_head": 9,
+        "n_layer": 9
+    },
+    "74": {
+        "params_m": 74,
+        "d_model": 640,
+        "ffw_inner": 2560,
+        "head_size": 64,
+        "n_head": 10,
+        "n_layer": 10
+    },
+    "90": {
+        "params_m": 90,
+        "d_model": 640,
+        "ffw_inner": 2560,
+        "head_size": 64,
+        "n_head": 10,
+        "n_layer": 13
+    },
+    "106": {
+        "params_m": 106,
+        "d_model": 640,
+        "ffw_inner": 2560,
+        "head_size": 64,
+        "n_head": 10,
+        "n_layer": 16
+    },
+    "117": {
+        "params_m": 117,
+        "d_model": 768,
+        "ffw_inner": 3072,
+        "head_size": 64,
+        "n_head": 12,
+        "n_layer": 12
+    },
+    "140": {
+        "params_m": 140,
+        "d_model": 768,
+        "ffw_inner": 3072,
+        "head_size": 64,
+        "n_head": 12,
+        "n_layer": 15
+    },
+    "163": {
+        "params_m": 163,
+        "d_model": 768,
+        "ffw_inner": 3072,
+        "head_size": 64,
+        "n_head": 12,
+        "n_layer": 18
+    },
+    "175": {
+        "params_m": 175,
+        "d_model": 896,
+        "ffw_inner": 3584,
+        "head_size": 64,
+        "n_head": 14,
+        "n_layer": 14
+    },
+    "196": {
+        "params_m": 196,
+        "d_model": 896,
+        "ffw_inner": 3584,
+        "head_size": 64,
+        "n_head": 14,
+        "n_layer": 16
+    },
+    "217": {
+        "params_m": 217,
+        "d_model": 896,
+        "ffw_inner": 3584,
+        "head_size": 64,
+        "n_head": 14,
+        "n_layer": 18
+    },
+    "251": {
+        "params_m": 251,
+        "d_model": 1024,
+        "ffw_inner": 4096,
+        "head_size": 64,
+        "n_head": 16,
+        "n_layer": 16
+    },
+    "278": {
+        "params_m": 278,
+        "d_model": 1024,
+        "ffw_inner": 4096,
+        "head_size": 64,
+        "n_head": 16,
+        "n_layer": 18
+    },
+    "306": {
+        "params_m": 306,
+        "d_model": 1024,
+        "ffw_inner": 4096,
+        "head_size": 64,
+        "n_head": 16,
+        "n_layer": 20
+    },
+    "425": {
+        "params_m": 425,
+        "d_model": 1280,
+        "ffw_inner": 5120,
+        "head_size": 128,
+        "n_head": 10,
+        "n_layer": 18
+    },
+    "489": {
+        "params_m": 489,
+        "d_model": 1280,
+        "ffw_inner": 5120,
+        "head_size": 128,
+        "n_head": 10,
+        "n_layer": 21
+    },
+    "509": {
+        "params_m": 509,
+        "d_model": 1408,
+        "ffw_inner": 5632,
+        "head_size": 128,
+        "n_head": 11,
+        "n_layer": 18
+    },
+    "552": {
+        "params_m": 552,
+        "d_model": 1280,
+        "ffw_inner": 5120,
+        "head_size": 128,
+        "n_head": 10,
+        "n_layer": 24
+    },
+    "587": {
+        "params_m": 587,
+        "d_model": 1408,
+        "ffw_inner": 5632,
+        "head_size": 128,
+        "n_head": 11,
+        "n_layer": 21
+    },
+    "632": {
+        "params_m": 632,
+        "d_model": 1536,
+        "ffw_inner": 6144,
+        "head_size": 128,
+        "n_head": 12,
+        "n_layer": 19
+    },
+    "664": {
+        "params_m": 664,
+        "d_model": 1408,
+        "ffw_inner": 5632,
+        "head_size": 128,
+        "n_head": 11,
+        "n_layer": 24
+    },
+    "724": {
+        "params_m": 724,
+        "d_model": 1536,
+        "ffw_inner": 6144,
+        "head_size": 128,
+        "n_head": 12,
+        "n_layer": 22
+    },
+    "816": {
+        "params_m": 816,
+        "d_model": 1536,
+        "ffw_inner": 6144,
+        "head_size": 128,
+        "n_head": 12,
+        "n_layer": 25
+    },
+    "893": {
+        "params_m": 893,
+        "d_model": 1792,
+        "ffw_inner": 7168,
+        "head_size": 128,
+        "n_head": 14,
+        "n_layer": 20
+    },
+    "1018": {
+        "params_m": 1018,
+        "d_model": 1792,
+        "ffw_inner": 7168,
+        "head_size": 128,
+        "n_head": 14,
+        "n_layer": 23
+    },
+    "1143": {
+        "params_m": 1143,
+        "d_model": 1792,
+        "ffw_inner": 7168,
+        "head_size": 128,
+        "n_head": 14,
+        "n_layer": 26
+    },
+    "1266": {
+        "params_m": 1266,
+        "d_model": 2048,
+        "ffw_inner": 8192,
+        "head_size": 128,
+        "n_head": 16,
+        "n_layer": 22
+    },
+    "1424": {
+        "params_m": 1424,
+        "d_model": 2176,
+        "ffw_inner": 8704,
+        "head_size": 128,
+        "n_head": 17,
+        "n_layer": 22
+    },
+    "1429": {
+        "params_m": 1429,
+        "d_model": 2048,
+        "ffw_inner": 8192,
+        "head_size": 128,
+        "n_head": 16,
+        "n_layer": 25
+    },
+    "1593": {
+        "params_m": 1593,
+        "d_model": 2048,
+        "ffw_inner": 8192,
+        "head_size": 128,
+        "n_head": 16,
+        "n_layer": 28
+    },
+    "1609": {
+        "params_m": 1609,
+        "d_model": 2176,
+        "ffw_inner": 8704,
+        "head_size": 128,
+        "n_head": 17,
+        "n_layer": 25
+    },
+    "1731": {
+        "params_m": 1731,
+        "d_model": 2304,
+        "ffw_inner": 9216,
+        "head_size": 128,
+        "n_head": 18,
+        "n_layer": 24
+    },
+    "1794": {
+        "params_m": 1794,
+        "d_model": 2176,
+        "ffw_inner": 8704,
+        "head_size": 128,
+        "n_head": 17,
+        "n_layer": 28
+    },
+    "2007": {
+        "params_m": 2007,
+        "d_model": 2304,
+        "ffw_inner": 9216,
+        "head_size": 128,
+        "n_head": 18,
+        "n_layer": 28
+    },
+    "2283": {
+        "params_m": 2283,
+        "d_model": 2304,
+        "ffw_inner": 9216,
+        "head_size": 128,
+        "n_head": 18,
+        "n_layer": 32
+    },
+    "2298": {
+        "params_m": 2298,
+        "d_model": 2560,
+        "ffw_inner": 10240,
+        "head_size": 128,
+        "n_head": 20,
+        "n_layer": 26
+    },
+    "2639": {
+        "params_m": 2639,
+        "d_model": 2560,
+        "ffw_inner": 10240,
+        "head_size": 128,
+        "n_head": 20,
+        "n_layer": 30
+    },
+    "2980": {
+        "params_m": 2980,
+        "d_model": 2560,
+        "ffw_inner": 10240,
+        "head_size": 128,
+        "n_head": 20,
+        "n_layer": 34
+    },
+    "3530": {
+        "params_m": 3530,
+        "d_model": 2688,
+        "ffw_inner": 10752,
+        "head_size": 128,
+        "n_head": 22,
+        "n_layer": 36
+    },
+    "3802": {
+        "params_m": 3802,
+        "d_model": 2816,
+        "ffw_inner": 11264,
+        "head_size": 128,
+        "n_head": 22,
+        "n_layer": 36
+    },
+    "4084": {
+        "params_m": 4084,
+        "d_model": 2944,
+        "ffw_inner": 11776,
+        "head_size": 128,
+        "n_head": 22,
+        "n_layer": 36
+    },
+    "4516": {
+        "params_m": 4516,
+        "d_model": 3072,
+        "ffw_inner": 12288,
+        "head_size": 128,
+        "n_head": 24,
+        "n_layer": 36
+    },
+    "6796": {
+        "params_m": 6796,
+        "d_model": 3584,
+        "ffw_inner": 14336,
+        "head_size": 128,
+        "n_head": 28,
+        "n_layer": 40
+    },
+    "9293": {
+        "params_m": 9293,
+        "d_model": 4096,
+        "ffw_inner": 16384,
+        "head_size": 128,
+        "n_head": 32,
+        "n_layer": 42
+    },
+    "11452": {
+        "params_m": 11452,
+        "d_model": 4352,
+        "ffw_inner": 17408,
+        "head_size": 128,
+        "n_head": 32,
+        "n_layer": 47
+    },
+    "12295": {
+        "params_m": 12295,
+        "d_model": 4608,
+        "ffw_inner": 18432,
+        "head_size": 128,
+        "n_head": 36,
+        "n_layer": 44
+    },
+    "12569": {
+        "params_m": 12569,
+        "d_model": 4608,
+        "ffw_inner": 18432,
+        "head_size": 128,
+        "n_head": 32,
+        "n_layer": 47
+    },
+    "13735": {
+        "params_m": 13735,
+        "d_model": 4864,
+        "ffw_inner": 19456,
+        "head_size": 128,
+        "n_head": 32,
+        "n_layer": 47
+    },
+    "14940": {
+        "params_m": 14940,
+        "d_model": 4992,
+        "ffw_inner": 19968,
+        "head_size": 128,
+        "n_head": 32,
+        "n_layer": 49
+    },
+    "16183": {
+        "params_m": 16183,
+        "d_model": 5120,
+        "ffw_inner": 20480,
+        "head_size": 128,
+        "n_head": 40,
+        "n_layer": 47
+    }
+}
