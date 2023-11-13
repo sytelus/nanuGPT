@@ -41,7 +41,7 @@ data:
   module_kwargs:
     dtype: 'uint16'
     train_batch_size: '_copy: /training/train_batch_size'
-    eval_batch_size: 32 # 2^15=32768
+    eval_batch_size: 1 # 2^15=32768
     data_loader_seed: 8
     context_length: '_copy: /model/module_kwargs/context_length'
     tokenized_train_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/train.bin'
@@ -49,8 +49,8 @@ data:
     tokenized_test_path: null
 
 training:
-  train_batch_size: 60
-  num_steps: 100000    # for OpenWebText/9B tokens
+  train_batch_size: 18
+  num_steps: 200000    # for OpenWebText/9B tokens
   enable_train_log: true
   log_every: 100
   grad_clip: 1.0 # disabled if 0.0
@@ -60,7 +60,7 @@ training:
 optimizer:
   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
   module_kwargs:
-    learning_rate: 6.0E-4
+    learning_rate: 43.0E-4
     weight_decay: 0.1
     beta1: 0.9
     beta2: 0.95
@@ -69,9 +69,9 @@ optimizer:
 scheduler:
   module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
   module_kwargs:
-    warmup_iters: 10000
+    warmup_iters: 5000
     lr_decay_iters: '_copy: /training/num_steps'
-    min_lr: 6.0E-5
+    min_lr: 43.0E-5
 
 generate:
   checkpoint_path: '_copy: /general/out_dir'
@@ -79,7 +79,7 @@ generate:
 
 eval:
   eval_every: 1000
-  eval_iters: 200 # number of samples to evaluate for dataset
+  eval_iters: 1 # number of samples to evaluate for dataset
   save_checkpoint: true
   checkoint_after: 500000 # starts saving checkpoint after these steps
   checkpoint_every_eval: 10 # multiple of eval_every, save checkpoint after these steps from last checkpoint when val loss is better

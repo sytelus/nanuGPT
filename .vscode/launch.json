@@ -69,12 +69,12 @@
             "args": ["configs/train_llama2/tinystories.yaml"]
         },
         {
-            "name": "Train OWT",
+            "name": "Train GPT2-OWT",
             "type": "python",
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": ["configs/train_gpt2/tinyshakespeare.yaml"]
+            "args": ["configs/train_gpt2/openwebtext.yaml"]
         },
         {
             "name": "Generate GPT2-Shakespear",
