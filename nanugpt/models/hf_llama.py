@@ -49,7 +49,11 @@ def get_model(
     )
 
     flash_attn_used = enable_flash_attn2 and utils.flash_attn_supported()
-    logging.info(f'flash_attn_used: flash_attn_used')
+    logging.info({
+                    'flash_attn_used': flash_attn_used,
+                    'flash_attn_supported': utils.flash_attn_supported(),
+                    'nvidia_sm': utils. nvidia_sm(),
+                  })
     if flash_attn_used:
         model_config._flash_attn_2_enabled = True
 
