@@ -269,4 +269,4 @@ if __name__ == "__main__":
     measure_throuput(config,
                      model_sizes=model_sizes,
                      context_lengths=[128, 256, 512, 1024, 2048, 4096, 8192, 16384],
-                     batch_sizes=[1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024])
+                     batch_sizes=[1, 2, 4, 8, 12, 16, 24, 26, 32, 48, 60, 64, 128, 256, 512, 1024])
