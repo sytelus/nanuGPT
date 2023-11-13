@@ -41,7 +41,7 @@ data:
   module_kwargs:
     dtype: 'uint16'
     train_batch_size: '_copy: /training/train_batch_size'
-    eval_batch_size: 1 # 2^15=32768
+    eval_batch_size: 16 # 2^15=32768
     data_loader_seed: 8
     context_length: '_copy: /model/module_kwargs/context_length'
     tokenized_train_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/train.bin'
@@ -49,7 +49,7 @@ data:
     tokenized_test_path: null
 
 training:
-  train_batch_size: 18
+  train_batch_size: 16
   num_steps: 200000    # for OpenWebText/9B tokens
   enable_train_log: true
   log_every: 100
