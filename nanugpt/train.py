@@ -249,7 +249,7 @@ def train(config:Mapping, logger=None):
 
                 model_kwargs = model_config['module_kwargs']
                 transformer_tflops = utils.transformer_tflops(batch_size=train_batch_size,
-                    param_count=utils.module_params_count(model, non_embedding=True),
+                    param_count=utils.module_params_count(model)[-1],
                     context_length=context_length, dt=eval_interval, iterations=iters_since_eval,
                     n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer'], n_head=model_kwargs['n_head'])
 

@@ -403,9 +403,19 @@ def module_params(module:torch.nn.Module, non_embedding=True):
         if p not in filter_params:
             yield p
 
-def module_params_count(module:torch.nn.Module, non_embedding=True)->int:
-    n_params = sum(p.numel() for p in module_params(module, non_embedding))
-    return n_params
+def module_params_count(module:torch.nn.Module)->Tuple[int, int, int, int]:
+    n_all, n_trainable, n_embedding, n_non_embedding_trainable = 0, 0, 0, 0
+    for m in module.modules():
+        for p in m.parameters():
+            n = p.numel()
+            n_all += n
+            if p.requires_grad:
+                n_trainable += n
+            if isinstance(m, nn.Embedding):
+                n_embedding += n
+            elif p.requires_grad:
+                n_non_embedding_trainable += n
+    return n_all, n_trainable, n_embedding, n_non_embedding_trainable
 
 def weight_norm(module:torch.nn.Module, non_embedding=True)->float:
     return torch.linalg.norm(torch.cat([p.view(-1) for p in module_params(module, non_embedding)])).item()

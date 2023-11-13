@@ -23,6 +23,11 @@ def setup_device(config:Mapping, logger:logging.Logger)->Tuple[torch.device, Abs
     if enable_distributed is None and int(os.environ.get('WORLD_SIZE', '1')) > 1:
         enable_distributed = True
 
+    # load cuda modules on demand to save memory
+    # TODO: add config for below, should be false by default
+    # if 'CUDA_MODULE_LOADING' not in os.environ:
+    #     os.environ['CUDA_MODULE_LOADING'] = 'LAZY'
+
     torch_info = utils.setup_torch(seed=seed,
                 device_type=device_type, dtype=dtype,
                 enable_distributed=enable_distributed,
@@ -89,8 +94,13 @@ def create_model_tokenizer(config:Mapping, logger:logging.Logger, device:torch.d
 
     model = get_model(vocab_size=len(tokenizer),
                       **model_config['module_kwargs']).to(device)
-    logger.summary({'model_params_all': utils.module_params_count(model, non_embedding=False),
-                    'model_params_no_embedding': utils.module_params_count(model, non_embedding=True),})
+    n_all, n_trainable, n_embedding, n_non_embedding_trainable = utils.module_params_count(model)
+    logger.summary({'model_params_all': n_all,
+                    'model_params_non_embedding': n_all-n_embedding,
+                    'model_params_embedding': n_embedding,
+                    'model_params_trainable': n_trainable,
+                    'model_params_non_embedding_trainable': n_non_embedding_trainable,
+                   })
 
     if state_dict is not None:
         logger.info("Loading model from state_dict...")
