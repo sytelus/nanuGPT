@@ -233,7 +233,7 @@ class Logger:
         # if there are keys in quite then only allow messages with those keys
         if self.quite_keys is not None:
             if len(self.quite_keys)==0 or isinstance(d, str) or \
-                    (isinstance(d, Mapping) and self.quite_keys.intersection(d.keys())):
+                    (isinstance(d, Mapping) and not self.quite_keys.intersection(d.keys())):
                 return
 
         if self._py_logger is not None:
@@ -339,9 +339,12 @@ class Logger:
                         'free_disk_space': free_disk_space(),
                         })
 
-    def quite(self, except_keys:Optional[Union[Iterable[str], str]]):
-        if except_keys is not None and not isinstance(except_keys, set):
-            except_keys = set(list(except_keys))
+    def quite(self, except_keys:Optional[Union[str, Iterable[str]]]):
+        if except_keys is not None:
+            if not isinstance(except_keys, str):
+                except_keys = set(list(except_keys))
+            else:
+                except_keys = set([except_keys])
         self.quite_keys = except_keys
 
     def finish(self):

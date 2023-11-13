@@ -262,6 +262,10 @@ if __name__ == "__main__":
     config['training']['gradient_accumulation_steps'] = 1
     config['training']['adj_grad_acc_gpu_count'] = False
     config['training']['enable_train_log'] = False
+    config['logging']['log_filename'] = 'throughput.log'
+    config['logging']['enable_wandb'] = False
+    config['logging']['project_name'] = 'gpt2-throughput'
+    config['logging']['run_name'] = 'throughput'
 
     model_sizes = list(common.get_model_sizes().values())
     model_sizes.sort(key=lambda x: x['params_m'])
