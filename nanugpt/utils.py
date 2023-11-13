@@ -273,7 +273,7 @@ def setup_torch(seed:int,
 
         is_distributed = True
         rank = torch.distributed.get_rank()
-        local_rank = torch.distributed.get_rank()
+        local_rank = int(os.environ['LOCAL_RANK'])
         world_size = torch.distributed.get_world_size()
         is_master = rank == 0
         seed_offset = rank
