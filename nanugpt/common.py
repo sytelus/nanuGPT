@@ -4,6 +4,7 @@ import sys
 import dataclasses
 from contextlib import AbstractContextManager, nullcontext
 from packaging import version
+import json
 
 import torch
 
@@ -105,3 +106,11 @@ def check_env_vars():
     utils.set_env_vars({'OUT_DIR': ('output', None),
                         'DATA_ROOT': (None, 'This variable should be set to directory where you data resides')
                        }, raise_exec=True)
+
+def get_model_sizes():
+    with open(utils.full_path('assets/model_sizes.json'), mode='r', encoding='utf-8') as f:
+        d = json.load(f)
+    return d
+
+
+

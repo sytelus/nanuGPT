@@ -1,25 +1,21 @@
-# torchrun --standalone --nproc_per_node=8 scripts/play.py
-import math
-import inspect
-from dataclasses import dataclass
+import csv
+import json
 
-import torch
-import torch.nn as nn
-from torch.nn import functional as F
-import torch.distributed as dist
+from nanugpt import utils
 
-if __name__ == "__main__":
-    dist.init_process_group(backend='nccl', init_method='env://')
-    print("Hello from rank {}".format(dist.get_rank()))
+def get_model_sizes():
+    csv_filepath = utils.full_path('nanugpt/assets/model_sizes.csv')
+    sizes = {}
+    with open(csv_filepath, mode='r') as csv_file:
+        csv_reader = csv.DictReader(csv_file)
+        for row in csv_reader:
+            for k,v in row.items():
+                row[k] = int(v)
+            sizes[row['params_m']] = row
+    return sizes
 
-    t = torch.ones(1, device='cuda:{}'.format(dist.get_rank()))
-    print("Rank {} has {}".format(dist.get_rank(), t))
-
-    #dist.barrier()
-
-    dist.reduce(t, 0)
-
-    print("Rank {} has {}".format(dist.get_rank(), t))
-
-    dist.destroy_process_group()
+if __name__ == '__main__':
+    d = get_model_sizes()
+    with open(utils.full_path('nanugpt/assets/model_sizes.json'), mode='w', encoding='utf-8') as json_file:
+        json.dump(d, json_file, indent=4)
 
