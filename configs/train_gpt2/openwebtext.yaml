@@ -1,14 +1,14 @@
 __include__: ['base_config.yaml']
 
 general:
-  out_dir: '~/out_dir/gpt2_124m_owt'
+  out_dir: '~/out_dir/gpt2_1b_owt'
 
 logging:
-  project_name: 'gpt2_124m_owt'
+  project_name: 'gpt2_1.5b_owt'
   enable_wandb: true
   enable_summaries: true
-  run_name: 'gpt2_124m_owt'  # select random name
-  run_description: 'GPT2 124M on OpenWebText'
+  run_name: 'gpt2_1.5b_owt_24n'  # select random name
+  run_description: 'GPT2 1.5B on OpenWebText'
 
 data:
   module_kwargs:

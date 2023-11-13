@@ -23,9 +23,9 @@ logging:
 model:
   module: 'nanugpt.models.nanogpt.get_model'
   module_kwargs:
-    n_layer: 12
-    n_embd: 768
-    n_head: 12
+    n_layer: 48
+    n_embd: 1600
+    n_head: 25
     context_length: 1024
 
 tokenizer:
@@ -50,12 +50,12 @@ data:
 
 training:
   train_batch_size: 60
-  num_steps: 600000    # for OpenWebText/9B tokens
+  num_steps: 100000    # for OpenWebText/9B tokens
   enable_train_log: true
   log_every: 100
   grad_clip: 1.0 # disabled if 0.0
-  gradient_accumulation_steps: 8
-  adj_grad_acc_gpu_count: true # adjust gradient accumulation steps for number of GPUs
+  gradient_accumulation_steps: 1
+  adj_grad_acc_gpu_count: false # adjust gradient accumulation steps for number of GPUs
 
 optimizer:
   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
@@ -69,7 +69,7 @@ optimizer:
 scheduler:
   module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
   module_kwargs:
-    warmup_iters: 2000
+    warmup_iters: 10000
     lr_decay_iters: '_copy: /training/num_steps'
     min_lr: 6.0E-5
 
