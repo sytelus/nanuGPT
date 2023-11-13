@@ -6,7 +6,7 @@ general:
   torch_compile: true # will not compile if Python > 3.11, torch < 2.1.0 or Windows
   seed: 42
   dtype: 'bfloat16'         # float32, float16, bfloat16
-  enable_distributed: null # automatically set to true if WORLD_SIZE > 1
+  enable_distributed: null # automatically set to true if RANK is set
   out_dir: '~/out_dir/train_gpt2'
 
 logging:
@@ -50,17 +50,17 @@ data:
 
 training:
   train_batch_size: 60
-  num_steps: 30000    # for OpenWebText/9B tokens
+  num_steps: 600000    # for OpenWebText/9B tokens
   enable_train_log: true
   log_every: 100
   grad_clip: 1.0 # disabled if 0.0
-  gradient_accumulation_steps: 1
-  adj_grad_acc_gpu_count: false # adjust gradient accumulation steps for number of GPUs
+  gradient_accumulation_steps: 8
+  adj_grad_acc_gpu_count: true # adjust gradient accumulation steps for number of GPUs
 
 optimizer:
   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
   module_kwargs:
-    learning_rate: 1.44E-2
+    learning_rate: 6.0E-4
     weight_decay: 0.1
     beta1: 0.9
     beta2: 0.95
@@ -71,7 +71,7 @@ scheduler:
   module_kwargs:
     warmup_iters: 2000
     lr_decay_iters: '_copy: /training/num_steps'
-    min_lr: 1.44E-3
+    min_lr: 6.0E-5
 
 generate:
   checkpoint_path: '_copy: /general/out_dir'
