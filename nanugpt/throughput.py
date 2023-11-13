@@ -11,10 +11,13 @@ from torch import distributed as dist
 from nanugpt import utils
 from nanugpt import common
 from nanugpt import glogging as logging
+from nanugpt.config import Config
 
 
-def measure_throuput(config:Mapping, model_sizes:List[dict],
+def measure_throuput(config:Mapping,
+                     model_sizes:List[dict],
                      context_lengths:List[int],
+                     batch_sizes:List[int],
                      logger:Optional[logging.Logger]=None):
     train_batch_size = config['training']['train_batch_size']
     out_dir = config['general']['out_dir']
@@ -51,49 +54,65 @@ def measure_throuput(config:Mapping, model_sizes:List[dict],
     tokenizer, tokenizer_config = common.create_tokenizer(config, logger)
     logger.summary({'vocab_size': len(tokenizer)})
 
-    for context_length in context_lengths:
-        data_config['module_kwargs']['context_length'] = context_length
-        train_loader, val_loader, test_loader = get_data(local_rank=torch_info.local_rank,
-                                                        **data_config['module_kwargs'])
-        for model_size in model_sizes:
-            model_kwargs = config['model']['module_kwargs']
-            model_kwargs['context_length'] = context_length
-            model_kwargs['n_layer'] = model_size['n_layer']
-            model_kwargs['n_embd'] = model_size['n_embd']
-            model_kwargs['n_head'] = model_size['n_head']
+    for batch_size in batch_sizes:
+        for context_length in context_lengths:
+            data_config['module_kwargs']['train_batch_size'] = batch_size
+            data_config['module_kwargs']['context_length'] = context_length
+            train_loader, val_loader, test_loader = get_data(local_rank=torch_info.local_rank,
+                                                            **data_config['module_kwargs'])
+            for model_size in model_sizes:
+                model_kwargs = config['model']['module_kwargs']
+                model_kwargs['context_length'] = context_length
+                model_kwargs['n_layer'] = model_size['n_layer']
+                model_kwargs['n_embd'] = model_size['n_embd']
+                model_kwargs['n_head'] = model_size['n_head']
 
-            model, model_config, train_loss, train_acc, total_samples, token_count, loop_start_time, loop_end_time, num_steps = \
-                train_config(config, logger, device, len(tokenizer), torch_info, train_loader, amp_ctx, gradient_accumulation_steps)
-            model_kwargs = model_config['module_kwargs']
-            dt = loop_end_time - loop_start_time
-            params_nonembedding_trainable = utils.module_params_count(model)[-1]
-            transformer_tflops = utils.transformer_tflops(batch_size=train_batch_size,
-                params_nonembedding_trainable=params_nonembedding_trainable,
-                context_length=context_length, dt=dt,
-                n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer'],
-                forward_iters=gradient_accumulation_steps, backward_iters=1
-            )
-            samples_rate = total_samples / dt
-            tokens_rate = token_count / dt
-            step_time = dt / num_steps
+                try:
+                    model, model_config, train_loss, train_acc, total_samples, token_count, loop_start_time, loop_end_time, num_steps = \
+                        train_config(config, logger, device, len(tokenizer), torch_info, train_loader, amp_ctx, gradient_accumulation_steps)
 
-            logger.summary({
-                            'train_loss': train_loss,
-                            'train_acc': train_acc,
-                            'total_samples': total_samples,
-                            'token_count': token_count,
-                            'dt': dt,
-                            'samples_rate': samples_rate,
-                            'tokens_rate': tokens_rate,
-                            'step_time': step_time,
-                            'transformer_tflops': transformer_tflops,
-                            'train_dataset_len': len(train_loader.dataset),
-                            'val_dataset_len': len(val_loader.dataset),
-                            'test_dataset_len': len(test_loader.dataset) if test_loader is not None else 0,
-                            'train_dataloader_len': len(train_loader),
-                            'val_dataloader_len': len(val_loader),
-                            'test_dataloader_len': len(test_loader) if test_loader is not None else 0
-                            })
+                    params_nonembedding_trainable = utils.module_params_count(model)[-1]
+
+                    model_kwargs = model_config['module_kwargs']
+                    dt = loop_end_time - loop_start_time
+                    transformer_tflops = utils.transformer_tflops(batch_size=train_batch_size,
+                        params_nonembedding_trainable=params_nonembedding_trainable,
+                        context_length=context_length, dt=dt,
+                        n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer'],
+                        forward_iters=gradient_accumulation_steps, backward_iters=1
+                    )
+                    samples_rate = total_samples / dt
+                    tokens_rate = token_count / dt
+                    step_time = dt / num_steps
+                except torch.cuda.OutOfMemoryError as e:
+                    logger.summary({
+                        'params_m(c_': model_size,
+                        'params_m(a)': '***OOM***',
+                        'context_length': model_size['context_length'],
+                        'n_layer': model_size['n_layer'],
+                        'n_embd': model_size['n_embd'],
+                        'n_head': model_size['n_head'],
+                    })
+                    break
+
+                logger.summary({
+                                'params_m(c_': model_size,
+                                'params_m(a)': int(params_nonembedding_trainable/1e6),
+                                'context_length': model_size['context_length'],
+                                'n_layer': model_size['n_layer'],
+                                'n_embd': model_size['n_embd'],
+                                'n_head': model_size['n_head'],
+                                'samples_rate': samples_rate,
+                                'tokens_rate': tokens_rate,
+                                'step_time': step_time,
+                                'transformer_tflops': transformer_tflops,
+                                # 'train_dataset_len': len(train_loader.dataset),
+                                # 'val_dataset_len': len(val_loader.dataset),
+                                # 'test_dataset_len': len(test_loader.dataset) if test_loader is not None else 0,
+                                # 'train_dataloader_len': len(train_loader),
+                                # 'val_dataloader_len': len(val_loader),
+                                # 'test_dataloader_len': len(test_loader) if test_loader is not None else 0
+                                })
 
     if torch_info.is_master:
         if torch_info.is_distributed:
@@ -240,8 +259,15 @@ def train_config(config:Mapping, logger:logging.Logger, device:torch.device,
 
     return model, model_config, train_loss, train_acc, total_samples, token_count, loop_start_time, loop_end_time, num_steps
 
-    # model_kwargs = model_config['module_kwargs']
-    # transformer_tflops = utils.transformer_tflops(batch_size=train_batch_size,
-    #     param_count=utils.module_params_count(model)[-1],
-    #     context_length=context_length, dt=eval_interval, iterations=iters_since_eval,
-    #     n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer'], n_head=model_kwargs['n_head'])
+if __name__ == "__main__":
+    # specify config file to use as first argument in commandline
+    config = Config(default_config_filepath='configs/train_gpt2/tinystories.yaml')
+    config['training']['num_steps'] = 5
+    config['training']['gradient_accumulation_steps'] = 1
+    config['training']['adj_grad_acc_gpu_count'] = False
+    config['training']['enable_train_log'] = False
+
+    measure_throuput(config,
+                     model_sizes=[{'n_layer': 12, 'n_embd': 768, 'n_head': 12}],
+                     context_lengths=[128, 256, 512, 1024, 2048, 4096, 8192, 16384],
+                     batch_sizes=[1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024])
