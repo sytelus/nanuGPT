@@ -39,13 +39,6 @@ def measure_throuput(config:Mapping,
         assert gradient_accumulation_steps % torch_info.world_size == 0, f'gradient_accumulation_steps ({gradient_accumulation_steps}) must be divisible by ddp_world_size ({torch_info.world_size})'
         gradient_accumulation_steps = gradient_accumulation_steps // torch_info.world_size
 
-    logger.summary({
-                    "gpu_batch_size": train_batch_size,
-                    "global_batch_size": gradient_accumulation_steps * train_batch_size * torch_info.world_size,
-                    "local_batch_size": gradient_accumulation_steps * train_batch_size,
-                    "tokens_per_iter": gradient_accumulation_steps * train_batch_size * torch_info.world_size * context_length
-                    })
-
     if torch_info.is_master:
         out_dir = utils.full_path(out_dir, create=True)
         logger.summary({'out_dir': out_dir})
@@ -106,6 +99,10 @@ def measure_throuput(config:Mapping,
                                 'tokens_rate': tokens_rate,
                                 'step_time': step_time,
                                 'transformer_tflops': transformer_tflops,
+                                "gpu_batch_size": batch_size,
+                                "global_batch_size": gradient_accumulation_steps * batch_size * torch_info.world_size,
+                                "local_batch_size": gradient_accumulation_steps * batch_size,
+                                "tokens_per_iter": gradient_accumulation_steps * batch_size * torch_info.world_size * context_length
                                 # 'train_dataset_len': len(train_loader.dataset),
                                 # 'val_dataset_len': len(val_loader.dataset),
                                 # 'test_dataset_len': len(test_loader.dataset) if test_loader is not None else 0,
