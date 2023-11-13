@@ -113,8 +113,8 @@ def check_env_vars():
                         'DATA_ROOT': (None, 'This variable should be set to directory where you data resides')
                        }, raise_exec=True)
 
-def get_model_sizes():
-    with open(utils.full_path('assets/model_sizes.json'), mode='r', encoding='utf-8') as f:
+def get_model_sizes()->Mapping[str, int]:
+    with open(utils.full_path('nanugpt/assets/model_sizes.json'), mode='r', encoding='utf-8') as f:
         d = json.load(f)
     return d
 

@@ -47,6 +47,9 @@ def measure_throuput(config:Mapping,
     tokenizer, tokenizer_config = common.create_tokenizer(config, logger)
     logger.summary({'vocab_size': len(tokenizer)})
 
+    # turn off loggig except for messages we want
+    logging.get_logger().quite('params_m(c)')
+
     for batch_size in batch_sizes:
         for context_length in context_lengths:
             data_config['module_kwargs']['train_batch_size'] = batch_size
@@ -61,6 +64,8 @@ def measure_throuput(config:Mapping,
                 model_kwargs['n_head'] = model_size['n_head']
 
                 try:
+                    torch.cuda.empty_cache()
+
                     model, model_config, train_loss, train_acc, total_samples, token_count, loop_start_time, loop_end_time, num_steps = \
                         train_config(config, logger, device, len(tokenizer), torch_info, train_loader, amp_ctx, gradient_accumulation_steps)
 
@@ -77,11 +82,11 @@ def measure_throuput(config:Mapping,
                     samples_rate = total_samples / dt
                     tokens_rate = token_count / dt
                     step_time = dt / num_steps
-                except torch.cuda.OutOfMemoryError as e:
+                except Exception as e:
                     logger.summary({
-                        'params_m(c_': model_size,
-                        'params_m(a)': '***OOM***',
-                        'context_length': model_size['context_length'],
+                        'params_m(c)': model_size['params_m'],
+                        'params_m(a)': '***OOM***' if isinstance(e, RuntimeError) and 'CUDA out of memory' in str(e) else type(e).__name__,
+                        'context_length': context_length,
                         'n_layer': model_size['n_layer'],
                         'n_embd': model_size['n_embd'],
                         'n_head': model_size['n_head'],
@@ -89,26 +94,20 @@ def measure_throuput(config:Mapping,
                     break
 
                 logger.summary({
-                                'params_m(c_': model_size,
+                                'params_m(c)': model_size['params_m'],
                                 'params_m(a)': int(params_nonembedding_trainable/1e6),
-                                'context_length': model_size['context_length'],
+                                'context_length': context_length,
                                 'n_layer': model_size['n_layer'],
                                 'n_embd': model_size['n_embd'],
                                 'n_head': model_size['n_head'],
-                                'samples_rate': samples_rate,
-                                'tokens_rate': tokens_rate,
+                                'samples/s': samples_rate,
+                                'tokens/s': tokens_rate,
                                 'step_time': step_time,
                                 'transformer_tflops': transformer_tflops,
                                 "gpu_batch_size": batch_size,
                                 "global_batch_size": gradient_accumulation_steps * batch_size * torch_info.world_size,
                                 "local_batch_size": gradient_accumulation_steps * batch_size,
-                                "tokens_per_iter": gradient_accumulation_steps * batch_size * torch_info.world_size * context_length
-                                # 'train_dataset_len': len(train_loader.dataset),
-                                # 'val_dataset_len': len(val_loader.dataset),
-                                # 'test_dataset_len': len(test_loader.dataset) if test_loader is not None else 0,
-                                # 'train_dataloader_len': len(train_loader),
-                                # 'val_dataloader_len': len(val_loader),
-                                # 'test_dataloader_len': len(test_loader) if test_loader is not None else 0
+                                "tokens/step": gradient_accumulation_steps * batch_size * torch_info.world_size * context_length,
                                 })
 
     if torch_info.is_master:
@@ -264,7 +263,10 @@ if __name__ == "__main__":
     config['training']['adj_grad_acc_gpu_count'] = False
     config['training']['enable_train_log'] = False
 
+    model_sizes = list(common.get_model_sizes().values())
+    model_sizes.sort(key=lambda x: x['params_m'])
+
     measure_throuput(config,
-                     model_sizes=[{'n_layer': 12, 'n_embd': 768, 'n_head': 12}],
+                     model_sizes=model_sizes,
                      context_lengths=[128, 256, 512, 1024, 2048, 4096, 8192, 16384],
                      batch_sizes=[1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024])

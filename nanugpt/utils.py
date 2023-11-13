@@ -402,16 +402,21 @@ def module_params(module:torch.nn.Module, non_embedding=True):
 
 def module_params_count(module:torch.nn.Module)->Tuple[int, int, int, int]:
     n_all, n_trainable, n_embedding, n_non_embedding_trainable = 0, 0, 0, 0
+    emd_params = set()
     for m in module.modules():
-        for p in m.parameters():
-            n = p.numel()
-            n_all += n
-            if p.requires_grad:
-                n_trainable += n
-            if isinstance(m, nn.Embedding):
-                n_embedding += n
-            elif p.requires_grad:
-                n_non_embedding_trainable += n
+        if isinstance(m, nn.Embedding):
+            for p in m.parameters():
+                emd_params.add(p)
+
+    for n,p in module.named_parameters():
+        n = p.numel()
+        n_all += n
+        if p.requires_grad:
+            n_trainable += n
+        if p in emd_params:
+            n_embedding += n
+        elif p.requires_grad:
+            n_non_embedding_trainable += n
     return n_all, n_trainable, n_embedding, n_non_embedding_trainable
 
 def weight_norm(module:torch.nn.Module, non_embedding=True)->float:
