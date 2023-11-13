@@ -1,6 +1,6 @@
 
 import sys
-from typing import Any, Dict, List, Mapping, Optional, Union
+from typing import Any, Dict, List, Mapping, Optional, Union, Set, Iterable
 from functools import partial
 import logging as py_logging
 import psutil
@@ -88,7 +88,7 @@ std_metrics['default'] = [
                             {"name": "train/samples", "step_metric":"elapsed_s", "summary":"max"},
                             {"name": "train/step_samples", "step_metric":"train/step", "summary":"mean"},
 
-                            {"name": "train/token_count", "step_metric":"train/step", "summary":"max", "goal":"max"},
+                            {"name": "train/tokens", "step_metric":"train/step", "summary":"max", "goal":"max"},
                             {"name": "train/loss", "step_metric":"train/samples", "summary":"min", "goal":"min"},
                             {"name": "train/loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
                             {"name": "train/best_loss", "step_metric":"train/samples", "summary":"min", "goal":"min"},
@@ -98,7 +98,7 @@ std_metrics['default'] = [
 
                             {"name": "train/epoch", "step_metric":"train/step", "summary":"max"},
                             {"name": "train/tokens_per_sec", "step_metric":"train/step", "summary":"mean"},
-                            {"name": "train/epoch_step", "step_metric":"train/step"},
+                            {"name": "train/fwd_bwd_interval", "step_metric":"train/step"},
 
                             {"name": "train/step_loss", "step_metric":"train/step", "summary":"min", "goal":"min"},
                             {"name": "train/step_ppl", "step_metric":"train/step", "summary":"min", "goal":"min"},
@@ -156,6 +156,11 @@ flush = _uninit_logger
 
 _logger:Optional['Logger'] = None
 
+def get_logger()->'Logger':
+    global _logger
+    if _logger is None:
+        raise RuntimeError('Logger not initialized. Create Logger() first.')
+    return _logger
 
 class Logger:
     def __init__(self, master_process:bool,
@@ -168,7 +173,8 @@ class Logger:
                  log_filename:Optional[str]=None,
                  allow_overwrite_log=False,
                  enable_summaries=True,
-                 glabal_instance:Optional[bool]=None) -> None:
+                 glabal_instance:Optional[bool]=None,
+                 ) -> None:
 
         global _logger, summary, log_config, info, warn, error, log_sys_info, finish, all_done, flush
 
@@ -191,13 +197,15 @@ class Logger:
         self.enable_wandb = enable_wandb
         self.master_process = master_process
         self.enable_summaries = enable_summaries
+        self.log_filepath = None
+        self.quite_keys:Optional[Set[str]] = None
 
         if master_process:
             if log_dir or log_filename:
-                log_filepath = os.path.join(full_path(str(log_dir), create=True), str(log_filename))
+                self.log_filepath = os.path.join(full_path(str(log_dir), create=True), str(log_filename))
             else:
-                log_filepath = None
-            self._py_logger = create_py_logger(filepath=log_filepath,
+                self.log_filepath = None
+            self._py_logger = create_py_logger(filepath=self.log_filepath,
                                             allow_overwrite_log=allow_overwrite_log,
                                             project_name=project_name,
                                             run_name=run_name,
@@ -221,6 +229,13 @@ class Logger:
             self._wandb_logger.config.update(config)
 
     def info(self, d:Union[str, Mapping[str,Any]], py_logger_only:bool=False):
+        # if quite key is set and set is empoty then quite everything
+        # if there are keys in quite then only allow messages with those keys
+        if self.quite_keys is not None:
+            if len(self.quite_keys)==0 or isinstance(d, str) or \
+                    (isinstance(d, Mapping) and not self.quite_keys.intersection(d.keys())):
+                return
+
         if self._py_logger is not None:
             msg = d # use separate variable to avoid changing d for wandb
             if isinstance(d, Mapping):
@@ -324,6 +339,14 @@ class Logger:
                         'free_disk_space': free_disk_space(),
                         })
 
+    def quite(self, except_keys:Optional[Union[str, Iterable[str]]]):
+        if except_keys is not None:
+            if not isinstance(except_keys, str):
+                except_keys = set(list(except_keys))
+            else:
+                except_keys = set([except_keys])
+        self.quite_keys = except_keys
+
     def finish(self):
         if self._wandb_logger is not None:
             self._wandb_logger.finish()
@@ -332,7 +355,7 @@ class Logger:
 
     def all_done(self, exit_code:int=0, write_total_time:bool=True):
         if write_total_time:
-            self.summary({'start_time': self.start_time, 'total_time': timeit.default_timer() - self.start_time})
+            self.summary({'log_filepath': self.log_filepath, 'start_time': self.start_time, 'total_time': timeit.default_timer() - self.start_time})
 
         self.finish()
         exit(exit_code)

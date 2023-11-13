@@ -24,6 +24,11 @@ def setup_device(config:Mapping, logger:logging.Logger)->Tuple[torch.device, Abs
     if enable_distributed is None and int(os.environ.get('WORLD_SIZE', '1')) > 1:
         enable_distributed = True
 
+    # load cuda modules on demand to save memory
+    # TODO: add config for below, should be false by default
+    # if 'CUDA_MODULE_LOADING' not in os.environ:
+    #     os.environ['CUDA_MODULE_LOADING'] = 'LAZY'
+
     torch_info = utils.setup_torch(seed=seed,
                 device_type=device_type, dtype=dtype,
                 enable_distributed=enable_distributed,
@@ -76,22 +81,15 @@ def compile_torch_model(model:torch.nn.Module, logger:logging.Logger)->torch.nn.
     return model
 
 
-def create_model_tokenizer(config:Mapping, logger:logging.Logger, device:torch.device,
-                           state_dict=None)->Tuple[torch.nn.Module, TokenizerBase, Mapping, Mapping]:
+def create_model(config:Mapping, logger:logging.Logger, device:torch.device,
+                           vocab_size:int, state_dict=None)->Tuple[torch.nn.Module, Mapping]:
     model_config = config['model']
-    tokenizer_config = config['tokenizer']
     torch_compile = config['general']['torch_compile']
 
-    get_tokenizer_factory = utils.import_fn(tokenizer_config['module'])
     get_model = utils.import_fn(model_config['module'])
 
-    tokenizer_factory = get_tokenizer_factory(**tokenizer_config['module_kwargs'])
-    tokenizer = tokenizer_factory()
-
-    model = get_model(vocab_size=len(tokenizer),
+    model = get_model(vocab_size=vocab_size,
                       **model_config['module_kwargs']).to(device)
-    logger.summary({'model_params_all': utils.module_params_count(model, non_embedding=False),
-                    'model_params_no_embedding': utils.module_params_count(model, non_embedding=True),})
 
     if state_dict is not None:
         logger.info("Loading model from state_dict...")
@@ -100,15 +98,23 @@ def create_model_tokenizer(config:Mapping, logger:logging.Logger, device:torch.d
     if torch_compile:
         model = compile_torch_model(model, logger)
 
-    return model, tokenizer, model_config, tokenizer_config
+    return model, model_config
+
+def create_tokenizer(config:Mapping, logger:logging.Logger)->Tuple[TokenizerBase, Mapping]:
+    tokenizer_config = config['tokenizer']
+    get_tokenizer_factory = utils.import_fn(tokenizer_config['module'])
+    tokenizer_factory = get_tokenizer_factory(**tokenizer_config['module_kwargs'])
+    tokenizer = tokenizer_factory()
+
+    return tokenizer, tokenizer_config
 
 def check_env_vars():
     utils.set_env_vars({'OUT_DIR': ('output', None),
                         'DATA_ROOT': (None, 'This variable should be set to directory where you data resides')
                        }, raise_exec=True)
 
-def get_model_sizes():
-    with open(utils.full_path('assets/model_sizes.json'), mode='r', encoding='utf-8') as f:
+def get_model_sizes()->Mapping[str, int]:
+    with open(utils.full_path('nanugpt/assets/model_sizes.json'), mode='r', encoding='utf-8') as f:
         d = json.load(f)
     return d
 
