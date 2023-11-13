@@ -1,5 +1,5 @@
 from contextlib import AbstractContextManager
-from typing import Mapping, Tuple, Optional, Callable, Mapping
+from typing import Mapping, Tuple, Optional, Callable, Mapping, List
 import os
 import timeit
 import math
@@ -13,11 +13,12 @@ from nanugpt import common
 from nanugpt import glogging as logging
 
 
-def measure_throuput(config:Mapping, logger:Optional[logging.Logger]=None):
+def measure_throuput(config:Mapping, model_sizes:List[dict],
+                     context_lengths:List[int],
+                     logger:Optional[logging.Logger]=None):
     train_batch_size = config['training']['train_batch_size']
     out_dir = config['general']['out_dir']
     data_config = config['data']
-    context_length = config['model']['module_kwargs']['context_length'] #TODO: refactor so trainer is independent of context length?
     gradient_accumulation_steps = config['training']['gradient_accumulation_steps']
     adj_grad_acc_gpu_count = config['training']['adj_grad_acc_gpu_count']
 
@@ -46,48 +47,53 @@ def measure_throuput(config:Mapping, logger:Optional[logging.Logger]=None):
         out_dir = utils.full_path(out_dir, create=True)
         logger.summary({'out_dir': out_dir})
 
-    # get dataset
-    train_loader, val_loader, test_loader = get_data(local_rank=torch_info.local_rank,
-                                                     **data_config['module_kwargs'])
-    logger.summary({
-                    'train_dataset_len': len(train_loader.dataset),
-                    'val_dataset_len': len(val_loader.dataset),
-                    'test_dataset_len': len(test_loader.dataset) if test_loader is not None else 0,
-                    'train_dataloader_len': len(train_loader),
-                    'val_dataloader_len': len(val_loader),
-                    'test_dataloader_len': len(test_loader) if test_loader is not None else 0
-                    })
-
     # create tokenizer
     tokenizer, tokenizer_config = common.create_tokenizer(config, logger)
     logger.summary({'vocab_size': len(tokenizer)})
 
-    model, model_config, train_loss, train_acc, total_samples, token_count, loop_start_time, loop_end_time, num_steps = \
-        train_config(config, logger, device, len(tokenizer), torch_info, train_loader, amp_ctx, gradient_accumulation_steps)
-    model_kwargs = model_config['module_kwargs']
-    dt = loop_end_time - loop_start_time
-    params_nonembedding_trainable = utils.module_params_count(model)[-1]
-    transformer_tflops = utils.transformer_tflops(batch_size=train_batch_size,
-        params_nonembedding_trainable=params_nonembedding_trainable,
-        context_length=context_length, dt=dt,
-        n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer'],
-        forward_iters=gradient_accumulation_steps, backward_iters=1
-    )
-    samples_rate = total_samples / dt
-    tokens_rate = token_count / dt
-    step_time = dt / num_steps
+    for context_length in context_lengths:
+        data_config['module_kwargs']['context_length'] = context_length
+        train_loader, val_loader, test_loader = get_data(local_rank=torch_info.local_rank,
+                                                        **data_config['module_kwargs'])
+        for model_size in model_sizes:
+            model_kwargs = config['model']['module_kwargs']
+            model_kwargs['context_length'] = context_length
+            model_kwargs['n_layer'] = model_size['n_layer']
+            model_kwargs['n_embd'] = model_size['n_embd']
+            model_kwargs['n_head'] = model_size['n_head']
 
-    logger.summary({
-                    'train_loss': train_loss,
-                    'train_acc': train_acc,
-                    'total_samples': total_samples,
-                    'token_count': token_count,
-                    'dt': dt,
-                    'samples_rate': samples_rate,
-                    'tokens_rate': tokens_rate,
-                    'step_time': step_time,
-                    'transformer_tflops': transformer_tflops
-                    })
+            model, model_config, train_loss, train_acc, total_samples, token_count, loop_start_time, loop_end_time, num_steps = \
+                train_config(config, logger, device, len(tokenizer), torch_info, train_loader, amp_ctx, gradient_accumulation_steps)
+            model_kwargs = model_config['module_kwargs']
+            dt = loop_end_time - loop_start_time
+            params_nonembedding_trainable = utils.module_params_count(model)[-1]
+            transformer_tflops = utils.transformer_tflops(batch_size=train_batch_size,
+                params_nonembedding_trainable=params_nonembedding_trainable,
+                context_length=context_length, dt=dt,
+                n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer'],
+                forward_iters=gradient_accumulation_steps, backward_iters=1
+            )
+            samples_rate = total_samples / dt
+            tokens_rate = token_count / dt
+            step_time = dt / num_steps
+
+            logger.summary({
+                            'train_loss': train_loss,
+                            'train_acc': train_acc,
+                            'total_samples': total_samples,
+                            'token_count': token_count,
+                            'dt': dt,
+                            'samples_rate': samples_rate,
+                            'tokens_rate': tokens_rate,
+                            'step_time': step_time,
+                            'transformer_tflops': transformer_tflops,
+                            'train_dataset_len': len(train_loader.dataset),
+                            'val_dataset_len': len(val_loader.dataset),
+                            'test_dataset_len': len(test_loader.dataset) if test_loader is not None else 0,
+                            'train_dataloader_len': len(train_loader),
+                            'val_dataloader_len': len(val_loader),
+                            'test_dataloader_len': len(test_loader) if test_loader is not None else 0
+                            })
 
     if torch_info.is_master:
         if torch_info.is_distributed:
