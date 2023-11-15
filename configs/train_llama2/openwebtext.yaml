@@ -7,7 +7,7 @@ logging:
   project_name: 'tinyllama_124m_owt'
   enable_wandb: true
   enable_summaries: true
-  run_name: 'llama2_124m_owt_init'  # select random name
+  run_name: 'llama2_124m_owt'  # select random name
   run_description: 'Llama2 124M baseline on OpenWebText'
 
 data:
