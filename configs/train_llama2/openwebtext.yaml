@@ -4,7 +4,7 @@ general:
   out_dir: '~/out_dir/llama2_124m_owt'
 
 logging:
-  project_name: 'llama2_124m_owt'
+  project_name: 'tinyllama_124m_owt'
   enable_wandb: true
   enable_summaries: true
   run_name: 'llama2_124m_owt'  # select random name

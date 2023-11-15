@@ -6,9 +6,9 @@ general:
 
 logging:
   enable_wandb: true
+  project_name: 'tinyllama_shakespeare'
   run_name: tinyshakespeare_llama2_bf16  # select random name
-  run_description:
-  project_name: llama2_tinyshakespeare
+  run_description: 'TinyLlama on TinyShakespeare'
 
 model:
   module: 'nanugpt.models.tinyllama.get_model'
