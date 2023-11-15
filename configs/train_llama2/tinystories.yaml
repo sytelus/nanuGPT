@@ -7,7 +7,7 @@ logging:
   project_name: 'tinyllama_124m_tinystories'
   enable_wandb: true
   enable_summaries: true
-  run_name: 'Llama2-124m_tinystories_llama2_bloat16'  # null -> select random name
+  run_name: 'llama2_124m_tinystories'  # null -> select random name
   run_description: 'Llama2-124m tinystories using llama2 tokenizer and bfloat16'
 
 data:
