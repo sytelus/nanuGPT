@@ -31,7 +31,7 @@ def find_multiple(n: int, k: int) -> int:
 
 @dataclass
 class LlamaConfig:
-    block_size: int = 4096
+    context_length: int = 4096
     vocab_size: int = 50254
     padding_multiple: int = 512
     padded_vocab_size: Optional[int] = None
@@ -167,15 +167,15 @@ class Llama(nn.Module):
         B, T = idx.size()
         use_kv_cache = input_pos is not None
 
-        block_size = self.config.block_size
+        context_length = self.config.context_length
         if max_seq_length is None:
-            max_seq_length = block_size
+            max_seq_length = context_length
         if use_kv_cache:  # not relevant otherwise
             assert (
                 max_seq_length >= T
             ), f"Cannot forward sequence of length {T}, max seq length is only {max_seq_length}"
-        assert max_seq_length <= block_size, f"Cannot attend to {max_seq_length}, block size is only {block_size}"
-        assert block_size >= T, f"Cannot forward sequence of length {T}, block size is only {block_size}"
+        assert max_seq_length <= context_length, f"Cannot attend to {max_seq_length}, block size is only {context_length}"
+        assert context_length >= T, f"Cannot forward sequence of length {T}, block size is only {context_length}"
 
         if self.rope_cache is None:
             self.rope_cache = self.build_rope_cache(idx)
@@ -214,7 +214,7 @@ class Llama(nn.Module):
 
     def build_rope_cache(self, idx: torch.Tensor) -> RoPECache:
         return build_rope_cache(
-            seq_len=self.config.block_size,
+            seq_len=self.config.context_length,
             n_elem=int(self.config.rotary_percentage * self.config.head_size),
             dtype=torch.bfloat16,
             device=idx.device,
@@ -222,7 +222,7 @@ class Llama(nn.Module):
         )
 
     def build_mask_cache(self, idx: torch.Tensor) -> torch.Tensor:
-        ones = torch.ones((self.config.block_size, self.config.block_size), device=idx.device, dtype=torch.bool)
+        ones = torch.ones((self.config.context_length, self.config.context_length), device=idx.device, dtype=torch.bool)
         return torch.tril(ones).unsqueeze(0).unsqueeze(0)
 
     def build_kv_caches(self, idx: torch.Tensor, max_seq_length: int, rope_cache_length: int) -> List[KVCache]:
@@ -452,7 +452,7 @@ def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.T
     return roped.type_as(x)
 
 def get_model(
-                block_size=2048,
+                context_length=2048,
                 vocab_size=32000,
                 padding_multiple=64,
                 n_layer=12,
@@ -471,7 +471,7 @@ def get_model(
               ):
 
     gpt_config = LlamaConfig(
-        block_size=block_size,
+        context_length=context_length,
         vocab_size=vocab_size,
         padding_multiple=padding_multiple,
         n_layer=n_layer,
