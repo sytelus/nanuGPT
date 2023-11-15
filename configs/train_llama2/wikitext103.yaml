@@ -15,12 +15,3 @@ data:
     tokenized_train_path: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/tiktoken/train.bin'
     tokenized_val_path: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/tiktoken/validation.bin'
     tokenized_test_path: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/tiktoken/test.bin'
-
-model:
-  module: 'nanugpt.models.hf_llama.get_model'
-  module_kwargs:
-    n_layer: 24
-    n_embd: 1024
-    n_head: 16
-    context_length: 1024
-
