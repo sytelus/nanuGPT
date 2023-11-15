@@ -11,7 +11,7 @@ from rich.logging import RichHandler
 import wandb
 import torch
 
-from nanugpt.utils import full_path, is_debugging, is_master_process, free_disk_space
+from nanugpt import utils
 
 INFO=py_logging.INFO
 WARN=py_logging.WARN
@@ -61,8 +61,8 @@ def create_py_logger(filepath:Optional[str]=None,
     logger.propagate = False # otherwise root logger prints things again
 
     if filepath:
-        _ = full_path(os.path.dirname(filepath), create=True) # ensure dir exists
-        filepath = full_path(filepath)
+        _ = utils.full_path(os.path.dirname(filepath), create=True) # ensure dir exists
+        filepath = utils.full_path(filepath)
 
         if os.path.exists(filepath) and not allow_overwrite_log:
             raise FileExistsError(f'Log file {filepath} already exists. Specify different file or passt allow_overwrite_log=True.')
@@ -70,7 +70,7 @@ def create_py_logger(filepath:Optional[str]=None,
         # log files gets appeneded if already exist
         # zero_file(filepath)
         # use mode='a' to append
-        fh = py_logging.FileHandler(filename=full_path(filepath), mode='w', encoding='utf-8')
+        fh = py_logging.FileHandler(filename=utils.full_path(filepath), mode='w', encoding='utf-8')
         fh.setLevel(level)
         fh.setFormatter(py_logging.Formatter('[%(asctime)s][%(levelname)s] %(message)s'))
         logger.addHandler(fh)
@@ -132,7 +132,6 @@ def create_wandb_logger(project_name, run_name,
                         metrics:List[Dict[str, Any]],
                         description:Optional[str]=None):
 
-    print(f"Initializing WandB on LOCAL_RANK: {os.environ.get('LOCAL_RANK', '-1')}, RANK {os.environ.get('RANK', '-1')},  utils.is_master_process={is_master_process()}")
     wandb.login() # use API key from WANDB_API_KEY env variable
 
     run = wandb.init(project=project_name, name=run_name,
@@ -202,7 +201,7 @@ class Logger:
 
         if master_process:
             if log_dir or log_filename:
-                self.log_filepath = os.path.join(full_path(str(log_dir), create=True), str(log_filename))
+                self.log_filepath = os.path.join(utils.full_path(str(log_dir), create=True), str(log_filename))
             else:
                 self.log_filepath = None
             self._py_logger = create_py_logger(filepath=self.log_filepath,
@@ -212,8 +211,8 @@ class Logger:
                                             run_description=run_description)
 
         if enable_wandb and master_process:
-            if is_debugging():
-                self._py_logger.warn('Wandb logging is disabled in debug mode.')
+            if utils.is_debugging():
+                self._py_logger.warn('Wandb logging is disabled in debug mode.') # type: ignore
             else:
                 self._wandb_logger = create_wandb_logger(project_name, run_name,
                                                 std_metrics[metrics_type],
@@ -316,27 +315,29 @@ class Logger:
                         'env_OMP_NUM_THREADS': os.environ.get('OMP_NUM_THREADS', None),
                         'env_CUDA_HOME': os.environ.get('CUDA_HOME', None),
 
-                        'torch.distributed.is_initialized': torch.distributed.is_initialized(),
-                        'torch.distributed.is_available': torch.distributed.is_available(),
-                        'gloo_available': torch.distributed.is_gloo_available(),
-                        'mpi_available': torch.distributed.is_mpi_available(),
-                        'nccl_available': torch.distributed.is_nccl_available(),
-                        'get_world_size': torch.distributed.get_world_size() if torch.distributed.is_initialized() else None,
-                        'get_rank': torch.distributed.get_rank() if torch.distributed.is_initialized() else None,
+                        'torch.distributed.is_initialized': torch.distributed.is_initialized(), # type: ignore
+                        'torch.distributed.is_available': torch.distributed.is_available(), # type: ignore
+                        'gloo_available': torch.distributed.is_gloo_available(), # type: ignore
+                        'mpi_available': torch.distributed.is_mpi_available(), # type: ignore
+                        'nccl_available': torch.distributed.is_nccl_available(), # type: ignore
+                        'get_world_size': torch.distributed.get_world_size() if torch.distributed.is_initialized() else None, # type: ignore
+                        'get_rank': torch.distributed.get_rank() if torch.distributed.is_initialized() else None, # type: ignore
                         'is_anomaly_enabled': torch.is_anomaly_enabled(),
                         'device_count': torch.cuda.device_count(),
 
-                        'cudnn.enabled': torch.backends.cudnn.enabled,
-                        'cudnn.benchmark': torch.backends.cudnn.benchmark,
-                        'cudnn.deterministic': torch.backends.cudnn.deterministic,
-                        'cudnn.version': torch.backends.cudnn.version(),
+                        'cudnn.enabled': torch.backends.cudnn.enabled, # type: ignore
+                        'cudnn.benchmark': torch.backends.cudnn.benchmark, # type: ignore
+                        'cudnn.deterministic': torch.backends.cudnn.deterministic, # type: ignore
+                        'cudnn.version': torch.backends.cudnn.version(), # type: ignore
 
                         'CUDA_VISIBLE_DEVICES': os.environ['CUDA_VISIBLE_DEVICES']
                                 if 'CUDA_VISIBLE_DEVICES' in os.environ else 'NotSet',
 
                         'memory_gb': psutil.virtual_memory().available / (1024.0 ** 3),
                         'cpu_count': psutil.cpu_count(),
-                        'free_disk_space': free_disk_space(),
+                        'utils.free_disk_space': utils.free_disk_space(),
+                        'flash_attn_ver': utils.get_package_ver('flash_attn'),
+                        'transformers_ver': utils.get_package_ver('transformers'),
                         })
 
     def quite(self, except_keys:Optional[Union[str, Iterable[str]]]):

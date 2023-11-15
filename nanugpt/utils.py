@@ -1,3 +1,4 @@
+from typing import Callable, Mapping, MutableMapping, Optional, Tuple, Dict, List, Sequence, Any, Type, Union
 import csv
 from datetime import datetime
 import os
@@ -5,7 +6,6 @@ import pathlib
 import platform
 import subprocess
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True' # needed to avoid Jupyter kernal crash due to matplotlib
-from typing import Callable, Mapping, MutableMapping, Optional, Tuple, Dict, List, Sequence, Any, Type
 from itertools import groupby, chain
 from collections import OrderedDict, defaultdict
 import os
@@ -707,3 +707,14 @@ def is_master_process()->bool:
 def free_disk_space()->int:
     """Returns free disk space in bytes"""
     return psutil.disk_usage('/').free
+
+def get_package_ver(pkg_name: str) -> Optional[str]:
+    package_exists = importlib.util.find_spec(pkg_name) is not None # type: ignore
+    package_version = None
+    if package_exists:
+        try:
+            package_version = importlib.metadata.version(pkg_name) # type: ignore
+            package_exists = True
+        except importlib.metadata.PackageNotFoundError: # type: ignore
+            package_exists = False
+    return package_version
