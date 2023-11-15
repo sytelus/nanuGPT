@@ -13,7 +13,7 @@ def get_model(
                 n_layer: int, n_embd: int, n_head: int,
                 vocab_size: int, context_length: int,
 
-                use_gqa: bool, # False for  < 13B
+                use_gqa: bool=False, # False for  < 13B
                 rope_theta: Optional[float]=10000.0, # theta for RoPE, 10000.0 but should be 10*contex_len
                 enable_flash_attn2: Optional[bool]=True,
 
