@@ -49,7 +49,7 @@ data:
     tokenized_test_path: null
 
 training:
-  train_batch_size: 60
+  train_batch_size: 30
   num_steps: 600000    # for OpenWebText/9B tokens
   enable_train_log: true
   log_every: 20
