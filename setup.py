@@ -10,7 +10,8 @@ install_requires=[
     'einops', 'tiktoken',
     'wandb', 'mlflow',
     'sentencepiece', 'tokenizers', 'transformers', 'datasets',
-    'tqdm', 'matplotlib', 'rich'
+    'tqdm', 'matplotlib', 'rich',
+    # assumes xformers is installed for tiny llama
 ]
 
 setuptools.setup(
