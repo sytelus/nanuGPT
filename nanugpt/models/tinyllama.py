@@ -7,11 +7,13 @@ import torch
 import torch.nn as nn
 from typing_extensions import Self
 
-from xformers.ops import SwiGLU
 
 from nanugpt.models.fused_rotary_embedding import apply_rotary_emb_func
 from nanugpt.models.rmsnorm import RMSNorm
 from nanugpt import utils
+
+from xformers.ops import SwiGLU
+
 
 RoPECache = Tuple[torch.Tensor, torch.Tensor]
 KVCache = Tuple[torch.Tensor, torch.Tensor]

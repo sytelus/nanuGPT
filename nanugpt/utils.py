@@ -721,5 +721,5 @@ def get_package_ver(pkg_name: str) -> Optional[version.Version]:
     return package_version
 
 def is_flash_attn_available() -> bool:
-    ver = get_package_ver("flash-attn")
+    ver = get_package_ver("flash_attn")
     return ver is not None and ver >= version.parse("2.0.0.post1")
