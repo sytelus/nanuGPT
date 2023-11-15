@@ -77,7 +77,7 @@ def measure_throuput(config:Mapping,
                         params_nonembedding_trainable=params_nonembedding_trainable,
                         context_length=context_length, dt=dt,
                         n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer'],
-                        forward_iters=gradient_accumulation_steps, backward_iters=1
+                        forward_iters=gradient_accumulation_steps, backward_iters=gradient_accumulation_steps,
                     )
                     samples_rate = total_samples / dt
                     tokens_rate = token_count / dt
@@ -259,10 +259,10 @@ if __name__ == "__main__":
     # specify config file to use as first argument in commandline
     config = Config(default_config_filepath='configs/train_gpt2/tinystories.yaml')
     config['training']['num_steps'] = 5
-    config['training']['gradient_accumulation_steps'] = 1
+    config['training']['gradient_accumulation_steps'] = 16
     config['training']['adj_grad_acc_gpu_count'] = False
     config['training']['enable_train_log'] = False
-    config['logging']['log_filename'] = 'throughput.log'
+    config['logging']['log_filename'] = 'throughput_grad_acc16.log'
     config['logging']['enable_wandb'] = False
     config['logging']['project_name'] = 'gpt2-throughput'
     config['logging']['run_name'] = 'throughput'
