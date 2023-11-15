@@ -1,3 +1,4 @@
+import sys
 from dataclasses import dataclass
 import math
 from typing import Any, List, Optional, Tuple, Literal, Type
@@ -16,10 +17,7 @@ RoPECache = Tuple[torch.Tensor, torch.Tensor]
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
 
-def is_flash_attn_available() -> bool:
-    ver = utils.get_package_ver("flash-attn")
-    return ver is not None and ver >= "2.0.0.post1"
-_flash_attn_available = is_flash_attn_available()
+_flash_attn_available = utils.is_flash_attn_available()
 if _flash_attn_available:
     from flash_attn import flash_attn_func # type: ignore
 
@@ -103,7 +101,7 @@ class LlamaConfig:
     @property
     def mlp_class(self) -> Type:
         # `self._mlp_class` cannot be the type to keep the config json serializable
-        return getattr(Llama, self._mlp_class)
+        return getattr(sys.modules[__name__], self._mlp_class)
 
     @property
     def norm_class(self) -> Type:

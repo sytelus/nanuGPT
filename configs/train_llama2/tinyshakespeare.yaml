@@ -11,7 +11,7 @@ logging:
   project_name: llama2_tinyshakespeare
 
 model:
-  module: 'nanugpt.models.hf_llama.get_model'
+  module: 'nanugpt.models.tinyllama.get_model'
   module_kwargs:
     n_layer: 6
     n_embd: 384

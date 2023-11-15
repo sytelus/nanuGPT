@@ -25,6 +25,7 @@ import multiprocessing
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 import logging
+from packaging import version
 
 import yaml
 
@@ -708,13 +709,17 @@ def free_disk_space()->int:
     """Returns free disk space in bytes"""
     return psutil.disk_usage('/').free
 
-def get_package_ver(pkg_name: str) -> Optional[str]:
+def get_package_ver(pkg_name: str) -> Optional[version.Version]:
     package_exists = importlib.util.find_spec(pkg_name) is not None # type: ignore
     package_version = None
     if package_exists:
         try:
-            package_version = importlib.metadata.version(pkg_name) # type: ignore
+            package_version = version.parse(importlib.metadata.version(pkg_name)) # type: ignore
             package_exists = True
         except importlib.metadata.PackageNotFoundError: # type: ignore
             package_exists = False
     return package_version
+
+def is_flash_attn_available() -> bool:
+    ver = get_package_ver("flash-attn")
+    return ver is not None and ver >= version.parse("2.0.0.post1")

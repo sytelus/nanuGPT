@@ -8,11 +8,7 @@ from einops import rearrange, repeat
 
 from nanugpt import utils
 
-
-def is_flash_attn_available() -> bool:
-    ver = utils.get_package_ver("flash-attn")
-    return ver is not None and ver >= "2.0.0.post1"
-_flash_attn_available = is_flash_attn_available()
+_flash_attn_available = utils.is_flash_attn_available()
 if _flash_attn_available:
     import rotary_emb # type: ignore
 
