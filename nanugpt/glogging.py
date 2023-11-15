@@ -336,8 +336,10 @@ class Logger:
                         'memory_gb': psutil.virtual_memory().available / (1024.0 ** 3),
                         'cpu_count': psutil.cpu_count(),
                         'utils.free_disk_space': utils.free_disk_space(),
-                        'flash_attn_ver': str(utils.get_package_ver('flash_attn')),
-                        'transformers_ver': str(utils.get_package_ver('transformers')),
+
+                        # TODO: importlib.metadata doesn't work in Python 3.8 so disabling for now
+                        # 'flash_attn_ver': str(utils.get_package_ver('flash_attn')),
+                        # 'transformers_ver': str(utils.get_package_ver('transformers')),
                         })
 
     def quite(self, except_keys:Optional[Union[str, Iterable[str]]]):

@@ -5,12 +5,14 @@ import torch
 import torch
 from torch.nn import init
 
+import dropout_layer_norm # type: ignore
+
 from nanugpt import utils
 
-
-_flash_attn_available = utils.is_flash_attn_available()
-if _flash_attn_available:
-    import dropout_layer_norm # type: ignore
+_flash_attn_available = True
+# _flash_attn_available = utils.is_flash_attn_available()
+# if _flash_attn_available:
+#     import dropout_layer_norm # type: ignore
 
 def maybe_align(x, alignment_in_bytes=16):
     """Assume that x already has last dim divisible by alignment_in_bytes"""

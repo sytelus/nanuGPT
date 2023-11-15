@@ -9,6 +9,8 @@ import torch.nn as nn
 
 from xformers.ops import SwiGLU
 
+from flash_attn import flash_attn_func # type: ignore
+
 from nanugpt.models.fused_rotary_embedding import apply_rotary_emb_func
 from nanugpt.models.rmsnorm import RMSNorm
 from nanugpt import utils
@@ -17,10 +19,10 @@ from nanugpt import utils
 RoPECache = Tuple[torch.Tensor, torch.Tensor]
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
-
-_flash_attn_available = utils.is_flash_attn_available()
-if _flash_attn_available:
-    from flash_attn import flash_attn_func # type: ignore
+_flash_attn_available = True
+# _flash_attn_available = utils.is_flash_attn_available()
+# if _flash_attn_available:
+#     from flash_attn import flash_attn_func # type: ignore
 
 def find_multiple(n: int, k: int) -> int:
     assert k > 0
@@ -373,9 +375,8 @@ class CausalSelfAttention(nn.Module):
             and q.device.type == "cuda"
             and q.dtype in (torch.float16, torch.bfloat16)
         ):
-            from flash_attn import flash_attn_func # type: ignore
-
             return flash_attn_func(q, k, v, dropout_p=0.0, softmax_scale=scale, causal=True)
+
         q = q.transpose(1, 2)
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)

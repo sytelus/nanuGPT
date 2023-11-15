@@ -6,11 +6,14 @@ from typing import Optional, Tuple
 import torch
 from einops import rearrange, repeat
 
+import rotary_emb # type: ignore
+
 from nanugpt import utils
 
-_flash_attn_available = utils.is_flash_attn_available()
-if _flash_attn_available:
-    import rotary_emb # type: ignore
+_flash_attn_available = True
+# _flash_attn_available = utils.is_flash_attn_available()
+# if _flash_attn_available:
+#     import rotary_emb # type: ignore
 
 class ApplyRotaryEmb(torch.autograd.Function):
     @staticmethod
