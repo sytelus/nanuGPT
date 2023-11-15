@@ -1,18 +1,17 @@
+from typing import Any, List, Optional, Tuple, Literal, Type
 import sys
 from dataclasses import dataclass
 import math
-from typing import Any, List, Optional, Tuple, Literal, Type
+from functools import partial
 
 import torch
 import torch.nn as nn
-from typing_extensions import Self
 
+from xformers.ops import SwiGLU
 
 from nanugpt.models.fused_rotary_embedding import apply_rotary_emb_func
 from nanugpt.models.rmsnorm import RMSNorm
 from nanugpt import utils
-
-from xformers.ops import SwiGLU
 
 
 RoPECache = Tuple[torch.Tensor, torch.Tensor]
@@ -136,6 +135,8 @@ class Llama(nn.Module):
         self.rope_cache: Optional[RoPECache] = None
         self.mask_cache: Optional[torch.Tensor] = None
         self.kv_caches: List[KVCache] = []
+
+        self.apply(partial(self._init_weights, n_layer=config.n_layer))
 
     def _init_weights(self, module: nn.Module, n_layer) -> None:
         """Meant to be used with `gpt.apply(gpt._init_weights)`."""
