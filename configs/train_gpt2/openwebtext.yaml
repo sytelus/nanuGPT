@@ -7,7 +7,7 @@ logging:
   project_name: 'gpt2_124m_owt'
   enable_wandb: true
   enable_summaries: true
-  run_name: 'gpt2_124m_owt'  # select random name
+  run_name: 'gpt2_124m_owt_llama_hp'  # select random name
   run_description: 'GPT2 124M on OpenWebText'
 
 data:

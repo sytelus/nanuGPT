@@ -455,7 +455,7 @@ def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.T
 
 def get_model(
                 context_length=2048,
-                vocab_size=32000,
+                vocab_size=50257,
                 padding_multiple=64,
                 n_layer=12,
                 n_head=12,
