@@ -7,11 +7,11 @@ logging:
   project_name: 'gpt2_124m_owt'
   enable_wandb: true
   enable_summaries: true
-  run_name: 'gpt2_124m_owt'  # select random name
-  run_description: 'GPT2 124M on OpenWebText'
+  run_name: 'gpt2_124m_owt_tokgpt4'  # select random name
+  run_description: 'GPT2 124M on OpenWebText, Tiktoken GPT4'
 
 data:
   module_kwargs:
-    tokenized_train_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/train.bin'
-    tokenized_val_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/val.bin'
+    tokenized_train_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken_gpt4/train.bin'
+    tokenized_val_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken_gpt4/val.bin'
 
