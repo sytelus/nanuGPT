@@ -71,6 +71,3 @@ df = pd.DataFrame(results, columns=["step", "a", "b", "c",
                                     "R^2", "MAE_all_next", "MAE_last_5",
                                     "last_actual", "last_pred"])
 df.to_csv(results_filepath, sep="\t", index=False)
-
-
-print('df')
