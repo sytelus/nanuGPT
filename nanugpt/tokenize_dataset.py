@@ -32,9 +32,9 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
     # create instance so any downloading can be done before we start the tokenization
     tok = tokenizer_factory()
     vocab_size = len(tok)
-    logging.summary({'vocab_size': vocab_size})
+    logging.summary({'run/vocab_size': vocab_size})
     np_dtype = np.uint16 if vocab_size < 2**16 else np.uint32
-    logging.summary({'np_dtype': str(np_dtype)})
+    logging.summary({'run/np_dtype': str(np_dtype)})
 
     class TokenizerPerThread:
         def __init__(self, tokenizer_factory):
@@ -70,7 +70,7 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
         dset = tokenized[split]
 
         arr_len = np.sum(dset['len'], dtype=np.uint64)
-        logging.summary({f'{split}_tokens': arr_len})
+        logging.summary({f'data/{split}_tokens': arr_len})
 
         tokenized_out_dir = utils.full_path(tokenized_out_dir, create=True)
         filename = os.path.join(tokenized_out_dir, f'{split}.bin')

@@ -87,11 +87,11 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         grad_acc_steps = grad_acc_steps // torch_info.world_size
 
     logger.summary({
-                    "grad_acc_steps": grad_acc_steps,
-                    "gpu_batch_size": train_batch_size,
-                    "global_batch_size": grad_acc_steps * train_batch_size * torch_info.world_size,
-                    "local_batch_size": grad_acc_steps * train_batch_size,
-                    "tokens_per_iter": grad_acc_steps * train_batch_size * torch_info.world_size * context_length
+                    "run/grad_acc_steps": grad_acc_steps,
+                    "run/gpu_batch_size": train_batch_size,
+                    "run/global_batch_size": grad_acc_steps * train_batch_size * torch_info.world_size,
+                    "run/local_batch_size": grad_acc_steps * train_batch_size,
+                    "run/tokens_per_iter": grad_acc_steps * train_batch_size * torch_info.world_size * context_length
                     })
 
     # get dataset
@@ -99,12 +99,12 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                                                      **data_config['module_kwargs'])
     train_batch_count = len(train_loader)
     logger.summary({
-                    'train_dataset_len': len(train_loader.dataset),
-                    'val_dataset_len': len(val_loader.dataset),
-                    'test_dataset_len': len(test_loader.dataset) if test_loader is not None else 0,
-                    'train_dataloader_len': train_batch_count,
-                    'val_dataloader_len': len(val_loader),
-                    'test_dataloader_len': len(test_loader) if test_loader is not None else 0
+                    'data/train_dataset_len': len(train_loader.dataset),
+                    'data/val_dataset_len': len(val_loader.dataset),
+                    'data/test_dataset_len': len(test_loader.dataset) if test_loader is not None else 0,
+                    'data/train_dataloader_len': train_batch_count,
+                    'data/val_dataloader_len': len(val_loader),
+                    'data/test_dataloader_len': len(test_loader) if test_loader is not None else 0
                     })
 
     # create tokenizer
@@ -116,11 +116,11 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     model_kwargs = model_config['module_kwargs']
 
     n_all, n_trainable, n_embedding, n_non_embedding_trainable = utils.module_params_count(model)
-    logger.summary({'model_params_all': n_all,
-                    'model_params_non_embedding': n_all-n_embedding,
-                    'model_params_embedding': n_embedding,
-                    'model_params_trainable': n_trainable,
-                    'model_params_non_embedding_trainable': n_non_embedding_trainable,
+    logger.summary({'model/params_all': n_all,
+                    'model/params_non_emb': n_all-n_embedding,
+                    'model/params_emb': n_embedding,
+                    'model/params_trai': n_trainable,
+                    'model/params_non_emb_train': n_non_embedding_trainable,
                    })
 
     # optimizer
@@ -141,7 +141,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
     if torch_info.is_master:
         out_dir = utils.full_path(out_dir, create=True)
-        logger.summary({'out_dir': out_dir})
+        logger.summary({'run/out_dir': out_dir})
 
     step, eval_count, total_samples, total_tokens = 0, 0, 0, 0
     best_train_loss, best_val_loss = float('inf'), float('inf')

@@ -41,7 +41,7 @@ def get_datasets(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Op
     logging.info(f'Loaded dataset {hf_name_path}')
     dataset_split_names = set(dataset.keys())
     for split in dataset_split_names:
-        logging.summary({f'{split}_original_rows': len(dataset[split])})
+        logging.summary({f'data/{split}_original_rows': len(dataset[split])})
 
     # Validate split names
     if train_split is None: # auto-detect
@@ -128,7 +128,7 @@ def get_datasets(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Op
     assert train_split != val_split and train_split != test_split and val_split != test_split
 
     for split in dataset.keys():
-        logging.summary({f'{split}_split_rows': len(dataset[split])})
+        logging.summary({f'data/{split}_split_rows': len(dataset[split])})
 
     return dataset, train_split, val_split, test_split
 

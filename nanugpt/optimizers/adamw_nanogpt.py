@@ -22,8 +22,8 @@ def get_optim(model, learning_rate, weight_decay,
     # TODO: move this out of function call
     num_decay_params = sum(p.numel() for p in decay_params)
     num_nodecay_params = sum(p.numel() for p in nodecay_params)
-    logging.summary({'num_decay_params': num_decay_params,
-                     'num_nodecay_params': num_nodecay_params})
+    logging.summary({'model/params_decay': num_decay_params,
+                     'model/params_no_decay': num_nodecay_params})
 
     # Create AdamW optimizer and use the fused version if it is available
     use_fused = enable_fused and \
@@ -31,7 +31,7 @@ def get_optim(model, learning_rate, weight_decay,
     extra_args = dict(fused=True) if use_fused else dict()
 
     # TODO: move this out of function call
-    logging.summary({'use_fused_adamw': use_fused})
+    logging.summary({'model/use_fused_adamw': use_fused})
 
     return torch.optim.AdamW(
         optim_groups,

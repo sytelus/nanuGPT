@@ -304,38 +304,37 @@ class Logger:
 
     def log_sys_info(self):
         self.summary({
-                        'device_name': torch.cuda.get_device_name() if torch.cuda.is_available() else '<not_cuda>',
-                        'torch_version': torch.__version__,
-                        'python_version': f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}',
-                        'env_rank': os.environ.get('RANK', None),
-                        'env_local_rank': os.environ.get('LOCAL_RANK', None),
-                        'env_world_size': os.environ.get('WORLD_SIZE', None),
-                        'env_master_addr': os.environ.get('MASTER_ADDR', None),
-                        'env_master_port': os.environ.get('MASTER_PORT', None),
-                        'env_OMP_NUM_THREADS': os.environ.get('OMP_NUM_THREADS', None),
-                        'env_CUDA_HOME': os.environ.get('CUDA_HOME', None),
+                        'sys/python_version': f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}',
+                        'sys/torch_version': torch.__version__,
+                        'sys/is_anomaly_enabled': torch.is_anomaly_enabled(),
+                        'sys/memory_gb': psutil.virtual_memory().available / (1024.0 ** 3),
+                        'sys/cpu_count': psutil.cpu_count(),
+                        'sys/utils.free_disk_space': utils.free_disk_space(),
 
-                        'torch.distributed.is_initialized': torch.distributed.is_initialized(), # type: ignore
-                        'torch.distributed.is_available': torch.distributed.is_available(), # type: ignore
-                        'gloo_available': torch.distributed.is_gloo_available(), # type: ignore
-                        'mpi_available': torch.distributed.is_mpi_available(), # type: ignore
-                        'nccl_available': torch.distributed.is_nccl_available(), # type: ignore
-                        'get_world_size': torch.distributed.get_world_size() if torch.distributed.is_initialized() else None, # type: ignore
-                        'get_rank': torch.distributed.get_rank() if torch.distributed.is_initialized() else None, # type: ignore
-                        'is_anomaly_enabled': torch.is_anomaly_enabled(),
-                        'device_count': torch.cuda.device_count(),
+                        'env/env_rank': os.environ.get('RANK', None),
+                        'env/env_local_rank': os.environ.get('LOCAL_RANK', None),
+                        'env/env_world_size': os.environ.get('WORLD_SIZE', None),
+                        'env/env_master_addr': os.environ.get('MASTER_ADDR', None),
+                        'env/env_master_port': os.environ.get('MASTER_PORT', None),
+                        'env/env_OMP_NUM_THREADS': os.environ.get('OMP_NUM_THREADS', None),
+                        'env/env_CUDA_HOME': os.environ.get('CUDA_HOME', None),
+                        'env/nccl_available': torch.distributed.is_nccl_available(), # type: ignore
 
-                        'cudnn.enabled': torch.backends.cudnn.enabled, # type: ignore
-                        'cudnn.benchmark': torch.backends.cudnn.benchmark, # type: ignore
-                        'cudnn.deterministic': torch.backends.cudnn.deterministic, # type: ignore
-                        'cudnn.version': torch.backends.cudnn.version(), # type: ignore
-
-                        'CUDA_VISIBLE_DEVICES': os.environ['CUDA_VISIBLE_DEVICES']
+                        'cuda/device_name': torch.cuda.get_device_name() if torch.cuda.is_available() else '<not_cuda>',
+                        'cuda/device_count': torch.cuda.device_count(),
+                        'cuda/cudnn.enabled': torch.backends.cudnn.enabled, # type: ignore
+                        'cuda/cudnn.benchmark': torch.backends.cudnn.benchmark, # type: ignore
+                        'cuda/cudnn.deterministic': torch.backends.cudnn.deterministic, # type: ignore
+                        'cuda/cudnn.version': torch.backends.cudnn.version(), # type: ignore
+                        'cuda/CUDA_VISIBLE_DEVICES': os.environ['CUDA_VISIBLE_DEVICES']
                                 if 'CUDA_VISIBLE_DEVICES' in os.environ else 'NotSet',
 
-                        'memory_gb': psutil.virtual_memory().available / (1024.0 ** 3),
-                        'cpu_count': psutil.cpu_count(),
-                        'utils.free_disk_space': utils.free_disk_space(),
+                        'dist/get_world_size': torch.distributed.get_world_size() if torch.distributed.is_initialized() else None, # type: ignore
+                        'dist/get_rank': torch.distributed.get_rank() if torch.distributed.is_initialized() else None, # type: ignore
+                        'dist/torch.distributed.is_initialized': torch.distributed.is_initialized(), # type: ignore
+                        'dist/torch.distributed.is_available': torch.distributed.is_available(), # type: ignore
+                        'dist/gloo_available': torch.distributed.is_gloo_available(), # type: ignore
+                        'dist/mpi_available': torch.distributed.is_mpi_available(), # type: ignore
 
                         # TODO: importlib.metadata doesn't work in Python 3.8 so disabling for now
                         # 'flash_attn_ver': str(utils.get_package_ver('flash_attn')),
@@ -358,7 +357,7 @@ class Logger:
 
     def all_done(self, exit_code:int=0, write_total_time:bool=True):
         if write_total_time:
-            self.summary({'log_filepath': self.log_filepath, 'start_time': self.start_time, 'elapsed_hr': (timeit.default_timer() - self.start_time)/3600.0})
+            self.summary({'run/log_filepath': self.log_filepath, 'run/start_time': self.start_time, 'run/elapsed_hr': (timeit.default_timer() - self.start_time)/3600.0})
 
         self.finish()
         exit(exit_code)

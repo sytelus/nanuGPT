@@ -38,7 +38,7 @@ def setup_device(config:Mapping, logger:logging.Logger)->Tuple[torch.device, Abs
     utils.setup_sys(seed + torch_info.seed_offset)
 
     d = dataclasses.asdict(torch_info)
-    d['pt_dtype'] = str(d['pt_dtype'])  # make it JSON serializable so it can be logged
+    d['run/pt_dtype'] = str(d['pt_dtype'])  # make it JSON serializable so it can be logged
     logger.summary(d)
 
     device = torch.device(torch_info.device_name)

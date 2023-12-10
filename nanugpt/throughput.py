@@ -41,11 +41,11 @@ def measure_throuput(config:Mapping,
 
     if torch_info.is_master:
         out_dir = utils.full_path(out_dir, create=True)
-        logger.summary({'out_dir': out_dir})
+        logger.summary({'run/out_dir': out_dir})
 
     # create tokenizer
     tokenizer, tokenizer_config = common.create_tokenizer(config, logger)
-    logger.summary({'vocab_size': len(tokenizer)})
+    logger.summary({'run/vocab_size': len(tokenizer)})
 
     # turn off loggig except for messages we want
     logging.get_logger().quite('params_m(c)')
@@ -84,30 +84,30 @@ def measure_throuput(config:Mapping,
                     step_time = dt / num_steps
                 except Exception as e:
                     logger.summary({
-                        'params_m(c)': model_size['params_m'],
-                        'params_m(a)': '***OOM***' if isinstance(e, RuntimeError) and 'CUDA out of memory' in str(e) else type(e).__name__,
-                        'context_length': context_length,
-                        'n_layer': model_size['n_layer'],
-                        'n_embd': model_size['n_embd'],
-                        'n_head': model_size['n_head'],
+                        'model/params_m(c)': model_size['params_m'],
+                        'model/params_m(a)': '***OOM***' if isinstance(e, RuntimeError) and 'CUDA out of memory' in str(e) else type(e).__name__,
+                        'model/context_length': context_length,
+                        'model/n_layer': model_size['n_layer'],
+                        'model/n_embd': model_size['n_embd'],
+                        'model/n_head': model_size['n_head'],
                     })
                     break
 
                 logger.summary({
-                                'params_m(c)': model_size['params_m'],
-                                'params_m(a)': int(params_nonembedding_trainable/1e6),
-                                'context_length': context_length,
-                                'n_layer': model_size['n_layer'],
-                                'n_embd': model_size['n_embd'],
-                                'n_head': model_size['n_head'],
-                                'samples/s': samples_rate,
-                                'tokens/s': tokens_rate,
-                                'step_time': step_time,
-                                'transformer_tflops': transformer_tflops,
-                                "gpu_batch_size": batch_size,
-                                "global_batch_size": gradient_accumulation_steps * batch_size * torch_info.world_size,
-                                "local_batch_size": gradient_accumulation_steps * batch_size,
-                                "tokens/step": gradient_accumulation_steps * batch_size * torch_info.world_size * context_length,
+                                'model/params_m(c)': model_size['params_m'],
+                                'model/params_m(a)': int(params_nonembedding_trainable/1e6),
+                                'model/context_length': context_length,
+                                'model/n_layer': model_size['n_layer'],
+                                'model/n_embd': model_size['n_embd'],
+                                'model/n_head': model_size['n_head'],
+                                'perf/samples_per_s': samples_rate,
+                                'perf/tokens_per_s': tokens_rate,
+                                'perf/step_time': step_time,
+                                'perf/transformer_tflops': transformer_tflops,
+                                "run/gpu_batch_size": batch_size,
+                                "run/global_batch_size": gradient_accumulation_steps * batch_size * torch_info.world_size,
+                                "run/local_batch_size": gradient_accumulation_steps * batch_size,
+                                "run/tokens_per_step": gradient_accumulation_steps * batch_size * torch_info.world_size * context_length,
                                 })
 
     if torch_info.is_master:
