@@ -222,7 +222,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             dist.reduce(int_dist, dst=0,op=dist.ReduceOp.SUM)
             if torch_info.is_master:
                 loss_sum,fwd_bwd_interval_sum = tuple(fp32_dist.tolist())
-                fwd_bwd_interval = fwd_bwd_interval_sum / torch_info.world_size
+                fwd_bwd_interval = fwd_bwd_interval_sum
                 correct_sum, step_preds_count, step_sample_count,step_token_count = tuple(int_dist.tolist())
 
         total_samples += step_sample_count
@@ -234,7 +234,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             best_train_loss_step = step
 
         if torch_info.is_master:
-            transformer_tflops = utils.transformer_tflops(batch_size=train_batch_size,
+            transformer_tflops = utils.transformer_tflops(batch_size=step_sample_count,
                 params_nonembedding_trainable=n_non_embedding_trainable,
                 context_length=context_length, dt=fwd_bwd_interval,
                 n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer'],
