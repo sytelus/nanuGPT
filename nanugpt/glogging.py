@@ -383,7 +383,7 @@ class Logger:
                          )
 
         # write summaries to file
-        if self.master_process:
+        if self.master_process and self.summaries_filepath is not None:
             with open(self.summaries_filepath, 'w', encoding='utf-8') as f:
                 json.dump(self.summaries, f, indent=4)
 
