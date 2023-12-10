@@ -70,7 +70,7 @@ def create_py_logger(filepath:Optional[str]=None,
         # log files gets appeneded if already exist
         # zero_file(filepath)
         # use mode='a' to append
-        fh = py_logging.FileHandler(filename=utils.full_path(filepath), mode='w', encoding='utf-8')
+        fh = py_logging.FileHandler(filename=filepath, mode='w', encoding='utf-8')
         fh.setLevel(level)
         fh.setFormatter(py_logging.Formatter('[%(asctime)s][%(levelname)s] %(message)s'))
         logger.addHandler(fh)
@@ -202,8 +202,7 @@ class Logger:
         if master_process:
             if log_dir or log_filename:
                 self.log_filepath = os.path.join(utils.full_path(str(log_dir), create=True), str(log_filename))
-            else:
-                self.log_filepath = None
+
             self._py_logger = create_py_logger(filepath=self.log_filepath,
                                             allow_overwrite_log=allow_overwrite_log,
                                             project_name=project_name,
@@ -356,6 +355,8 @@ class Logger:
             py_logging.shutdown()
 
     def all_done(self, exit_code:int=0, write_total_time:bool=True):
+        if self.log_filepath is not None and self._wandb_logger is not None:
+            self._wandb_logger.log_artifact(self.log_filepath, type='log_file', name='log_file')
         if write_total_time:
             self.summary({'run/log_filepath': self.log_filepath, 'run/start_time': self.start_time, 'run/elapsed_hr': (timeit.default_timer() - self.start_time)/3600.0})
 
