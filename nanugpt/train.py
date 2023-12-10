@@ -10,6 +10,7 @@ from torch import distributed as dist
 from nanugpt import utils
 from nanugpt import common
 from nanugpt import glogging as logging
+from nanugpt import lin_predictor
 
 @torch.no_grad()
 def estimate_loss(model:torch.nn.Module, get_loss:Callable,
@@ -147,7 +148,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     best_train_loss, best_val_loss = float('inf'), float('inf')
     best_train_loss_step, best_val_loss_step = -1, -1
     last_checkpoint_time = timeit.default_timer()
-    prev_train_loss, loss_inversions, loss_improvement_steps = float('-inf'), 0,0
+    prev_train_losses, loss_inversions, loss_improvement_steps = [], 0,0
+    max_previous_losses, pred_loss = 30, float('inf')
     checkpoint_log = []
     loop_start_time = last_eval_time = timeit.default_timer()
     batches = Batches(train_loader)
@@ -232,9 +234,9 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         total_tokens += step_token_count
         train_acc = correct_sum / step_preds_count
         train_loss = loss_sum / step_sample_count
-        if train_loss < prev_train_loss:
+        if train_loss < prev_train_losses[-1] if prev_train_losses else float('inf'):
             loss_inversions += 1
-        prev_train_loss = train_loss
+        prev_train_losses[-max_previous_losses:] += [train_loss]
         if train_loss < best_train_loss:
             best_train_loss = train_loss
             best_train_loss_step = step
@@ -249,6 +251,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             )
 
             elapsed_hr = (timeit.default_timer() - loop_start_time)/3600.0
+            loss_pred_model = lin_predictor.fit(list(range(step-max_previous_losses, max_previous_losses)), prev_train_losses)
+            pred_loss = lin_predictor.predict(loss_pred_model, [max_steps-1])[0]
             metrics.update({
                 "train/step": step,
                 "train/loss": train_loss,
@@ -265,6 +269,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                 "train/tokens_per_sec": step_token_count / fwd_bwd_interval,
                 "train/loss_inversions": 100.0*loss_inversions/(step+1),
                 "train/loss_improvement_steps": 100.0*loss_improvement_steps/(step+1),
+                "train/pred_loss": pred_loss,
                 "lr": optimizer.param_groups[0]['lr'],
                 'tflops': transformer_tflops,
                 "elapsed_hr": elapsed_hr,
