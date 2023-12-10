@@ -98,6 +98,7 @@ def create_py_logger(filepath:Optional[str]=None,
 std_metrics = {}
 std_metrics['default'] = [
                             {"name": "elapsed_hr", "step_metric":"train/step", "summary":"max"},
+                            {"name": "eta_hr", "step_metric":"train/step", "summary":"max"},
                             {"name": "train/step", "step_metric":"elapsed_hr", "summary":"max"},
                             {"name": "train/samples_hr", "step_metric":"elapsed_hr", "summary":"max"},
                             {"name": "train/samples", "step_metric":"train/step", "summary":"mean"},
@@ -128,7 +129,6 @@ std_metrics['default'] = [
                             {"name": "test/ppl", "step_metric":"train/step", "summary":"min", "goal":"min"},
 
                             {"name": "lr", "step_metric":"train/step", "summary":"max"},
-                            {"name": "ETA_hr", "step_metric":"train/step", "summary":"max", "goal":"min"},
                             {"name": "w_norm", "step_metric":"train/step", "summary":"mean", "goal":"min"},
                             {"name": "transformer_tflops", "step_metric":"train/step", "summary":"mean", "goal":"max"},
                             {"name": "tokens_per_sec", "step_metric":"train/step", "summary":"mean", "goal":"max"},

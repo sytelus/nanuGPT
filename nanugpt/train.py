@@ -215,6 +215,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         fwd_bwd_interval = timeit.default_timer() - step_start_time
 
         if torch_info.is_distributed:
+            dist.barrier()
             # reduce tensors to rank 0 to get numbers from all ranks
             fp32_dist = torch.tensor([loss_sum, fwd_bwd_interval], dtype=torch.float32, device=device)
             int_dist = torch.tensor([correct_sum, step_preds_count, step_sample_count, step_token_count], dtype=torch.int64, device=device)
@@ -241,6 +242,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                 forward_iters=grad_acc_steps, backward_iters=1
             )
 
+            elapsed_hr = (timeit.default_timer() - loop_start_time)/3600.0
             metrics.update({
                 "train/step": step,
                 "train/loss": train_loss,
@@ -257,7 +259,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                 "train/tokens_per_sec": step_token_count / fwd_bwd_interval,
                 "lr": optimizer.param_groups[0]['lr'],
                 'tflops': transformer_tflops,
-                "elapsed_hr": (timeit.default_timer() - loop_start_time)/3600.0
+                "elapsed_hr": elapsed_hr,
+                "eta_hr": elapsed_hr * (max_steps - step) / (step+1),
             })
 
         # is it time to evaluate? We evaluate after 1st step to get initial loss.
