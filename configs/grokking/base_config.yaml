@@ -49,7 +49,7 @@ tokenizer:
 
 training:
   train_batch_size: 512
-  num_steps: 3000    # 1e5 is not enough when weight_decay=0.0
+  max_steps: 3000    # 1e5 is not enough when weight_decay=0.0
   enable_train_log: false
   log_every: 20
   grad_clip: 0.0 # disabled if 0.0

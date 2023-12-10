@@ -12,7 +12,7 @@ if __name__ == "__main__":
     config['logging']['enable_summaries'] = False
     config['eval']['eval_every'] = 1000000 # only eval the last step
     config['eval']['save_checkpoint'] = False
-    config['training']['num_steps'] = 3000 # only train for 1M steps
+    config['training']['max_steps'] = 3000 # only train for 1M steps
     config['logging']['allow_overwrite_log'] = False
     config['logging']['log_filename'] = 'seed_search_' + datetime.now().strftime('%Y%m%d%H%M%S') + '.log'
     config['training']['enable_train_log'] = False

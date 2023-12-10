@@ -13,4 +13,4 @@ optimizer:
     weight_decay: 0.0     # weight_decay=1 makes convergence much faster and original graph is not reproducible
 
 training:
-  num_steps: 1000000    # 1e5 is not enough when weight_decay=0.0
+  max_steps: 1000000    # 1e5 is not enough when weight_decay=0.0

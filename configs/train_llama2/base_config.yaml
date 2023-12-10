@@ -53,7 +53,7 @@ data:
 
 training:
   train_batch_size: 32 #32, 8
-  num_steps: 1000000    # for OpenWebText/9B tokens
+  max_steps: 1000000    # for OpenWebText/9B tokens
   enable_train_log: true
   log_every: 20
   grad_clip: 1.0 # disabled if 0.0
@@ -73,7 +73,7 @@ scheduler:
   module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
   module_kwargs:
     warmup_iters: 2000
-    lr_decay_iters: '_copy: /training/num_steps'
+    lr_decay_iters: '_copy: /training/max_steps'
     min_lr: 3.0E-5
 
 generate:

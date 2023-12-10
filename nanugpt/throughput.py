@@ -66,7 +66,7 @@ def measure_throuput(config:Mapping,
                 try:
                     torch.cuda.empty_cache()
 
-                    model, model_config, train_loss, train_acc, total_samples, token_count, loop_start_time, loop_end_time, num_steps = \
+                    model, model_config, train_loss, train_acc, total_samples, token_count, loop_start_time, loop_end_time, max_steps = \
                         train_config(config, logger, device, len(tokenizer), torch_info, train_loader, amp_ctx, gradient_accumulation_steps)
 
                     params_nonembedding_trainable = utils.module_params_count(model)[-1]
@@ -81,7 +81,7 @@ def measure_throuput(config:Mapping,
                     )
                     samples_rate = total_samples / dt
                     tokens_rate = token_count / dt
-                    step_time = dt / num_steps
+                    step_time = dt / max_steps
                 except Exception as e:
                     logger.summary({
                         'model/params_m(c)': model_size['params_m'],
@@ -123,7 +123,7 @@ def train_config(config:Mapping, logger:logging.Logger, device:torch.device,
                  train_loader:torch.utils.data.DataLoader, amp_ctx:AbstractContextManager,
                  gradient_accumulation_steps:int):
 
-    num_steps = config['training']['num_steps']
+    max_steps = config['training']['max_steps']
     grad_clip = config['training']['grad_clip']
     optimizer_config = config['optimizer']
     scheduler_config = config['scheduler']
@@ -157,7 +157,7 @@ def train_config(config:Mapping, logger:logging.Logger, device:torch.device,
     train_loss, train_acc = 0., 0.
 
     # run steps
-    while step < num_steps:
+    while step < max_steps:
         step_start_time = timeit.default_timer()
 
         batch_iter = iter(train_loader) # restart iterator
@@ -248,17 +248,17 @@ def train_config(config:Mapping, logger:logging.Logger, device:torch.device,
             train_acc = correct_sum / step_preds_count
 
             step += 1
-            if step >= num_steps:
+            if step >= max_steps:
                 break
 
     loop_end_time = timeit.default_timer()
 
-    return model, model_config, train_loss, train_acc, total_samples, token_count, loop_start_time, loop_end_time, num_steps
+    return model, model_config, train_loss, train_acc, total_samples, token_count, loop_start_time, loop_end_time, max_steps
 
 if __name__ == "__main__":
     # specify config file to use as first argument in commandline
     config = Config(default_config_filepath='configs/train_gpt2/tinystories.yaml')
-    config['training']['num_steps'] = 5
+    config['training']['max_steps'] = 5
     config['training']['gradient_accumulation_steps'] = 1
     config['training']['adj_grad_acc_gpu_count'] = False
     config['training']['enable_train_log'] = False

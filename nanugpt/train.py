@@ -51,7 +51,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     project_name = config['logging']['project_name']
     run_name = config['logging']['run_name']
     train_batch_size = config['training']['train_batch_size']
-    num_steps = config['training']['num_steps']
+    max_steps = config['training']['max_steps']
     grad_clip = config['training']['grad_clip']
     enable_train_log = config['training']['enable_train_log']
     train_log_every = config['training']['log_every']
@@ -151,7 +151,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     batches = Batches(train_loader)
 
     # run steps
-    while step < num_steps:
+    while step < max_steps:
         step_start_time = timeit.default_timer()
         step_sample_count, step_token_count = 0, 0
         loss_sum, correct_sum, step_preds_count = 0., 0, 0
@@ -262,7 +262,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
         # is it time to evaluate? We evaluate after 1st step to get initial loss.
         eval_performed = False
-        if torch_info.is_master and ((step+1) % eval_every == 0 or step+1 >= num_steps):
+        if torch_info.is_master and ((step+1) % eval_every == 0 or step+1 >= max_steps):
             eval_performed = True
             eval_count += 1
             eval_interval = timeit.default_timer() - last_eval_time
@@ -282,7 +282,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                 "w_norm": utils.weight_norm(model),
                 "val/interval": eval_interval,
             })
-            if step+1 >= num_steps and test_loader:
+            if step+1 >= max_steps and test_loader:
                 test_loss, test_acc = estimate_loss(model, get_loss, test_loader, None,
                                             amp_ctx, torch_info.is_cuda, device)
                 metrics.update({
@@ -294,7 +294,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
             # if this is the best model so far, save it
             if save_checkpoint and last_checkpoint_step < best_val_loss_step and \
-                    ((step+1 >= num_steps) or \
+                    ((step+1 >= max_steps) or \
                         (step > checkoint_after and (eval_count+1) % checkpoint_every_eval == 0)
                     ):
                 checkpoint_filename = project_name + \
@@ -311,13 +311,13 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         # Decide if we should log
         can_log = len(metrics) > 0 and torch_info.is_master and (
                         (enable_train_log and (
-                            step % train_log_every == 0 or step+1 >= num_steps)
+                            step % train_log_every == 0 or step+1 >= max_steps)
                         ) or eval_performed)
         if can_log:
             logger.info(metrics)
 
         step += 1
-        if step >= num_steps:
+        if step >= max_steps:
             break
 
 

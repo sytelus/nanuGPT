@@ -25,7 +25,7 @@ data:
 
 training:
   train_batch_size: 32
-  num_steps: 8000 # divide the number of steps by number of GPUs
+  max_steps: 8000 # divide the number of steps by number of GPUs
   gradient_accumulation_steps: 2
   adj_grad_acc_gpu_count: false # adjust gradient accumulation steps for number of GPUs
 
@@ -41,7 +41,7 @@ scheduler:
   module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
   module_kwargs:
     warmup_iters: 100
-    lr_decay_iters: '_copy: /training/num_steps'
+    lr_decay_iters: '_copy: /training/max_steps'
     min_lr: 3.0E-5
 
 eval:

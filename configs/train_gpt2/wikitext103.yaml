@@ -26,7 +26,7 @@ model:
 
 training:
   train_batch_size: 32
-  num_steps: 300000
+  max_steps: 300000
   gradient_accumulation_steps: 16
   adj_grad_acc_gpu_count: true # adjust gradient accumulation steps for number of GPUs
 
