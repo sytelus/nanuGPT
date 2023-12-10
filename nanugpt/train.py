@@ -146,6 +146,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     step, eval_count, total_samples, total_tokens = 0, 0, 0, 0
     best_train_loss, best_val_loss = float('inf'), float('inf')
     best_train_loss_step, best_val_loss_step, last_checkpoint_step = -1, -1, -1
+    prev_train_loss, loss_inversions, loss_improvement_steps = float('-inf'), 0,0
     checkpoint_log = []
     loop_start_time = last_eval_time = timeit.default_timer()
     batches = Batches(train_loader)
@@ -228,11 +229,15 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
         total_samples += step_sample_count
         total_tokens += step_token_count
-        train_loss = loss_sum / step_sample_count
         train_acc = correct_sum / step_preds_count
+        train_loss = loss_sum / step_sample_count
+        if train_loss < prev_train_loss:
+            loss_inversions += 1
+        prev_train_loss = train_loss
         if train_loss < best_train_loss:
             best_train_loss = train_loss
             best_train_loss_step = step
+            loss_improvement_steps += 1
 
         if torch_info.is_master:
             transformer_tflops = utils.transformer_tflops(batch_size=step_sample_count,
@@ -257,6 +262,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                 "train/step_samples": step_sample_count,
                 "train/tokens": total_tokens,
                 "train/tokens_per_sec": step_token_count / fwd_bwd_interval,
+                "train/loss_inversions": 100.0*loss_inversions/(step+1),
+                "train/loss_improvement_steps": 100.0*loss_improvement_steps/(step+1),
                 "lr": optimizer.param_groups[0]['lr'],
                 'tflops': transformer_tflops,
                 "elapsed_hr": elapsed_hr,
