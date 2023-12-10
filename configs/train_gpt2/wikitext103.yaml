@@ -6,7 +6,7 @@ general:
 logging:
   project_name: 'gpt2_124m_wikitext-103'
   enable_wandb: true
-  enable_summaries: true
+  summaries_stdout: true
   run_name: 'gpt124m_wikitext103_tiktoken_bloat16'  # select random name
   run_description: 'GPT124M WikiText-103 using gpt2 tokenizer and bfloat16'
 

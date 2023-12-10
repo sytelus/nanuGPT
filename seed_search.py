@@ -9,7 +9,7 @@ from nanugpt import glogging as logging
 if __name__ == "__main__":
     config = Config(default_config_filepath='configs/grokking/prime223.yaml')
 
-    config['logging']['enable_summaries'] = False
+    config['logging']['summaries_stdout'] = False
     config['eval']['eval_every'] = 1000000 # only eval the last step
     config['eval']['save_checkpoint'] = False
     config['training']['max_steps'] = 3000 # only train for 1M steps

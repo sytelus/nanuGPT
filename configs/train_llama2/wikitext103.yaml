@@ -6,7 +6,7 @@ general:
 logging:
   project_name: 'tinyllama_124m_wikitext103'
   enable_wandb: true
-  enable_summaries: true
+  summaries_stdout: true
   run_name: 'llama2-124m_wikitext103'  # select random name
   run_description: 'Llama2-124M WikiText-103 using llama2 tokenizer and bfloat16'
 

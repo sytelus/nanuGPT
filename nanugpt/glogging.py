@@ -171,7 +171,7 @@ class Logger:
                  log_dir:Optional[str]=None,
                  log_filename:Optional[str]=None,
                  allow_overwrite_log=False,
-                 enable_summaries=True,
+                 summaries_stdout=True,
                  glabal_instance:Optional[bool]=None,
                  ) -> None:
 
@@ -195,7 +195,7 @@ class Logger:
         self._wandb_logger = None
         self.enable_wandb = enable_wandb
         self.master_process = master_process
-        self.enable_summaries = enable_summaries
+        self.summaries_stdout = summaries_stdout
         self.log_filepath = None
         self.quite_keys:Optional[Set[str]] = None
 
@@ -219,7 +219,7 @@ class Logger:
         # else leave things to None
 
     def log_config(self, config):
-        if not self.enable_summaries:
+        if not self.summaries_stdout:
             return
         if self._py_logger is not None:
             self._py_logger.info(_dict2msg({'project_config': config}))
@@ -278,7 +278,7 @@ class Logger:
             wandb.alert(title=d[:64], text=ex_msg, level=wandb.AlertLevel.ERROR)
 
     def summary(self, d:Mapping[str,Any], py_logger_only:bool=False):
-        if not self.enable_summaries:
+        if not self.summaries_stdout:
             return
         if self._py_logger is not None:
             self.info(d, py_logger_only=True)

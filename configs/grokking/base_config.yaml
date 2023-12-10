@@ -10,7 +10,7 @@ general:
 
 logging:
   enable_wandb: false
-  enable_summaries: true
+  summaries_stdout: true
   project_name: grokking
   run_name: nil  # select random name
   run_description: nil

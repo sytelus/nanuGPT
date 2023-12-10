@@ -1,6 +1,6 @@
 logging:
   enable_wandb: false
-  enable_summaries: true
+  summaries_stdout: true
   project_name: 'tokenization'
   run_name: null  # select random name
   run_description: null

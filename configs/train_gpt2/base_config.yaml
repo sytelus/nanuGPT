@@ -18,7 +18,7 @@ logging:
   log_filename: 'log.txt'
   allow_overwrite_log: true
   metrics_type: 'classification'
-  enable_summaries: true
+  summaries_stdout: true
 
 model:
   module: 'nanugpt.models.nanogpt.get_model'

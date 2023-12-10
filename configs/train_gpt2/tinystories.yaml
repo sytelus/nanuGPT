@@ -6,7 +6,7 @@ general:
 logging:
   project_name: 'gpt2_124m_tinystories'
   enable_wandb: true
-  enable_summaries: true
+  summaries_stdout: true
   run_name: 'gpt124m_tinystories_tiktoken_bloat16'  # null -> select random name
   run_description: 'GPT124M tinystories using gpt2 tokenizer and bfloat16'
 
