@@ -212,6 +212,7 @@ class Logger:
         self.master_process = master_process
         self.summaries_stdout = summaries_stdout
         self.log_filepath = None
+        self.summaries_filepath = None
         self.quite_keys:Optional[Set[str]] = None
         self.summaries = {}
 
@@ -381,15 +382,17 @@ class Logger:
                          )
 
         # write summaries to file
-        with open(self.summaries_filepath, 'w', encoding='utf-8') as f:
-            json.dump(self.summaries, f, indent=4)
+        if self.master_process:
+            with open(self.summaries_filepath, 'w', encoding='utf-8') as f:
+                json.dump(self.summaries, f, indent=4)
 
+        # attach artifacts to wandb
         if self._wandb_logger is not None:
             self._wandb_logger.log_artifact(self.summaries_filepath, type='summaries_file', name='summaries_file')
+            if self.log_filepath is not None:
+                self._wandb_logger.log_artifact(self.log_filepath, type='log_file', name='log_file')
 
-        if self.log_filepath is not None and self._wandb_logger is not None:
-            self._wandb_logger.log_artifact(self.log_filepath, type='log_file', name='log_file')
-
+        # close loggers
         if self._wandb_logger is not None:
             self._wandb_logger.finish()
         if self._py_logger is not None:
