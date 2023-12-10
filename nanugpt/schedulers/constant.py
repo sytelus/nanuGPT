@@ -14,6 +14,7 @@ class ConstantWithCooldownScheduler(LRScheduler):
         self.warmup_iters = warmup_iters
         self.cooldown_iters = cooldown_iters
         self.max_steps = max_steps
+        self.schedule_iters = max(max_steps - warmup_iters - cooldown_iters, 0)
 
         super().__init__(optimizer, last_epoch, verbose)
 
@@ -29,7 +30,7 @@ class ConstantWithCooldownScheduler(LRScheduler):
             return (init_lrs * self.last_epoch / self.warmup_iters).tolist()
 
         # 2) if it > max_steps, return cooldown learning rate
-        if self.last_epoch > (self.max_steps - self.cooldown_iters):
+        if self.last_epoch-self.warmup_iters > (self.max_steps - self.cooldown_iters):
             cooldown_start = self.max_steps - self.last_epoch - 1
             return (init_lrs * (cooldown_start / self.cooldown_iters)).tolist()
 
