@@ -314,6 +314,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                     (step > checkoint_after and \
                         (timeit.default_timer() - last_checkpoint_time) / 3600.0 > checkpoint_every_hr)
                 ):
+
+            last_checkpoint_time = timeit.default_timer()
             checkpoint_filename = "checkpoint_" + \
                 f"{step}" if not checkpoint_keep_best else "best"
             checkpoint_filepath = utils.save_checkpoint(out_dir, checkpoint_filename,
@@ -323,7 +325,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             metrics.update({"checkpoint_filepath": checkpoint_filepath})
 
             checkpoint_log.append(metrics)
-            logger.log_artifact(checkpoint_filename, 'file', file_or_dir=checkpoint_filepath)
+            logger.log_artifact(name=checkpoint_filename, type='file', file_or_dir=checkpoint_filepath)
 
         # Decide if we should log
         can_log = len(metrics) > 0 and torch_info.is_master and (
