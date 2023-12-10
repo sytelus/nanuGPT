@@ -101,8 +101,8 @@ std_metrics['default'] = [
                             {"name": "run/eta_hr", "step_metric":"train/step", "summary":"last"},
                             {"name": "run/tflops", "step_metric":"train/step", "summary":"last"},
                             {"name": "run/checkpoint_since_hr", "step_metric":"train/step", "summary":"last"},
-                            {"name": "train/step", "step_metric":"elapsed_hr", "summary":"last"},
-                            {"name": "train/samples_hr", "step_metric":"elapsed_hr", "summary":"last"},
+                            {"name": "train/step", "step_metric":"run/elapsed_hr", "summary":"last"},
+                            {"name": "train/samples_hr", "step_metric":"run/elapsed_hr", "summary":"last"},
                             {"name": "train/samples", "step_metric":"train/step", "summary":"last"},
 
                             {"name": "train/tokens", "step_metric":"train/step", "summary":"last", "goal":"max"},
