@@ -310,9 +310,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                     (step > checkoint_after and \
                         (timeit.default_timer() - last_checkpoint_time) / 3600.0 > checkpoint_every_hr)
                 ):
-            checkpoint_filename = project_name + \
-                (f"_{run_name}" if run_name else "") + \
-                f"_{step}" if not checkpoint_keep_best else "_best"
+            checkpoint_filename = "checkpoint_" + \
+                f"{step}" if not checkpoint_keep_best else "best"
             checkpoint_filepath = utils.save_checkpoint(out_dir, checkpoint_filename,
                                     model.module if torch_info.is_distributed else model,
                                     optimizer, scheduler, step, best_val_loss)
@@ -320,6 +319,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             metrics.update({"checkpoint_filepath": checkpoint_filepath})
 
             checkpoint_log.append(metrics)
+            logger.log_artifact(checkpoint_filename, 'file', file_or_dir=checkpoint_filepath)
 
         # Decide if we should log
         can_log = len(metrics) > 0 and torch_info.is_master and (
