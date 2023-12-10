@@ -257,7 +257,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                 "train/tokens_per_sec": step_token_count / fwd_bwd_interval,
                 "lr": optimizer.param_groups[0]['lr'],
                 'tflops': transformer_tflops,
-                "elapsed_s": timeit.default_timer() - loop_start_time
+                "elapsed_hr": (timeit.default_timer() - loop_start_time)/3600.0
             })
 
         # is it time to evaluate? We evaluate after 1st step to get initial loss.

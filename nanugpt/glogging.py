@@ -83,9 +83,9 @@ def create_py_logger(filepath:Optional[str]=None,
 
 std_metrics = {}
 std_metrics['default'] = [
-                            {"name": "elapsed_s", "step_metric":"train/step", "summary":"max"},
-                            {"name": "train/step", "step_metric":"elapsed_s", "summary":"max"},
-                            {"name": "train/samples", "step_metric":"elapsed_s", "summary":"max"},
+                            {"name": "elapsed_hr", "step_metric":"train/step", "summary":"max"},
+                            {"name": "train/step", "step_metric":"elapsed_hr", "summary":"max"},
+                            {"name": "train/samples", "step_metric":"elapsed_hr", "summary":"max"},
                             {"name": "train/step_samples", "step_metric":"train/step", "summary":"mean"},
 
                             {"name": "train/tokens", "step_metric":"train/step", "summary":"max", "goal":"max"},
@@ -358,7 +358,7 @@ class Logger:
 
     def all_done(self, exit_code:int=0, write_total_time:bool=True):
         if write_total_time:
-            self.summary({'log_filepath': self.log_filepath, 'start_time': self.start_time, 'total_time': timeit.default_timer() - self.start_time})
+            self.summary({'log_filepath': self.log_filepath, 'start_time': self.start_time, 'elapsed_hr': (timeit.default_timer() - self.start_time)/3600.0})
 
         self.finish()
         exit(exit_code)
