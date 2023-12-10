@@ -58,7 +58,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     eval_every = config['eval']['eval_every']
     eval_iters = config['eval']['eval_iters']
     save_checkpoint = config['eval']['save_checkpoint']
-    checkpoint_every_eval = config['eval']['checkpoint_every_eval']
+    checkpoint_every_hr = config['eval']['checkpoint_every_hr']
     checkpoint_keep_best = config['eval']['checkpoint_keep_best']
 
     checkoint_after = config['eval']['checkoint_after']
@@ -145,7 +145,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
     step, eval_count, total_samples, total_tokens = 0, 0, 0, 0
     best_train_loss, best_val_loss = float('inf'), float('inf')
-    best_train_loss_step, best_val_loss_step, last_checkpoint_step = -1, -1, -1
+    best_train_loss_step, best_val_loss_step = -1, -1
+    last_checkpoint_time = timeit.default_timer()
     prev_train_loss, loss_inversions, loss_improvement_steps = float('-inf'), 0,0
     checkpoint_log = []
     loop_start_time = last_eval_time = timeit.default_timer()
@@ -268,6 +269,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                 'tflops': transformer_tflops,
                 "elapsed_hr": elapsed_hr,
                 "eta_hr": elapsed_hr * (max_steps - step) / (step+1),
+                "checkpoint_since_hr": (timeit.default_timer() - last_checkpoint_time)/3600.0,
             })
 
         # is it time to evaluate? We evaluate after 1st step to get initial loss.
@@ -302,21 +304,22 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                 })
             last_eval_time = timeit.default_timer()
 
-            # if this is the best model so far, save it
-            if save_checkpoint and last_checkpoint_step < best_val_loss_step and \
-                    ((step+1 >= max_steps) or \
-                        (step > checkoint_after and (eval_count+1) % checkpoint_every_eval == 0)
-                    ):
-                checkpoint_filename = project_name + \
-                    (f"_{run_name}" if run_name else "") + \
-                    f"_{step}" if not checkpoint_keep_best else "_best"
-                checkpoint_filepath = utils.save_checkpoint(out_dir, checkpoint_filename,
-                                        model.module if torch_info.is_distributed else model,
-                                        optimizer, scheduler, step, best_val_loss)
+        # if this is last step or enough time has passed, save checkpoint
+        if save_checkpoint and \
+                ((step+1 >= max_steps) or \
+                    (step > checkoint_after and \
+                        (timeit.default_timer() - last_checkpoint_time) / 3600.0 > checkpoint_every_hr)
+                ):
+            checkpoint_filename = project_name + \
+                (f"_{run_name}" if run_name else "") + \
+                f"_{step}" if not checkpoint_keep_best else "_best"
+            checkpoint_filepath = utils.save_checkpoint(out_dir, checkpoint_filename,
+                                    model.module if torch_info.is_distributed else model,
+                                    optimizer, scheduler, step, best_val_loss)
 
-                metrics.update({"checkpoint_filepath": checkpoint_filepath})
+            metrics.update({"checkpoint_filepath": checkpoint_filepath})
 
-                checkpoint_log.append(metrics)
+            checkpoint_log.append(metrics)
 
         # Decide if we should log
         can_log = len(metrics) > 0 and torch_info.is_master and (

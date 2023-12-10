@@ -99,6 +99,7 @@ std_metrics = {}
 std_metrics['default'] = [
                             {"name": "elapsed_hr", "step_metric":"train/step", "summary":"max"},
                             {"name": "eta_hr", "step_metric":"train/step", "summary":"max"},
+                            {"name": "checkpoint_since_hr", "step_metric":"train/step", "summary":"max"},
                             {"name": "train/step", "step_metric":"elapsed_hr", "summary":"max"},
                             {"name": "train/samples_hr", "step_metric":"elapsed_hr", "summary":"max"},
                             {"name": "train/samples", "step_metric":"train/step", "summary":"mean"},
