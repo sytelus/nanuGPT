@@ -48,7 +48,7 @@ def operation_mod_p_data(operation: str, p: int, tokenizer: GrokkingTokenizer):
     return equations, results
 
 def get_data(operation: str, prime: int, training_fraction: float, val_fraction:Optional[float],
-             train_batch_size: int, eval_batch_size:int, data_loader_seed:int,
+             device_batch_size: int, eval_batch_size:int, data_loader_seed:int,
              local_rank:int, context_length:int)->Tuple[DataLoader,DataLoader, Optional[DataLoader]]:
     tokenizer = get_tokenizer_factory(prime)()
 
@@ -73,7 +73,7 @@ def get_data(operation: str, prime: int, training_fraction: float, val_fraction:
     val_loader_gen = torch.Generator().manual_seed(val_loader_seed)
 
     train_loader = DataLoader(train_dataset,
-                              batch_size=min(train_batch_size, len(train_dataset)) ,
+                              batch_size=min(device_batch_size, len(train_dataset)) ,
                               shuffle=True,
                               num_workers=1, # don't use main process as worker
                               generator=train_loader_gen)

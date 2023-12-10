@@ -19,7 +19,7 @@ def measure_throuput(config:Mapping,
                      context_lengths:List[int],
                      batch_sizes:List[int],
                      logger:Optional[logging.Logger]=None):
-    train_batch_size = config['training']['train_batch_size']
+    device_batch_size = config['training']['device_batch_size']
     out_dir = config['general']['out_dir']
     data_config = config['data']
     gradient_accumulation_steps = config['training']['gradient_accumulation_steps']
@@ -52,7 +52,7 @@ def measure_throuput(config:Mapping,
 
     for batch_size in batch_sizes:
         for context_length in context_lengths:
-            data_config['module_kwargs']['train_batch_size'] = batch_size
+            data_config['module_kwargs']['device_batch_size'] = batch_size
             data_config['module_kwargs']['context_length'] = context_length
             train_loader, val_loader, test_loader = get_data(local_rank=torch_info.local_rank,
                                                             **data_config['module_kwargs'])
@@ -73,7 +73,7 @@ def measure_throuput(config:Mapping,
 
                     model_kwargs = model_config['module_kwargs']
                     dt = loop_end_time - loop_start_time
-                    transformer_tflops = utils.transformer_tflops(batch_size=train_batch_size,
+                    transformer_tflops = utils.transformer_tflops(batch_size=device_batch_size,
                         params_nonembedding_trainable=params_nonembedding_trainable,
                         context_length=context_length, dt=dt,
                         n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer'],
@@ -104,7 +104,7 @@ def measure_throuput(config:Mapping,
                                 'perf/tokens_per_s': tokens_rate,
                                 'perf/step_time': step_time,
                                 'perf/transformer_tflops': transformer_tflops,
-                                "run/gpu_batch_size": batch_size,
+                                "run/device_batch_size": batch_size,
                                 "run/global_batch_size": gradient_accumulation_steps * batch_size * torch_info.world_size,
                                 "run/local_batch_size": gradient_accumulation_steps * batch_size,
                                 "run/tokens_per_step": gradient_accumulation_steps * batch_size * torch_info.world_size * context_length,

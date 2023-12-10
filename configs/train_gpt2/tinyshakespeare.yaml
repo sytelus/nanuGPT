@@ -29,7 +29,7 @@ data:
     tokenized_val_path: '$DATA_ROOT/tokenized/tinyshakespeare/byte/val.bin'
 
 training:
-  train_batch_size: 64
+  device_batch_size: 64
   max_steps: 5000 # divide the number of steps by number of GPUs
   gradient_accumulation_steps: 1
   adj_grad_acc_gpu_count: false # adjust gradient accumulation steps for number of GPUs

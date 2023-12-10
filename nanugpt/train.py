@@ -51,7 +51,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     adj_grad_acc_gpu_count = config['training']['adj_grad_acc_gpu_count']
     project_name = config['logging']['project_name']
     run_name = config['logging']['run_name']
-    train_batch_size = config['training']['train_batch_size']
+    device_batch_size = config['training']['device_batch_size']
     max_steps = config['training']['max_steps']
     grad_clip = config['training']['grad_clip']
     enable_train_log = config['training']['enable_train_log']
@@ -89,10 +89,10 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
     logger.summary({
                     "run/grad_acc_steps": grad_acc_steps,
-                    "run/gpu_batch_size": train_batch_size,
-                    "run/global_batch_size": grad_acc_steps * train_batch_size * torch_info.world_size,
-                    "run/local_batch_size": grad_acc_steps * train_batch_size,
-                    "run/tokens_per_iter": grad_acc_steps * train_batch_size * torch_info.world_size * context_length
+                    "run/device_batch_size": device_batch_size,
+                    "run/global_batch_size": grad_acc_steps * device_batch_size * torch_info.world_size,
+                    "run/local_batch_size": grad_acc_steps * device_batch_size,
+                    "run/tokens_per_iter": grad_acc_steps * device_batch_size * torch_info.world_size * context_length
                     })
 
     # get dataset

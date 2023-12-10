@@ -37,7 +37,7 @@ data:
     operation: 'x/y'
     training_fraction: 0.5
     val_fraction: null # if null, use 1 - training_fraction, test fraction is 0
-    train_batch_size: '_copy: /training/train_batch_size'
+    device_batch_size: '_copy: /training/device_batch_size'
     eval_batch_size: 32768 # 2^15=32768
     data_loader_seed: 8
     context_length: '_copy: /model/module_kwargs/context_length'
@@ -49,7 +49,7 @@ tokenizer:
     prime: *prime
 
 training:
-  train_batch_size: 512
+  device_batch_size: 512
   max_steps: 3000    # 1e5 is not enough when weight_decay=0.0
   enable_train_log: false
   log_every: 20

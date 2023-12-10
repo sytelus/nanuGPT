@@ -137,7 +137,7 @@ def get_data(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
              hf_revision:Optional[str], hf_sample_by:Optional[str],
              train_split:Optional[str], val_split:Optional[str], test_split:Optional[str], hf_cache_dir:Optional[str],
              train_fraction:Optional[float], val_fraction:Optional[float], test_fraction:Optional[float],
-             train_batch_size: int, eval_batch_size:int, data_loader_seed:int, text_column:str,
+             device_batch_size: int, eval_batch_size:int, data_loader_seed:int, text_column:str,
              local_rank:int, context_length:int, tokenizer_factory:Callable[[], TokenizerBase])->Tuple[DataLoader,DataLoader, Optional[DataLoader]]:
 
     dataset = get_datasets(hf_name_path=hf_name_path, hf_dataset_name=hf_dataset_name, hf_data_dir=hf_data_dir, hf_data_files=hf_data_files, hf_revision=hf_revision,
@@ -157,7 +157,7 @@ def get_data(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
         train_dataset.set_transform(lambda x: train_tokenizer.batch_encode(x[text_column]))
         train_loader_gen = torch.Generator().manual_seed(data_loader_seed)
         train_loader = DataLoader(train_dataset,
-                                  batch_size=min(train_batch_size, len(train_dataset)),
+                                  batch_size=min(device_batch_size, len(train_dataset)),
                                   shuffle=True,
                                   num_workers=1, # don't use main process as worker
                                   generator=train_loader_gen)

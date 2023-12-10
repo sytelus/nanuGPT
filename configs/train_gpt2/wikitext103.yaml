@@ -25,7 +25,7 @@ model:
     context_length: 1024
 
 training:
-  train_batch_size: 32
+  device_batch_size: 32
   max_steps: 300000
   gradient_accumulation_steps: 16
   adj_grad_acc_gpu_count: true # adjust gradient accumulation steps for number of GPUs

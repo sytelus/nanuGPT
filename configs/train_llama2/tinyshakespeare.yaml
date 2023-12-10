@@ -24,7 +24,7 @@ data:
     tokenized_val_path: '$DATA_ROOT/tokenized/tinyshakespeare/llama2/val.bin'
 
 training:
-  train_batch_size: 32
+  device_batch_size: 32
   max_steps: 8000 # divide the number of steps by number of GPUs
   gradient_accumulation_steps: 2
   adj_grad_acc_gpu_count: false # adjust gradient accumulation steps for number of GPUs

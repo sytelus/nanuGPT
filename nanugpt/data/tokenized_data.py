@@ -69,7 +69,7 @@ class MemmapDataloader:
 
 def get_data(local_rank:int, # everything except local rank comes from config
              context_length:int, dtype,
-             train_batch_size:int, eval_batch_size:int,
+             device_batch_size:int, eval_batch_size:int,
              data_loader_seed:int,
              tokenized_train_path:str, tokenized_val_path:str,
              tokenized_test_path=None):
@@ -88,7 +88,7 @@ def get_data(local_rank:int, # everything except local rank comes from config
                                   context_length) if tokenized_test_path else None
 
     # shuffle on val and test is needed as we do sampling for evaluation
-    return MemmapDataloader(train_dataset, train_batch_size,
+    return MemmapDataloader(train_dataset, device_batch_size,
                             seed=data_loader_seed+local_rank, shuffle=True), \
             MemmapDataloader(val_dataset, eval_batch_size,
                              seed=data_loader_seed+local_rank, shuffle=True), \
