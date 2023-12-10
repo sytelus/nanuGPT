@@ -91,7 +91,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                     "run/device_batch_size": device_batch_size,
                     "run/global_batch_size": global_batch_size,
                     "run/local_batch_size": grad_acc_steps * device_batch_size,
-                    "run/tokens_per_iter": global_batch_size * context_length
+                    "run/tokens_per_step": global_batch_size * context_length
                     })
 
     # get dataset
@@ -109,7 +109,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
     # create tokenizer
     tokenizer, tokenizer_config = common.create_tokenizer(config, logger)
-    logger.summary({'vocab_size': len(tokenizer)})
+    logger.summary({'run/vocab_size': len(tokenizer)})
 
     # create model
     model, model_config = common.create_model(config, logger, device, vocab_size=len(tokenizer))
@@ -269,11 +269,11 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                 "train/loss_inversions": 100.0*loss_inversions/(step+1),
                 "train/loss_improvement_steps": 100.0*loss_improvement_steps/(step+1),
                 "train/pred_loss": pred_loss,
-                "lr": optimizer.param_groups[0]['lr'],
-                'tflops': transformer_tflops,
-                "elapsed_hr": elapsed_hr,
-                "eta_hr": elapsed_hr * (max_steps - step) / (step+1),
-                "checkpoint_since_hr": (timeit.default_timer() - last_checkpoint_time)/3600.0,
+                "run/lr": optimizer.param_groups[0]['lr'],
+                'run/tflops': transformer_tflops,
+                "run/elapsed_hr": elapsed_hr,
+                "run/eta_hr": elapsed_hr * (max_steps-step-1) / (step+1),
+                "run/checkpoint_since_hr": (timeit.default_timer() - last_checkpoint_time)/3600.0,
             })
 
         # is it time to evaluate? We evaluate after 1st step to get initial loss.
@@ -295,7 +295,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                 "val/ppl": math.exp(val_loss),
                 "val/best_loss": best_val_loss,
                 "val/best_loss_step": best_val_loss_step,
-                "w_norm": utils.weight_norm(model),
+                "run/w_norm": utils.weight_norm(model),
                 "val/interval": eval_interval,
             })
             if step+1 >= max_steps and test_loader:

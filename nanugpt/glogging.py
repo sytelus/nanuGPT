@@ -97,9 +97,10 @@ def create_py_logger(filepath:Optional[str]=None,
 
 std_metrics = {}
 std_metrics['default'] = [
-                            {"name": "elapsed_hr", "step_metric":"train/step", "summary":"last"},
-                            {"name": "eta_hr", "step_metric":"train/step", "summary":"last"},
-                            {"name": "checkpoint_since_hr", "step_metric":"train/step", "summary":"last"},
+                            {"name": "run/elapsed_hr", "step_metric":"train/step", "summary":"last"},
+                            {"name": "run/eta_hr", "step_metric":"train/step", "summary":"last"},
+                            {"name": "run/tflops", "step_metric":"train/step", "summary":"last"},
+                            {"name": "run/checkpoint_since_hr", "step_metric":"train/step", "summary":"last"},
                             {"name": "train/step", "step_metric":"elapsed_hr", "summary":"last"},
                             {"name": "train/samples_hr", "step_metric":"elapsed_hr", "summary":"last"},
                             {"name": "train/samples", "step_metric":"train/step", "summary":"last"},
@@ -129,8 +130,8 @@ std_metrics['default'] = [
                             {"name": "test/loss", "step_metric":"train/step", "summary":"last", "goal":"min"},
                             {"name": "test/ppl", "step_metric":"train/step", "summary":"last", "goal":"min"},
 
-                            {"name": "lr", "step_metric":"train/step", "summary":"last"},
-                            {"name": "w_norm", "step_metric":"train/step", "summary":"last", "goal":"min"},
+                            {"name": "run/lr", "step_metric":"train/step", "summary":"last"},
+                            {"name": "run/w_norm", "step_metric":"train/step", "summary":"last", "goal":"min"},
                             {"name": "transformer_tflops", "step_metric":"train/step", "summary":"last", "goal":"max"},
                             {"name": "tokens_per_sec", "step_metric":"train/step", "summary":"last", "goal":"max"},
                     ]
