@@ -16,6 +16,7 @@ logging:
   run_description: nil
   log_dir: '_copy: /general/out_dir'
   log_filename: 'log.txt'
+  summaries_filename: 'summaries.txt'
   allow_overwrite_log: true
   metrics_type: 'classification'
   summaries_stdout: true

@@ -330,4 +330,4 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             dist.destroy_process_group()
 
         if own_logger:
-            logger.all_done()
+            logger.shutdown()

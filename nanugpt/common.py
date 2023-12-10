@@ -5,13 +5,13 @@ import dataclasses
 from contextlib import AbstractContextManager, nullcontext
 from packaging import version
 import json
+import atexit
 
 import torch
 
 from nanugpt import utils
 from nanugpt import glogging as logging
 from nanugpt.tokenizers.tokenizer_base import TokenizerBase
-
 
 def setup_device(config:Mapping, logger:logging.Logger)->Tuple[torch.device, AbstractContextManager, utils.TorchInfo]:
     seed = config['general']['seed']

@@ -18,4 +18,4 @@ if __name__ == "__main__":
 
     tokenize(tokenizer_factory=tokenizer_factory, **data_config)
 
-    logging.all_done()
+    logging.shutdown()

@@ -115,7 +115,7 @@ def measure_throuput(config:Mapping,
             dist.destroy_process_group()
 
         if own_logger:
-            logger.all_done()
+            logger.shutdown()
 
 
 def train_config(config:Mapping, logger:logging.Logger, device:torch.device,

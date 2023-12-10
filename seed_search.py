@@ -26,4 +26,4 @@ if __name__ == "__main__":
         config['data']['data_loader_seed'] = random.randint(0, 32000)
         train(config, logger=logger)
 
-    logger.all_done()
+    logger.shutdown()

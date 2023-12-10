@@ -6,6 +6,8 @@ import logging as py_logging
 import psutil
 import os
 import timeit
+import json
+import atexit
 
 from rich.logging import RichHandler
 import wandb
@@ -17,6 +19,18 @@ INFO=py_logging.INFO
 WARN=py_logging.WARN
 ERROR=py_logging.ERROR
 DEBUF=py_logging.DEBUG
+
+# when app exist, call shutdown to save everything in log system
+_atexit_reg = False # is hook for atexit registered?
+def install_atexit():
+    # create hooks to execute code when script exits
+    global _atexit_reg
+    if not _atexit_reg:
+        atexit.register(on_app_exit)
+        _atexit_reg = True
+def on_app_exit():
+    print('Process exit:', os.getpid(), flush=True)
+    shutdown()
 
 def _fmt(val:Any)->str:
     if isinstance(val, torch.Tensor):
@@ -149,8 +163,7 @@ info = _uninit_logger
 warn = _uninit_logger
 error = _uninit_logger
 log_sys_info = _uninit_logger
-finish = _uninit_logger
-all_done = _uninit_logger
+shutdown = _uninit_logger
 flush = _uninit_logger
 
 _logger:Optional['Logger'] = None
@@ -160,7 +173,6 @@ def get_logger()->'Logger':
     if _logger is None:
         raise RuntimeError('Logger not initialized. Create Logger() first.')
     return _logger
-
 class Logger:
     def __init__(self, master_process:bool,
                  project_name:Optional[str]=None,
@@ -170,12 +182,14 @@ class Logger:
                  metrics_type='default',
                  log_dir:Optional[str]=None,
                  log_filename:Optional[str]=None,
+                 summaries_filename:Optional[str]=None,
                  allow_overwrite_log=False,
                  summaries_stdout=True,
                  glabal_instance:Optional[bool]=None,
+                 save_on_exit:bool=True,
                  ) -> None:
 
-        global _logger, summary, log_config, info, warn, error, log_sys_info, finish, all_done, flush
+        global _logger, summary, log_config, info, warn, error, log_sys_info, shutdown, flush
 
         if glabal_instance!=False and _logger is None:
             _logger = self
@@ -186,10 +200,10 @@ class Logger:
             warn = partial(Logger.warn, _logger)
             error = partial(Logger.error, _logger)
             log_sys_info = partial(Logger.log_sys_info, _logger)
-            finish = partial(Logger.finish, _logger)
-            all_done = partial(Logger.all_done, _logger)
+            shutdown = partial(Logger.shutdown, _logger)
             flush = partial(Logger.flush, _logger)
 
+        self.has_shutdown = False
         self.start_time = timeit.default_timer()
         self._py_logger = None
         self._wandb_logger = None
@@ -198,10 +212,15 @@ class Logger:
         self.summaries_stdout = summaries_stdout
         self.log_filepath = None
         self.quite_keys:Optional[Set[str]] = None
+        self.summaries = {}
 
         if master_process:
-            if log_dir or log_filename:
-                self.log_filepath = os.path.join(utils.full_path(str(log_dir), create=True), str(log_filename))
+            if log_dir:
+                log_dir = utils.full_path(str(log_dir), create=True)
+                if log_filename is None:
+                    self.log_filepath = utils.full_path(os.path.join(log_dir, str(log_filename)))
+                if summaries_filename is None:
+                    self.summaries_filepath = utils.full_path(os.path.join(log_dir, str(summaries_filename)))
 
             self._py_logger = create_py_logger(filepath=self.log_filepath,
                                             allow_overwrite_log=allow_overwrite_log,
@@ -209,19 +228,20 @@ class Logger:
                                             run_name=run_name,
                                             run_description=run_description)
 
-        if enable_wandb and master_process:
-            if utils.is_debugging():
-                self._py_logger.warn('Wandb logging is disabled in debug mode.') # type: ignore
-            else:
-                self._wandb_logger = create_wandb_logger(project_name, run_name,
-                                                std_metrics[metrics_type],
-                                                run_description)
-        # else leave things to None
+            if enable_wandb:
+                if utils.is_debugging():
+                    self._py_logger.warn('Wandb logging is disabled in debug mode.') # type: ignore
+                else:
+                    self._wandb_logger = create_wandb_logger(project_name, run_name,
+                                                    std_metrics[metrics_type],
+                                                    run_description)
+            # else leave things to None
+
+            if save_on_exit and _logger == self:
+                install_atexit()
 
     def log_config(self, config):
-        if not self.summaries_stdout:
-            return
-        if self._py_logger is not None:
+        if self.summaries_stdout and self._py_logger is not None:
             self._py_logger.info(_dict2msg({'project_config': config}))
         if self.enable_wandb and self._wandb_logger is not None:
             self._wandb_logger.config.update(config)
@@ -278,9 +298,9 @@ class Logger:
             wandb.alert(title=d[:64], text=ex_msg, level=wandb.AlertLevel.ERROR)
 
     def summary(self, d:Mapping[str,Any], py_logger_only:bool=False):
-        if not self.summaries_stdout:
-            return
-        if self._py_logger is not None:
+        self.summaries.update(d)
+
+        if self.summaries_stdout and self._py_logger is not None:
             self.info(d, py_logger_only=True)
 
         if not py_logger_only and self.enable_wandb and self._wandb_logger is not None:
@@ -348,20 +368,33 @@ class Logger:
                 except_keys = set([except_keys])
         self.quite_keys = except_keys
 
-    def finish(self):
+    def shutdown(self, write_total_time:bool=True):
+        if self.has_shutdown:
+            return
+
+        if write_total_time:
+            self.summary({
+                            'run/log_filepath': self.log_filepath,
+                            'run/start_time': self.start_time,
+                            'run/elapsed_hr': (timeit.default_timer() - self.start_time)/3600.0}
+                         )
+
+        # write summaries to file
+        with open(self.summaries_filepath, 'w', encoding='utf-8') as f:
+            json.dump(self.summaries, f, indent=4)
+
+        if self._wandb_logger is not None:
+            self._wandb_logger.log_artifact(self.summaries_filepath, type='summaries_file', name='summaries_file')
+
+        if self.log_filepath is not None and self._wandb_logger is not None:
+            self._wandb_logger.log_artifact(self.log_filepath, type='log_file', name='log_file')
+
         if self._wandb_logger is not None:
             self._wandb_logger.finish()
         if self._py_logger is not None:
             py_logging.shutdown()
 
-    def all_done(self, exit_code:int=0, write_total_time:bool=True):
-        if self.log_filepath is not None and self._wandb_logger is not None:
-            self._wandb_logger.log_artifact(self.log_filepath, type='log_file', name='log_file')
-        if write_total_time:
-            self.summary({'run/log_filepath': self.log_filepath, 'run/start_time': self.start_time, 'run/elapsed_hr': (timeit.default_timer() - self.start_time)/3600.0})
-
-        self.finish()
-        exit(exit_code)
+        self.has_shutdown = True
 
     def flush(self):
         if self._py_logger is not None:

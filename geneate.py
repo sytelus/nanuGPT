@@ -14,4 +14,4 @@ if __name__ == "__main__":
     results = gen.generate(['\n'], 200)
     print(results)
 
-    logger.all_done()
+    logger.shutdown()
