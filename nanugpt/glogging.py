@@ -220,9 +220,9 @@ class Logger:
         if master_process:
             if log_dir:
                 log_dir = utils.full_path(str(log_dir), create=True)
-                if log_filename is None:
+                if log_filename:
                     self.log_filepath = utils.full_path(os.path.join(log_dir, str(log_filename)))
-                if summaries_filename is None:
+                if summaries_filename:
                     self.summaries_filepath = utils.full_path(os.path.join(log_dir, str(summaries_filename)))
 
             self._py_logger = create_py_logger(filepath=self.log_filepath,
