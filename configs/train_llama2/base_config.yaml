@@ -58,8 +58,7 @@ training:
   enable_train_log: true
   log_every: 20
   grad_clip: 1.0 # disabled if 0.0
-  gradient_accumulation_steps: 128 #128, 64
-  adj_grad_acc_gpu_count: true # adjust gradient accumulation steps for number of GPUs
+  global_batch_size: 4096
 
 optimizer:
   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'

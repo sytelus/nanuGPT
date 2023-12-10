@@ -723,3 +723,7 @@ def get_package_ver(pkg_name: str) -> Optional[version.Version]:
 def is_flash_attn_available() -> bool:
     ver = get_package_ver("flash_attn")
     return ver is not None and ver >= version.parse("2.0.0.post1")
+
+def calc_grad_acc(global_batch_size:int, device_batch_size:int, world_size:int)->int:
+    gac = int(round((global_batch_size / device_batch_size) / world_size))
+    return max(1, gac)

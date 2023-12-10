@@ -47,8 +47,7 @@ class Batches:
             return next(self.iter)
 
 def train(config:Mapping, logger:Optional[logging.Logger]=None):
-    grad_acc_steps = config['training']['gradient_accumulation_steps']
-    adj_grad_acc_gpu_count = config['training']['adj_grad_acc_gpu_count']
+    global_batch_size = config['training']['global_batch_size']
     project_name = config['logging']['project_name']
     run_name = config['logging']['run_name']
     device_batch_size = config['training']['device_batch_size']
@@ -82,17 +81,17 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     device, amp_ctx, torch_info = common.setup_device(config, logger)
     assert torch_info.is_master == utils.is_master_process(), "torch_info.is_master != utils.is_master_process()"
 
-    # adjust gradient accumulation steps if we are doing distributed training
-    if torch_info.is_distributed and adj_grad_acc_gpu_count:
-        assert grad_acc_steps % torch_info.world_size == 0, f'grad_acc_steps ({grad_acc_steps}) must be divisible by ddp_world_size ({torch_info.world_size})'
-        grad_acc_steps = grad_acc_steps // torch_info.world_size
+    # compute needed accumulation steps
+    grad_acc_steps = utils.calc_grad_acc(global_batch_size, device_batch_size, torch_info.world_size)
+    # readjust global batch size
+    global_batch_size = grad_acc_steps * device_batch_size * torch_info.world_size
 
     logger.summary({
                     "run/grad_acc_steps": grad_acc_steps,
                     "run/device_batch_size": device_batch_size,
-                    "run/global_batch_size": grad_acc_steps * device_batch_size * torch_info.world_size,
+                    "run/global_batch_size": global_batch_size,
                     "run/local_batch_size": grad_acc_steps * device_batch_size,
-                    "run/tokens_per_iter": grad_acc_steps * device_batch_size * torch_info.world_size * context_length
+                    "run/tokens_per_iter": global_batch_size * context_length
                     })
 
     # get dataset

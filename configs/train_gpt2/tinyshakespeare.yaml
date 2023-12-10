@@ -31,8 +31,7 @@ data:
 training:
   device_batch_size: 64
   max_steps: 5000 # divide the number of steps by number of GPUs
-  gradient_accumulation_steps: 1
-  adj_grad_acc_gpu_count: false # adjust gradient accumulation steps for number of GPUs
+  global_batch_size: 64
 
 optimizer:
   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'

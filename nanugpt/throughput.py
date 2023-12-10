@@ -17,13 +17,12 @@ from nanugpt.config import Config
 def measure_throuput(config:Mapping,
                      model_sizes:List[dict],
                      context_lengths:List[int],
-                     batch_sizes:List[int],
+                     device_batch_sizes:List[int],
                      logger:Optional[logging.Logger]=None):
+    global_batch_size = config['training']['global_batch_size']
     device_batch_size = config['training']['device_batch_size']
     out_dir = config['general']['out_dir']
     data_config = config['data']
-    gradient_accumulation_steps = config['training']['gradient_accumulation_steps']
-    adj_grad_acc_gpu_count = config['training']['adj_grad_acc_gpu_count']
 
     get_data = utils.import_fn(data_config['module'])
 
@@ -34,10 +33,7 @@ def measure_throuput(config:Mapping,
     device, amp_ctx, torch_info = common.setup_device(config, logger)
     assert torch_info.is_master == utils.is_master_process(), "torch_info.is_master != utils.is_master_process()"
 
-    # adjust gradient accumulation steps if we are doing distributed training
-    if torch_info.is_distributed and adj_grad_acc_gpu_count:
-        assert gradient_accumulation_steps % torch_info.world_size == 0, f'gradient_accumulation_steps ({gradient_accumulation_steps}) must be divisible by ddp_world_size ({torch_info.world_size})'
-        gradient_accumulation_steps = gradient_accumulation_steps // torch_info.world_size
+    gradient_accumulation_steps = utils.calc_grad_acc(global_batch_size, device_batch_size, torch_info.world_size)
 
     if torch_info.is_master:
         out_dir = utils.full_path(out_dir, create=True)
@@ -50,9 +46,9 @@ def measure_throuput(config:Mapping,
     # turn off loggig except for messages we want
     logging.get_logger().quite('params_m(c)')
 
-    for batch_size in batch_sizes:
+    for device_batch_size in device_batch_sizes:
         for context_length in context_lengths:
-            data_config['module_kwargs']['device_batch_size'] = batch_size
+            data_config['module_kwargs']['device_batch_size'] = device_batch_size
             data_config['module_kwargs']['context_length'] = context_length
             train_loader, val_loader, test_loader = get_data(local_rank=torch_info.local_rank,
                                                             **data_config['module_kwargs'])
@@ -73,7 +69,7 @@ def measure_throuput(config:Mapping,
 
                     model_kwargs = model_config['module_kwargs']
                     dt = loop_end_time - loop_start_time
-                    transformer_tflops = utils.transformer_tflops(batch_size=device_batch_size,
+                    transformer_tflops = utils.transformer_tflops(batch_size=device_batch_size*gradient_accumulation_steps,
                         params_nonembedding_trainable=params_nonembedding_trainable,
                         context_length=context_length, dt=dt,
                         n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer'],
@@ -104,10 +100,10 @@ def measure_throuput(config:Mapping,
                                 'perf/tokens_per_s': tokens_rate,
                                 'perf/step_time': step_time,
                                 'perf/transformer_tflops': transformer_tflops,
-                                "run/device_batch_size": batch_size,
-                                "run/global_batch_size": gradient_accumulation_steps * batch_size * torch_info.world_size,
-                                "run/local_batch_size": gradient_accumulation_steps * batch_size,
-                                "run/tokens_per_step": gradient_accumulation_steps * batch_size * torch_info.world_size * context_length,
+                                "run/device_batch_size": device_batch_size,
+                                "run/global_batch_size": gradient_accumulation_steps * device_batch_size * torch_info.world_size,
+                                "run/local_batch_size": gradient_accumulation_steps * device_batch_size,
+                                "run/tokens_per_step": gradient_accumulation_steps * device_batch_size * torch_info.world_size * context_length,
                                 })
 
     if torch_info.is_master:
@@ -259,8 +255,7 @@ if __name__ == "__main__":
     # specify config file to use as first argument in commandline
     config = Config(default_config_filepath='configs/train_gpt2/tinystories.yaml')
     config['training']['max_steps'] = 5
-    config['training']['gradient_accumulation_steps'] = 1
-    config['training']['adj_grad_acc_gpu_count'] = False
+    config['training']['global_batch_size'] = config['training']['device_batch_size']
     config['training']['enable_train_log'] = False
     config['logging']['log_filename'] = 'throughput.log'
     config['logging']['enable_wandb'] = False
@@ -273,4 +268,4 @@ if __name__ == "__main__":
     measure_throuput(config,
                      model_sizes=model_sizes,
                      context_lengths=[128, 256, 512, 1024, 2048, 4096, 8192, 16384],
-                     batch_sizes=[1, 2, 4, 8, 12, 16, 24, 26, 32, 48, 60, 64, 128, 256, 512, 1024])
+                     device_batch_sizes=[1, 2, 4, 8, 12, 16, 24, 26, 32, 48, 60, 64, 128, 256, 512, 1024])
