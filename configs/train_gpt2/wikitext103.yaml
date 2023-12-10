@@ -7,8 +7,8 @@ logging:
   project_name: 'gpt2_124m_wikitext-103'
   enable_wandb: true
   summaries_stdout: true
-  run_name: 'gpt124m_wikitext103_tiktoken_bloat16'  # select random name
-  run_description: 'GPT124M WikiText-103 using gpt2 tokenizer and bfloat16'
+  run_name: 'gpt124m_wikitext103'  # select random name
+  run_description: 'GPT124M WikiText-103 using gpt2 tokenizer'
 
 data:
   module_kwargs:
@@ -16,26 +16,27 @@ data:
     tokenized_val_path: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/tiktoken/validation.bin'
     tokenized_test_path: '$DATA_ROOT/tokenized/wikitext-103-raw-v1/tiktoken/test.bin'
 
-model:
-  module: 'nanugpt.models.nanogpt.get_model'
-  module_kwargs:
-    n_layer: 24
-    n_embd: 1024
-    n_head: 16
-    context_length: 1024
+# model:
+#   module: 'nanugpt.models.nanogpt.get_model'
+#   module_kwargs:
+#     n_layer: 24
+#     n_embd: 1024
+#     n_head: 16
+#     context_length: 1024
 
 training:
-  device_batch_size: 32
-  max_steps: 300000
-  global_batch_size:: 512
+  #device_batch_size: 32
+  max_steps: 8000
+  #global_batch_size:: 512
 
-optimizer:
-  module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
-  module_kwargs:
-    learning_rate: 1.5E-4
+# optimizer:
+#   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
+#   module_kwargs:
+#     learning_rate: 1.5E-4
 
-scheduler:
-  module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
-  module_kwargs:
-    warmup_iters: 3000
-    min_lr: 1.0E-5
+# scheduler:
+#   module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
+#   module_kwargs:
+#     warmup_iters: 3000
+#     min_lr: 1.0E-5
+
