@@ -36,7 +36,7 @@ tokenizer:
 
 training:
   device_batch_size: 64
-  max_steps: 5000 # divide the number of steps by number of GPUs
+  max_steps: 2500  # Karpathy's original value is 5000 but dataset overfits after 2300 steps
   global_batch_size: 64
 
 optimizer:
