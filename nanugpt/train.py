@@ -148,7 +148,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     best_train_loss_step, best_val_loss_step = -1, -1
     last_checkpoint_time = timeit.default_timer()
     prev_train_losses, loss_inversions, loss_improvement_steps = [], 0,0
-    max_previous_losses, pred_loss = 30, float('inf')
+    max_previous_losses, pred_loss = 300, float('inf')
     checkpoint_log = []
     loop_start_time = last_eval_time = timeit.default_timer()
     batches = Batches(train_loader)
