@@ -13,6 +13,11 @@ from nanugpt import common
 from nanugpt import glogging as logging
 from nanugpt.config import Config
 
+"""
+The goal of this script to figure out the maximum throughput of model.
+We first find out max device_batch_size that fits into GPU memory.
+Then we plot throuput vs grad acc steps.
+"""
 
 def measure_throuput(config:Mapping,
                      model_sizes:List[dict],
@@ -254,7 +259,9 @@ def train_config(config:Mapping, logger:logging.Logger, device:torch.device,
 if __name__ == "__main__":
     # specify config file to use as first argument in commandline
     config = Config(default_config_filepath='configs/train_gpt2/tinystories.yaml')
-    config['training']['max_steps'] = 5
+    # just run one step to see if we get OOM
+    config['training']['max_steps'] = 1
+    #initially set grad acc steps to 1
     config['training']['global_batch_size'] = config['training']['device_batch_size']
     config['training']['enable_train_log'] = False
     config['logging']['log_filename'] = 'throughput.log'
@@ -267,5 +274,5 @@ if __name__ == "__main__":
 
     measure_throuput(config,
                      model_sizes=model_sizes,
-                     context_lengths=[128, 256, 512, 1024, 2048, 4096, 8192, 16384],
+                     context_lengths=[1024],
                      device_batch_sizes=[1, 2, 4, 8, 12, 16, 24, 26, 32, 48, 60, 64, 128, 256, 512, 1024])

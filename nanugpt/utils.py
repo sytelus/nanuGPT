@@ -727,3 +727,10 @@ def is_flash_attn_available() -> bool:
 def calc_grad_acc(global_batch_size:int, device_batch_size:int, world_size:int)->int:
     gac = int(round((global_batch_size / device_batch_size) / world_size))
     return max(1, gac)
+
+def dict2tsv(d:Dict[Any, Any], sort_keys=True, delimiter='\t')->str:
+    # convert keys and values to tab-separated strings
+    keys = sorted(d.keys()) if sort_keys else list(d.keys())
+    keys_line = delimiter.join(str(k) for k in keys)
+    values_line = delimiter.join(str(d[k]) for k in keys)
+    return f"{keys_line}\n{values_line}"

@@ -21,6 +21,14 @@
             "args": ["configs/tokenize/tinyshakespeare_llama2.yaml"]
         },
         {
+            "name": "Tokenize TinyShakespear/GPT2",
+            "type": "python",
+            "request": "launch",
+            "program": "tokenize_dataset.py",
+            "console": "integratedTerminal",
+            "args": ["configs/tokenize/tinyshakespeare_tiktoken_gpt2.yaml"]
+        },
+        {
             "name": "Tokenize OWT/Tiktoen-gpt2",
             "type": "python",
             "request": "launch",
