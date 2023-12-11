@@ -7,8 +7,8 @@ logging:
   project_name: 'gpt2_124m_tinystories'
   enable_wandb: true
   summaries_stdout: true
-  run_name: 'gpt124m_tinystories_tiktoken_bloat16'  # null -> select random name
-  run_description: 'GPT124M tinystories using gpt2 tokenizer and bfloat16'
+  run_name: 'gpt124m_tinystories'  # null -> select random name
+  run_description: 'GPT124M tinystories'
 
 data:
   module_kwargs:
@@ -16,22 +16,23 @@ data:
     tokenized_val_path: '$DATA_ROOT/tokenized/tinystories_v2/tiktoken/validation.bin'
 
 training:
-  device_batch_size: 60
-  max_steps: 300000
-  global_batch_size: 480
+  #device_batch_size: 60
+  max_steps: 37500
+  #global_batch_size: 480
 
-optimizer:
-  module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
-  module_kwargs:
-    learning_rate: 6.0E-4
-    weight_decay: 0.1
-    beta1: 0.9
-    beta2: 0.95
-    eps: 1.0E-8 # pytorch default
+# optimizer:
+#   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
+#   module_kwargs:
+#     learning_rate: 6.0E-4
+#     weight_decay: 0.1
+#     beta1: 0.9
+#     beta2: 0.95
+#     eps: 1.0E-8 # pytorch default
 
-scheduler:
-  module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
-  module_kwargs:
-    warmup_iters: 2000
-    lr_decay_iters: '_copy: /training/max_steps'
-    min_lr: 6.0E-5
+# scheduler:
+#   module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
+#   module_kwargs:
+#     warmup_iters: 2000
+#     lr_decay_iters: '_copy: /training/max_steps'
+#     min_lr: 6.0E-5
+
