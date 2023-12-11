@@ -8,7 +8,7 @@ from torch import distributed as dist
 
 import matplotlib
 # below is needed to avoid message ""Backend TkAgg is interactive backend. Turning interactive mode on"
-matplotlib.use('TkAgg',force=True)
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from nanugpt import utils

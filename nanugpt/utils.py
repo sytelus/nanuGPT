@@ -31,7 +31,9 @@ import yaml
 
 import matplotlib
 # below is needed to avoid message ""Backend TkAgg is interactive backend. Turning interactive mode on"
-matplotlib.use('TkAgg',force=True)
+#matplotlib.use('TkAgg',force=True)
+matplotlib.use('Agg')
+
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.cm as cm
