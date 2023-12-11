@@ -215,10 +215,13 @@ def measure_throuput(config:Mapping,
                      model_warmup_steps:int=10,
                      measurement_steps:int=10,):
 
+    train_config = config['training']
+    data_config = config['data']
+
     data = []
     for device_batch_size in device_batch_range:
         for gradient_accumulation_steps in grad_acc_steps_range:
-            train_config = config['training']
+            data_config['device_batch_size'] = device_batch_size
             train_config['device_batch_size'] = device_batch_size
             train_config['global_batch_size'] = device_batch_size * gradient_accumulation_steps
 
@@ -250,13 +253,13 @@ def measure_throuput(config:Mapping,
                         'timings': timings,
                     })
 
-    plot_save_filepath = os.path.join(utils.full_path(config['general']['out_dir'], create=True),
-                                 'throughput.png')
-    make_plot(data, save_filepath=plot_save_filepath)
-
     data_save_filepath = os.path.join(utils.full_path(config['general']['out_dir'], create=True),
                                  'throughput.yaml')
     utils.save_yaml(data, data_save_filepath)
+
+    plot_save_filepath = os.path.join(utils.full_path(config['general']['out_dir'], create=True),
+                                 'throughput.png')
+    make_plot(data, save_filepath=plot_save_filepath)
 
     logger.summary({'plot_save_filepath': plot_save_filepath,
                     'data_save_filepath': data_save_filepath})
