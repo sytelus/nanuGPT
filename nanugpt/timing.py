@@ -10,7 +10,8 @@ from typing import Optional
 class Timing:
     """Context manager that measures the time elapsed in a block of code."""
 
-    def __init__(self, name: str, disable_gc: Optional[bool] = False, verbose: Optional[bool] = False) -> None:
+    def __init__(self, name: str, disable_gc: Optional[bool] = False,
+                 verbose: Optional[bool] = False) -> None:
         """Initilize the timer.
 
         Args:
@@ -24,7 +25,7 @@ class Timing:
         self.disable_gc = disable_gc
         self.verbose = verbose
 
-    def __enter__(self) -> Timing:
+    def __enter__(self) -> 'Timing':
         self.is_gc_enabled = gc.isenabled()
 
         if self.disable_gc:
