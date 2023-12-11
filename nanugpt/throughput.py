@@ -1,3 +1,4 @@
+from collections import defaultdict
 import os
 from contextlib import AbstractContextManager
 from typing import Iterator, Mapping, Tuple, Optional, Callable, Mapping, List
@@ -187,12 +188,14 @@ def make_plot(data:List[Tuple[int, int, float]],
               save_filepath:Optional[str]):
     # using the data in plot_data, plot throughput vs grad_acc_steps, one curve with each device_batch_size, include legends and axis labels
 
-    # create a new figure and axes
-    fig, ax = plt.subplots()
+    plots = defaultdict(list)
+    for bs, gs, th, *_ in data:
+        plots[bs].append((gs, th))
 
-    # plot each curve
-    for l, x, y, *_ in data:
-        ax.plot(x, y, label=l)
+    fig, ax = plt.subplots()
+    for bs, data in plots.items():
+        gs, th = zip(*data)
+        ax.plot(gs, th, label=f'bs={bs}')
 
     # set labels
     ax.set_xlabel('grad_acc_steps')
