@@ -221,7 +221,7 @@ def measure_throuput(config:Mapping,
     data = []
     for device_batch_size in device_batch_range:
         for gradient_accumulation_steps in grad_acc_steps_range:
-            data_config['device_batch_size'] = device_batch_size
+            data_config['module_kwargs']['device_batch_size'] = device_batch_size
             train_config['device_batch_size'] = device_batch_size
             train_config['global_batch_size'] = device_batch_size * gradient_accumulation_steps
 
