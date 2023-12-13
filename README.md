@@ -39,7 +39,7 @@ wget -P $DATA_ROOT/datasets/tinyshakespeare https://raw.githubusercontent.com/ka
 You can reproduce [Grokking](https://arxiv.org/abs/2201.02177) phenomenon in just 10 minutes of training on a single RTX 3080. Here, we train a tiny transformer that can learn to compute a simple math expression reaching train and eventually val loss of ~0. Synthetic dataset is generated and tokenized on the fly. To try this, run:
 
 ```python
-python nanugpt/train.py configs/grokking/prime223.yaml
+python train.py configs/grokking/prime223.yaml
 ```
 
 ### TinyShakespear Dataset
@@ -48,13 +48,13 @@ You can also train a language model using all the works of Shakespear as data in
 
 ```python
 # tokenize input file using byte tokenizer
-python nanugpt/tokenize_dataset.py configs/tokenize/tinyshakespeare.yaml
+python tokenize_dataset.py configs/tokenize/tinyshakespeare.yaml
 
 # run training using GPT2 124M model
-python nanugpt/train.py configs/train_gpt2/tinyshakespeare.yaml
+python train.py configs/train_gpt2/tinyshakespeare.yaml
 
 # generate completitions for the prompt
-python nanugpt/generate.py cconfigs/train_gpt2/tinyshakespeare.yaml
+python generate.py cconfigs/train_gpt2/tinyshakespeare.yaml
 ```
 
 ### Other Datasets
