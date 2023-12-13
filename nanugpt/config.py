@@ -10,7 +10,7 @@ import yaml
 
 _PREFIX_NODE = '_copy' # for copy node content command (must be dict)
 _PREFIX_PATH = '_copy:' # for copy node value command (must be scaler)
-
+_PREFIX_INHERIT = '_inherit' # for inherit node command, if true then inherit values else don't
 
 def resolve_all(root_d:MutableMapping):
     _resolve_all(root_d, root_d, '/', set())
@@ -159,12 +159,16 @@ def _resolve_path(root_d:MutableMapping, path:str, prev_paths:set)->Any:
 
 def deep_update(d:MutableMapping, u:Mapping, create_map:Callable[[],MutableMapping])\
         ->MutableMapping:
+    # d is current state, u is new state
+    # we start with empty, then merhe includes and then merge final file
     for k, v in u.items():
         if isinstance(v, Mapping):
+            inherit = v.get(_PREFIX_INHERIT, True)
+
             # v is mapping so d[k] needs to be mapping to be able to merge
             # if k doesn't exist or set to None, create new mapping
             target = d.get(k, None)
-            if target is None:
+            if target is None or not inherit:
                 target = create_map()
                 d[k] = target
             d[k] = deep_update(d[k], v, create_map)
@@ -175,7 +179,10 @@ def deep_update(d:MutableMapping, u:Mapping, create_map:Callable[[],MutableMappi
 class Config(UserDict):
     def __init__(self, config_filepath:Optional[str]=None,
                  default_config_filepath:Optional[str]=None,
-                 app_desc:Optional[str]=None, use_args=True, first_arg_filename=True,
+                 config_content:Optional[dict]=None,
+                 app_desc:Optional[str]=None,
+                 use_args=True,
+                 first_arg_filename=True,
                  param_args: Sequence = [], resolve_redirects=True) -> None:
         """Create config from specified yaml files and override args.
 
@@ -190,12 +197,16 @@ class Config(UserDict):
         For example,
             `'_copy': '/a/b/c'` will copy value of `/a/b/c` to current path.
 
+        You can stop inheritance using `'_inherit': False`.
+
         Keyword Arguments:
             config_filepath {[str]} -- [Yaml file to load config from, could be names of files separated by semicolon which will be loaded in sequence oveeriding previous config] (default: {None})
             app_desc {[str]} -- [app description that will show up in --help] (default: {None})
             use_args {bool} -- [if true then command line parameters will override parameters from config files] (default: {False})
             param_args {Sequence} -- [parameters specified as ['--key1',val1,'--key2',val2,...] which will override parameters from config file.] (default: {[]})
             resolve_redirects -- [if True then _copy commands in yaml are executed]
+            config_content -- if provided, this overrides content from the files, but not the command line args
+            first_arg_filename -- if True then first arg is treated as config file name, else it is treated as normal arg
         """
         super(Config, self).__init__()
 
@@ -217,6 +228,8 @@ class Config(UserDict):
         if config_filepath:
             for filepath in config_filepath.strip().split(';'):
                 self._load_from_file(filepath.strip())
+        if config_content is not None:
+            deep_update(self, config_content, lambda: Config(resolve_redirects=False, first_arg_filename=False))
 
         # Create a copy of ourselves and do the resolution over it.
         # This resolved_conf then can be used to search for overrides that
@@ -235,6 +248,8 @@ class Config(UserDict):
         self.config_filepath = config_filepath
 
     def _load_from_file(self, filepath:Optional[str])->None:
+        # first we process includes and then we load source file
+        # this allows source file to override included files
         if filepath:
             filepath = os.path.expanduser(os.path.expandvars(filepath))
             filepath = os.path.abspath(filepath)

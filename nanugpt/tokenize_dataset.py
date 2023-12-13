@@ -70,7 +70,7 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
         dset = tokenized[split]
 
         arr_len = np.sum(dset['len'], dtype=np.uint64)
-        logging.summary({f'data/{split}_tokens': arr_len})
+        logging.summary({f'data/{split}_tokens': arr_len.item()})
 
         tokenized_out_dir = utils.full_path(tokenized_out_dir, create=True)
         filename = os.path.join(tokenized_out_dir, f'{split}.bin')
@@ -87,5 +87,6 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
             arr[idx : idx + len(arr_batch)] = arr_batch
             idx += len(arr_batch)
         arr.flush()
+        del arr
 
     logging.info(f'Tokenized dataset saved to {tokenized_out_dir}')

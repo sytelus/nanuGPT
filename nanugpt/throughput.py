@@ -1,271 +1,285 @@
-from contextlib import AbstractContextManager
-from typing import Mapping, Tuple, Optional, Callable, Mapping, List
+from collections import defaultdict
 import os
-import timeit
-import math
+from contextlib import AbstractContextManager
+from typing import Iterator, Mapping, Tuple, Optional, Callable, Mapping, List
 
 import torch
 from torch.nn.parallel import DistributedDataParallel
 from torch import distributed as dist
 
+import matplotlib
+# below is needed to avoid message ""Backend TkAgg is interactive backend. Turning interactive mode on"
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
 from nanugpt import utils
 from nanugpt import common
 from nanugpt import glogging as logging
 from nanugpt.config import Config
+from nanugpt.stopwatch import StopWatch
+
+"""
+The goal of this script to figure out the maximum throughput of model.
+We first find out max device_batch_size that fits into GPU memory.
+Then we plot throuput vs grad acc steps.
+"""
+
+sw  = StopWatch()
+
+def infinite_batches(train_loader)->Iterator[Tuple[torch.Tensor, torch.Tensor]]:
+    """Generate infinite batches repeatedly from train_loader"""
+    batch_iter = iter(train_loader)
+    while True:
+        try:
+            x, y = next(batch_iter)
+            yield x, y
+        except StopIteration:
+            batch_iter = iter(train_loader)
 
 
-def measure_throuput(config:Mapping,
-                     model_sizes:List[dict],
-                     context_lengths:List[int],
-                     device_batch_sizes:List[int],
-                     logger:Optional[logging.Logger]=None):
-    global_batch_size = config['training']['global_batch_size']
-    device_batch_size = config['training']['device_batch_size']
+def train_step(batch_iter, model, gread_acc_steps, scaler, optimizer, grad_clip,
+               device, torch_info, amp_ctx, get_loss):
+    """Run a full step of train"""
+
+    sw.start('train_step')
+
+    step_samples, step_tokens = 0, 0
+
+    # run forward passes
+    sw.start('train_step\forward')
+    for _ in range(gread_acc_steps):
+        x, y = next(batch_iter)
+        loss, n_samples, n_tokens = forward_xy(x, y, model, device, torch_info, amp_ctx, get_loss)
+        loss = loss / gread_acc_steps # scale the loss to account for gradient accumulation
+        step_samples += n_samples
+        step_tokens += n_tokens
+    sw.pause('train_step\forward')
+
+    # backward pass, with gradient scaling if training in fp16
+    sw.start('train_step\backward')
+    scaler.scale(loss).backward() # type: ignore
+    sw.pause('train_step\backward')
+
+    # clip the gradient
+    if grad_clip != 0.0:
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+
+    # step the optimizer and scaler if training in fp16
+    scaler.step(optimizer)
+    scaler.update()
+
+    # flush the gradients as soon as we can, no need for this memory anymore
+    optimizer.zero_grad(set_to_none=True)
+
+    sw.pause('train_step')
+
+    return step_samples, step_tokens
+
+def forward_xy(x, y, model, device, torch_info, amp_ctx, get_loss):
+    """Run a forward pass"""
+    x, y = x.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else x.to(device), \
+        y.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else y.to(device)
+
+    n_samples = len(x)
+    n_tokens = x.numel()
+
+    with amp_ctx:
+        sw.start('forward')
+        logits = model(x)
+        sw.pause('forward')
+        loss, correct, n_preds = get_loss(logits, y)
+
+    return loss, n_samples, n_tokens
+
+def measure_global_batch(config:Mapping,
+                     logger:logging.Logger,
+                     model_warmup_steps:int=10,
+                     measurement_steps:int=10,):
+
+    optimizer_config = config['optimizer']
+    train_config = config['training']
     out_dir = config['general']['out_dir']
     data_config = config['data']
+    loss_config = config['loss']
 
-    get_data = utils.import_fn(data_config['module'])
+    global_batch_size = train_config['global_batch_size']
+    device_batch_size = train_config['device_batch_size']
+    gradient_accumulation_steps = global_batch_size // device_batch_size
 
-    # setup system, device, logger, torch
-    own_logger = logger is None
-    logger = common.setup_logger(utils.is_master_process(), config, logger)
+    # don't measure timings yet
+    sw.clear_all()
+    sw.enable_all(False)
 
+    # setup torch
     device, amp_ctx, torch_info = common.setup_device(config, logger)
     assert torch_info.is_master == utils.is_master_process(), "torch_info.is_master != utils.is_master_process()"
 
-    gradient_accumulation_steps = utils.calc_grad_acc(global_batch_size, device_batch_size, torch_info.world_size)
-
+    # setup output dir
     if torch_info.is_master:
         out_dir = utils.full_path(out_dir, create=True)
         logger.summary({'run/out_dir': out_dir})
 
+    if torch_info.is_cuda:
+        torch.cuda.empty_cache()
+
+    # setup data
+    get_data = utils.import_fn(data_config['module'])
+    get_loss = utils.import_fn(loss_config['module'])
+    train_loader, val_loader, test_loader = get_data(local_rank=torch_info.local_rank,
+                                                    **data_config['module_kwargs'])
+
     # create tokenizer
     tokenizer, tokenizer_config = common.create_tokenizer(config, logger)
-    logger.summary({'run/vocab_size': len(tokenizer)})
-
-    # turn off loggig except for messages we want
-    logging.get_logger().quite('params_m(c)')
-
-    for device_batch_size in device_batch_sizes:
-        for context_length in context_lengths:
-            data_config['module_kwargs']['device_batch_size'] = device_batch_size
-            data_config['module_kwargs']['context_length'] = context_length
-            train_loader, val_loader, test_loader = get_data(local_rank=torch_info.local_rank,
-                                                            **data_config['module_kwargs'])
-            for model_size in model_sizes:
-                model_kwargs = config['model']['module_kwargs']
-                model_kwargs['context_length'] = context_length
-                model_kwargs['n_layer'] = model_size['n_layer']
-                model_kwargs['n_embd'] = model_size['n_embd']
-                model_kwargs['n_head'] = model_size['n_head']
-
-                try:
-                    torch.cuda.empty_cache()
-
-                    model, model_config, train_loss, train_acc, total_samples, token_count, loop_start_time, loop_end_time, max_steps = \
-                        train_config(config, logger, device, len(tokenizer), torch_info, train_loader, amp_ctx, gradient_accumulation_steps)
-
-                    params_nonembedding_trainable = utils.module_params_count(model)[-1]
-
-                    model_kwargs = model_config['module_kwargs']
-                    dt = loop_end_time - loop_start_time
-                    transformer_tflops = utils.transformer_tflops(batch_size=device_batch_size*gradient_accumulation_steps,
-                        params_nonembedding_trainable=params_nonembedding_trainable,
-                        context_length=context_length, dt=dt,
-                        n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer'],
-                        forward_iters=gradient_accumulation_steps, backward_iters=1
-                    )
-                    samples_rate = total_samples / dt
-                    tokens_rate = token_count / dt
-                    step_time = dt / max_steps
-                except Exception as e:
-                    logger.summary({
-                        'model/params_m(c)': model_size['params_m'],
-                        'model/params_m(a)': '***OOM***' if isinstance(e, RuntimeError) and 'CUDA out of memory' in str(e) else type(e).__name__,
-                        'model/context_length': context_length,
-                        'model/n_layer': model_size['n_layer'],
-                        'model/n_embd': model_size['n_embd'],
-                        'model/n_head': model_size['n_head'],
-                    })
-                    break
-
-                logger.summary({
-                                'model/params_m(c)': model_size['params_m'],
-                                'model/params_m(a)': int(params_nonembedding_trainable/1e6),
-                                'model/context_length': context_length,
-                                'model/n_layer': model_size['n_layer'],
-                                'model/n_embd': model_size['n_embd'],
-                                'model/n_head': model_size['n_head'],
-                                'perf/samples_per_s': samples_rate,
-                                'perf/tokens_per_s': tokens_rate,
-                                'perf/step_time': step_time,
-                                'perf/transformer_tflops': transformer_tflops,
-                                "run/device_batch_size": device_batch_size,
-                                "run/global_batch_size": gradient_accumulation_steps * device_batch_size * torch_info.world_size,
-                                "run/local_batch_size": gradient_accumulation_steps * device_batch_size,
-                                "run/tokens_per_step": gradient_accumulation_steps * device_batch_size * torch_info.world_size * context_length,
-                                })
-
-    if torch_info.is_master:
-        if torch_info.is_distributed:
-            dist.destroy_process_group()
-
-        if own_logger:
-            logger.shutdown()
-
-
-def train_config(config:Mapping, logger:logging.Logger, device:torch.device,
-                 vocab_size:int, torch_info:utils.TorchInfo,
-                 train_loader:torch.utils.data.DataLoader, amp_ctx:AbstractContextManager,
-                 gradient_accumulation_steps:int):
-
-    max_steps = config['training']['max_steps']
-    grad_clip = config['training']['grad_clip']
-    optimizer_config = config['optimizer']
-    scheduler_config = config['scheduler']
-    loss_config = config['loss']
-
-    get_optim = utils.import_fn(optimizer_config['module'])
-    get_scheduler = utils.import_fn(scheduler_config['module'])
-    get_loss = utils.import_fn(loss_config['module'])
 
     # create model
-    model, model_config = common.create_model(config, logger, device, vocab_size=vocab_size)
+    model, model_config = common.create_model(config, logger, device, vocab_size=len(tokenizer))
 
-    # optimizer
+    # create optimizer
+    get_optim = utils.import_fn(optimizer_config['module'])
     optimizer = get_optim(model,
                         enable_fused=torch_info.is_cuda,
                         **optimizer_config['module_kwargs'])
-
-    if torch_info.is_distributed:
-        model = DistributedDataParallel(model,
-                                        device_ids=[torch_info.local_rank])
-
-    # scheduler provides warmup and then constant lr
-    scheduler = get_scheduler(optimizer, **scheduler_config['module_kwargs'])
 
     # initialize a GradScaler. If enabled=False scaler is a no-op
     # we need loss scaling only for fp16 due to reduced precision, not bf16 or fp32
     scaler = torch.cuda.amp.GradScaler(enabled=(torch_info.pt_dtype == torch.float16))
 
-    step, total_samples, token_count = 0, 0, 0
-    loop_start_time = timeit.default_timer()
-    train_loss, train_acc = 0., 0.
+    batch_iter = iter(infinite_batches(train_loader))
 
-    # run steps
-    while step < max_steps:
-        step_start_time = timeit.default_timer()
+    # let's warmup
+    logger.info("Warming up...")
+    for _ in range(model_warmup_steps):
+        train_step(batch_iter=batch_iter,
+                   model=model,
+                   gread_acc_steps=gradient_accumulation_steps,
+                   scaler=scaler,
+                   optimizer=optimizer,
+                   grad_clip=train_config['grad_clip'],
+                   device=device,
+                   torch_info=torch_info,
+                   amp_ctx=amp_ctx,
+                   get_loss=get_loss)
+    logger.info("Warmup done")
 
-        batch_iter = iter(train_loader) # restart iterator
-        try:
-            x, y = next(batch_iter)
-            batch_iter_done = False
-        except StopIteration:
-            break # empty dataset
+    sw.enable_all(True)
+    sw.start('measure_global_batch')
+    total_samples, total_tokens = 0, 0
+    for _ in range(measurement_steps):
+        step_samples, step_tokens= train_step(batch_iter=batch_iter,
+                   model=model,
+                   gread_acc_steps=gradient_accumulation_steps,
+                   scaler=scaler,
+                   optimizer=optimizer,
+                   grad_clip=train_config['grad_clip'],
+                   device=device,
+                   torch_info=torch_info,
+                   amp_ctx=amp_ctx,
+                   get_loss=get_loss)
+        total_samples += step_samples
+        total_tokens += step_tokens
 
-        # Loop over the training set
-        while not batch_iter_done:
-            model.train()
-            loss_sum, correct_sum, step_preds_count = 0., 0, 0
-            metrics = {} # add metrics here if any
-            step_sample_count = 0
+    sw.pause('measure_global_batch')
+    sw.enable_all(False)
 
-            for micro_step in range(gradient_accumulation_steps):
-                x, y = x.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else x.to(device), \
-                    y.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else y.to(device)
+    return total_samples, total_tokens, sw.report_all(), device_batch_size, gradient_accumulation_steps
 
-                if torch_info.is_distributed:
-                    # Instead of model.no_sync(), we do Karpathy's hack
-                    # On last step, flag model to require backward grad sync
-                    model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
+def make_plot(data:List[Tuple[int, int, float]],
+              save_filepath:Optional[str]):
+    # using the data in plot_data, plot throughput vs grad_acc_steps, one curve with each device_batch_size, include legends and axis labels
 
-                # note that we don't take context length into account here
-                # if we have N tokens in dataset, we move window N times and do
-                # N iterations per epoch. So, token count in traditional sense is
-                # number of samples, not number of tokens.
-                n_samples = len(x)
-                step_sample_count += n_samples
-                token_count += x.numel()
+    plots = defaultdict(list)
+    for bs, gs, th, *_ in data:
+        plots[bs].append((gs, th))
 
-                with amp_ctx:
-                    logits = model(x)
-                    loss, correct, n_preds = get_loss(logits, y)
+    fig, ax = plt.subplots()
+    for bs, data in plots.items():
+        gs, th = zip(*data)
+        ax.plot(gs, th, label=f'bs={bs}')
 
-                    loss_sum += loss.item() * n_samples
-                    correct_sum += correct.item()
-                    step_preds_count += n_preds
+    # set labels
+    ax.set_xlabel('grad_acc_steps')
+    ax.set_ylabel('samples_per_sec')
 
-                    # Scale the loss to account for gradient accumulation
-                    # During gradient accumulation, gradients are summed at each micro step.
-                    # When we divide the loss by the number of micro steps we average out the gradients
-                    # so that the net value of grads is same as if we had a larger batch size
-                    loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
+    # add a legend
+    ax.legend()
 
-                # immediately async prefetch next batch while model is doing the forward pass on the GPU
-                try:
-                    x, y = next(batch_iter)
-                except StopIteration:
-                    batch_iter_done = True
+    # save the figure
+    if save_filepath:
+        fig.savefig(utils.full_path(save_filepath))
 
-                # backward pass, with gradient scaling if training in fp16
-                scaler.scale(loss).backward() # type: ignore
+def measure_throuput(config:Mapping,
+                     logger:logging.Logger,
+                     device_batch_range:List[int],
+                     grad_acc_steps_range:List[int],
+                     model_warmup_steps:int=10,
+                     measurement_steps:int=10,):
 
-                # if we run out of data, break out of the micro steps loop
-                # this means last batch is partial
-                if batch_iter_done:
-                    break
+    train_config = config['training']
+    data_config = config['data']
 
-            # --- end of gradient accumulation loop ---
+    data = []
+    for device_batch_size in device_batch_range:
+        for gradient_accumulation_steps in grad_acc_steps_range:
+            data_config['module_kwargs']['device_batch_size'] = device_batch_size
+            train_config['device_batch_size'] = device_batch_size
+            train_config['global_batch_size'] = device_batch_size * gradient_accumulation_steps
 
-            # clip the gradient
-            if grad_clip != 0.0:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            try:
+                total_samples, total_tokens, timings, \
+                    device_batch_size, gradient_accumulation_steps = \
+                        measure_global_batch(config, logger,
+                                            model_warmup_steps=model_warmup_steps,
+                                            measurement_steps=measurement_steps)
+                elapsed_s = timings['measure_global_batch']['elapsed_total']
+            except RuntimeError as e:
+                total_samples, total_tokens, timings, \
+                    device_batch_size, gradient_accumulation_steps = \
+                        0, 0, {}, device_batch_size, gradient_accumulation_steps
+                elapsed_s = float('inf')
 
-            # step the optimizer and scaler if training in fp16
-            scaler.step(optimizer)
-            scaler.update()
-            scheduler.step()
-            # flush the gradients as soon as we can, no need for this memory anymore
-            optimizer.zero_grad(set_to_none=True)
+            throughput_samples = total_samples/elapsed_s
+            throughput_tokens = total_tokens/elapsed_s
+            data.append((device_batch_size, gradient_accumulation_steps, throughput_samples,
+                         total_samples, total_tokens, elapsed_s, timings,
+                         throughput_tokens))
 
-            if torch_info.is_distributed:
-                # reduce tensors to rank 0 to get numbers from all ranks
-                loss_sum_dist = torch.tensor(loss_sum, dtype=torch.float32, device=device)
-                counts_dist = torch.tensor([correct_sum, step_preds_count, step_sample_count], dtype=torch.int64, device=device)
-                dist.reduce(loss_sum_dist, dst=0, op=dist.ReduceOp.SUM)
-                dist.reduce(counts_dist, dst=0,op=dist.ReduceOp.SUM)
-                if torch_info.is_master:
-                    loss_sum = loss_sum_dist.item()
-                    correct_sum, step_preds_count, step_sample_count = tuple(counts_dist.tolist())
+            logger.info({'device_batch_size':device_batch_size,
+                        'gradient_accumulation_steps':gradient_accumulation_steps,
+                        'total_samples':total_samples,
+                        'total_tokens':total_tokens,
+                        'throughput_samples': throughput_samples,
+                        'throughput_tokens': throughput_tokens,
+                        'timings': timings,
+                    })
 
-            total_samples += step_sample_count
-            train_loss = loss_sum / step_sample_count
-            train_acc = correct_sum / step_preds_count
+    data_save_filepath = os.path.join(utils.full_path(config['general']['out_dir'], create=True),
+                                 'throughput.yaml')
+    utils.save_yaml(data, data_save_filepath)
 
-            step += 1
-            if step >= max_steps:
-                break
+    plot_save_filepath = os.path.join(utils.full_path(config['general']['out_dir'], create=True),
+                                 'throughput.png')
+    make_plot(data, save_filepath=plot_save_filepath)
 
-    loop_end_time = timeit.default_timer()
+    logger.summary({'plot_save_filepath': plot_save_filepath,
+                    'data_save_filepath': data_save_filepath})
 
-    return model, model_config, train_loss, train_acc, total_samples, token_count, loop_start_time, loop_end_time, max_steps
 
 if __name__ == "__main__":
     # specify config file to use as first argument in commandline
     config = Config(default_config_filepath='configs/train_gpt2/tinystories.yaml')
-    config['training']['max_steps'] = 5
-    config['training']['global_batch_size'] = config['training']['device_batch_size']
+    # we only care about local throughput here for now
+    config['general']['enable_distributed'] = False
+
+    # Turn off unnecessary logging
     config['training']['enable_train_log'] = False
-    config['logging']['log_filename'] = 'throughput.log'
     config['logging']['enable_wandb'] = False
     config['logging']['project_name'] = 'gpt2-throughput'
     config['logging']['run_name'] = 'throughput'
 
-    model_sizes = list(common.get_model_sizes().values())
-    model_sizes.sort(key=lambda x: x['params_m'])
+    logger = common.setup_logger(utils.is_master_process(), config)
 
     measure_throuput(config,
-                     model_sizes=model_sizes,
-                     context_lengths=[128, 256, 512, 1024, 2048, 4096, 8192, 16384],
-                     device_batch_sizes=[1, 2, 4, 8, 12, 16, 24, 26, 32, 48, 60, 64, 128, 256, 512, 1024])
+                     device_batch_range=[4, 8, 16, 32, 64, 128, 256, 512, 1024],
+                     grad_acc_steps_range=[1, 2, 4, 8, 16, 32],
+                     logger=logger)
