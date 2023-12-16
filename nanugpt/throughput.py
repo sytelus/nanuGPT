@@ -11,6 +11,7 @@ import matplotlib
 # below is needed to avoid message ""Backend TkAgg is interactive backend. Turning interactive mode on"
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from cycler import cycler
 
 from nanugpt import utils
 from nanugpt import common
@@ -184,25 +185,61 @@ def measure_global_batch(config:Mapping,
 
     return total_samples, total_tokens, sw.report_all(), device_batch_size, gradient_accumulation_steps
 
-def make_plot(data:List[Tuple[int, int, float]],
+def make_plot(title:str, data:List[Tuple[int, int, float]],
               save_filepath:Optional[str]):
     # using the data in plot_data, plot throughput vs grad_acc_steps, one curve with each device_batch_size, include legends and axis labels
 
+    color_palette = plt.get_cmap('tab10')
+    line_styles = list(matplotlib.lines.lineStyles.keys())
+    marker_styles = list(matplotlib.markers.MarkerStyle.markers.keys())
+
+    # Define custom cyclers for color, line style, and markers
+    color_cycler = cycler(color=color_palette.colors)
+    line_style_cycler = cycler(linestyle=line_styles)
+    marker_cycler = cycler(marker=marker_styles)
+
+    # Combine cyclers
+    combined_cycler = color_cycler + line_style_cycler + marker_cycler
+
+    # Set the combined cycler to the current axes
+    plt.gca().set_prop_cycle(combined_cycler)
+
+    # prepare data
     plots = defaultdict(list)
     for bs, gs, th, *_ in data:
-        plots[bs].append((gs, th))
+        if th > 0: # don't include error points
+            plots[bs].append((gs, th))
 
     fig, ax = plt.subplots()
     for bs, data in plots.items():
         gs, th = zip(*data)
-        ax.plot(gs, th, label=f'bs={bs}')
+        ax.plot(gs, th, label=f'bs={bs}', linewidth=2)
 
     # set labels
     ax.set_xlabel('grad_acc_steps')
     ax.set_ylabel('samples_per_sec')
+    plt.title(title)
 
     # add a legend
     ax.legend()
+
+    # theme the plot
+    ax.grid('on')
+    # change the color of the top and right spines to opaque gray
+    ax.spines['right'].set_color((.8,.8,.8))
+    ax.spines['top'].set_color((.8,.8,.8))
+    # tweak the axis labels
+    xlab = ax.xaxis.get_label()
+    ylab = ax.yaxis.get_label()
+
+    xlab.set_style('italic')
+    xlab.set_size(10)
+    ylab.set_style('italic')
+    ylab.set_size(10)
+
+    # tweak the title
+    ttl = ax.title
+    ttl.set_weight('bold')
 
     # save the figure
     if save_filepath:
@@ -259,7 +296,7 @@ def measure_throuput(config:Mapping,
 
     plot_save_filepath = os.path.join(utils.full_path(config['general']['out_dir'], create=True),
                                  'throughput.png')
-    make_plot(data, save_filepath=plot_save_filepath)
+    make_plot('GPT-124M', data, save_filepath=plot_save_filepath)
 
     logger.summary({'plot_save_filepath': plot_save_filepath,
                     'data_save_filepath': data_save_filepath})
