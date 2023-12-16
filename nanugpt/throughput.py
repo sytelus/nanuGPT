@@ -342,7 +342,10 @@ if __name__ == "__main__":
         # sync settings
         config['data']['module_kwargs']['context_length'] = config['model']['module_kwargs']['context_length']
 
-        measure_throuput(model_name, config,
-                        device_batch_range=[4, 8, 16, 32, 64, 128, 256, 512, 1024],
-                        grad_acc_steps_range=[1, 2, 4, 8, 16, 32],
-                        logger=logger)
+        try:
+            measure_throuput(model_name, config,
+                            device_batch_range=[4, 8, 16, 32, 64, 128, 256, 512, 1024],
+                            grad_acc_steps_range=[1, 2, 4, 8, 16, 32],
+                            logger=logger)
+        except Exception as e:
+            logger.error(f"Failed to measure throughput for {model_name}", exception_instance=e)
