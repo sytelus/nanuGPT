@@ -337,9 +337,12 @@ if __name__ == "__main__":
 
     logger = common.setup_logger(utils.is_master_process(), config)
 
+    for model_name, model_config in model_sizes.model_sizes.items():
+        config['model']['module_kwargs'].update(model_config)
+        # sync settings
+        config['data']['module_kwargs']['context_length'] = model_config['module_kwargs']['context_length']
 
-
-    measure_throuput(config,
-                     device_batch_range=[4, 8, 16, 32, 64, 128, 256, 512, 1024],
-                     grad_acc_steps_range=[1, 2, 4, 8, 16, 32],
-                     logger=logger)
+        measure_throuput(model_name, config,
+                        device_batch_range=[4, 8, 16, 32, 64, 128, 256, 512, 1024],
+                        grad_acc_steps_range=[1, 2, 4, 8, 16, 32],
+                        logger=logger)
