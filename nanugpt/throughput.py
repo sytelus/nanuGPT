@@ -18,6 +18,7 @@ from nanugpt import common
 from nanugpt import glogging as logging
 from nanugpt.config import Config
 from nanugpt.stopwatch import StopWatch
+from nanugpt import model_sizes
 
 """
 The goal of this script to figure out the maximum throughput of model.
@@ -189,31 +190,25 @@ def make_plot(title:str, data:List[Tuple[int, int, float]],
               save_filepath:Optional[str]):
     # using the data in plot_data, plot throughput vs grad_acc_steps, one curve with each device_batch_size, include legends and axis labels
 
-    color_palette = plt.get_cmap('tab10')
-    line_styles = list(matplotlib.lines.lineStyles.keys())
-    marker_styles = list(matplotlib.markers.MarkerStyle.markers.keys())
-
-    # Define custom cyclers for color, line style, and markers
-    color_cycler = cycler(color=color_palette.colors)
-    line_style_cycler = cycler(linestyle=line_styles)
-    marker_cycler = cycler(marker=marker_styles)
-
-    # Combine cyclers
-    combined_cycler = color_cycler + line_style_cycler + marker_cycler
-
-    # Set the combined cycler to the current axes
-    plt.gca().set_prop_cycle(combined_cycler)
+    color_palette = utils.infinite_iter(plt.get_cmap('tab10').colors)
+    line_styles = utils.infinite_iter(list(matplotlib.lines.lineStyles.keys()))
+    marker_styles = utils.infinite_iter(list(k for k in matplotlib.markers.MarkerStyle.markers.keys() if isinstance(k, str)))
 
     # prepare data
     plots = defaultdict(list)
-    for bs, gs, th, *_ in data:
+    for d in data:
+        bs, gs, th, *_ = d
         if th > 0: # don't include error points
             plots[bs].append((gs, th))
 
     fig, ax = plt.subplots()
     for bs, data in plots.items():
         gs, th = zip(*data)
-        ax.plot(gs, th, label=f'bs={bs}', linewidth=2)
+        ax.plot(gs, th, label=f'bs={bs}', linewidth=2,
+                color=next(color_palette),
+                linestyle=next(line_styles),
+                marker=next(marker_styles),
+        )
 
     # set labels
     ax.set_xlabel('grad_acc_steps')
@@ -237,6 +232,27 @@ def make_plot(title:str, data:List[Tuple[int, int, float]],
     ylab.set_style('italic')
     ylab.set_size(10)
 
+    # Getting current tick locations
+    current_xticks = plt.xticks()[0]
+    current_yticks = plt.yticks()[0]
+
+    # # Calculating new ticks (increasing by a factor of 5)
+    # new_xticks = np.linspace(current_xticks[0], current_xticks[-1], len(current_xticks) * 5)
+    # new_yticks = np.linspace(current_yticks[0], current_yticks[-1], len(current_yticks) * 5)
+
+    # # Creating new ticks but keeping labels only for the original ticks
+    # new_xtick_labels = ['' if x not in current_xticks else str(x) for x in new_xticks]
+    # new_ytick_labels = ['' if y not in current_yticks else str(y) for y in new_yticks]
+
+    # # Setting new tick locations
+    # plt.xticks(new_xticks, new_xtick_labels)
+    # plt.yticks(new_yticks, new_ytick_labels)
+
+    # # Adjusting the intermediate tick labels' opacity
+    # for label in plt.gca().get_xticklabels() + plt.gca().get_yticklabels():
+    #     if label.get_text() == '':
+    #         label.set_alpha(0.1)
+
     # tweak the title
     ttl = ax.title
     ttl.set_weight('bold')
@@ -245,7 +261,11 @@ def make_plot(title:str, data:List[Tuple[int, int, float]],
     if save_filepath:
         fig.savefig(utils.full_path(save_filepath))
 
-def measure_throuput(config:Mapping,
+    return plt, fig
+
+
+def measure_throuput(model_name:str,
+                     config:Mapping,
                      logger:logging.Logger,
                      device_batch_range:List[int],
                      grad_acc_steps_range:List[int],
@@ -288,15 +308,16 @@ def measure_throuput(config:Mapping,
                         'throughput_samples': throughput_samples,
                         'throughput_tokens': throughput_tokens,
                         'timings': timings,
+                        'model_name': model_name,
                     })
 
     data_save_filepath = os.path.join(utils.full_path(config['general']['out_dir'], create=True),
-                                 'throughput.yaml')
+                                 model_name + '_throughput.yaml')
     utils.save_yaml(data, data_save_filepath)
 
     plot_save_filepath = os.path.join(utils.full_path(config['general']['out_dir'], create=True),
-                                 'throughput.png')
-    make_plot('GPT-124M', data, save_filepath=plot_save_filepath)
+                                 model_name + '_throughput.png')
+    make_plot(model_name, data, save_filepath=plot_save_filepath)
 
     logger.summary({'plot_save_filepath': plot_save_filepath,
                     'data_save_filepath': data_save_filepath})
@@ -315,6 +336,8 @@ if __name__ == "__main__":
     config['logging']['run_name'] = 'throughput'
 
     logger = common.setup_logger(utils.is_master_process(), config)
+
+
 
     measure_throuput(config,
                      device_batch_range=[4, 8, 16, 32, 64, 128, 256, 512, 1024],

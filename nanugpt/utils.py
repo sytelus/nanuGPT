@@ -1,4 +1,4 @@
-from typing import Callable, Mapping, MutableMapping, Optional, Tuple, Dict, List, Sequence, Any, Type, Union
+from typing import Callable, Mapping, MutableMapping, Optional, Tuple, Dict, List, Sequence, Any, Type, Union, Iterable
 import csv
 from datetime import datetime
 import os
@@ -695,3 +695,12 @@ def dict2tsv(d:Dict[Any, Any], sort_keys=True, delimiter='\t')->str:
     keys_line = delimiter.join(str(k) for k in keys)
     values_line = delimiter.join(str(d[k]) for k in keys)
     return f"{keys_line}\n{values_line}"
+
+def infinite_iter(iterable:Iterable[Any])->Any:
+    """Returns items from ietrator forever"""
+    it = iter(iterable)
+    while True:
+        try:
+            yield next(it)
+        except StopIteration:
+            it = iter(iterable)
