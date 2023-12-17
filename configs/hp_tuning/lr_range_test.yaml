@@ -1,0 +1,8 @@
+
+
+scheduler:
+  _inherit: false
+  module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
+  module_kwargs:
+    max_steps: '_copy: /training/max_steps'
+    range_coeff: 5.0
