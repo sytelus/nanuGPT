@@ -31,7 +31,7 @@ training:
 optimizer:
   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
   module_kwargs:
-    learning_rate: 3.0E-4 # LRRT found 2.5E-3, Karpathy used 1.0E-3
+    learning_rate: 30.0E-4 # LRRT found 2.5E-3, Karpathy used 1.0E-3
     weight_decay: 0.1
     beta1: 0.9
     beta2: 0.99
