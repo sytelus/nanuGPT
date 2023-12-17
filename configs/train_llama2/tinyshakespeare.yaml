@@ -25,13 +25,13 @@ tokenizer:
 
 training:
   device_batch_size: 64
-  max_steps: 600  # Karpathy's original value is 5000 but dataset overfits after 2300 steps
+  max_steps: 1000  # Karpathy's original value is 5000 but dataset overfits after 2300 steps
   global_batch_size: 64
 
 optimizer:
   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
   module_kwargs:
-    learning_rate: 20.0E-4 # LRRT found 2.5E-3, Karpathy used 1.0E-3
+    learning_rate: 10.0E-4 # LRRT found 2.5E-3, Karpathy used 1.0E-3
     weight_decay: 0.1
     beta1: 0.9
     beta2: 0.99
@@ -39,7 +39,7 @@ optimizer:
 scheduler:
   module: 'nanugpt.schedulers.linear.get_scheduler'
   module_kwargs:
-    warmup_iters: 20
+    warmup_iters: 50
     max_iters: '_copy: /training/max_steps'
     end_factor: 1.0E-2
 
