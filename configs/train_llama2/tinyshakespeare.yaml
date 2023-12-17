@@ -30,7 +30,7 @@ optimizer:
     beta2: 0.99
 
 scheduler:
-  module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
+  module: 'nanugpt.schedulers.cosine.get_scheduler'
   module_kwargs:
     warmup_iters: 100
     max_iters: '_copy: /training/max_steps'

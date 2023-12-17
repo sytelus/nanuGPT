@@ -27,7 +27,7 @@ optimizer:
     learning_rate: 73.0E-4 # LR found by LRRT
 
 # scheduler:
-#   module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
+#   module: 'nanugpt.schedulers.cosine.get_scheduler'
 #   module_kwargs:
 #     warmup_iters: 3000
 #     end_factor: 1.0E-2
