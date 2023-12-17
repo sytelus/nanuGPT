@@ -1,4 +1,8 @@
 general:
+  project_name: 'tokenization'
+  run_name: '_time:' # default run name is timestamp
+  run_description: nil
+  out_dir: '~/out_dir/$project_name/$run_name'
   device_type: 'cuda'            # auto select if blank or cpu, cuda
   distributed_backend: 'nccl'       # nccl, gloo, mpi, horovod)
   distributed_init_method: 'env://' # for horovod, use 'tcp://localhost:23456'
@@ -6,15 +10,18 @@ general:
   seed: 42
   dtype: 'float32'         # float32, float16, bfloat16
   enable_distributed: null # automatically set to true if WORLD_SIZE > 1
-  out_dir: '~/out_dir/grokking'
+
+_env: # creates env vars
+  project_name: '_copy: /general/project_name'
+  run_name: '_copy: /general/run_name'
 
 logging:
+  project_name: '_copy: /general/project_name'
+  run_name: '_copy: /general/run_name'
+  log_dir: '_copy: /general/out_dir'
+  run_description: '_copy: /general/run_description'
   enable_wandb: false
   summaries_stdout: true
-  project_name: grokking
-  run_name: nil  # select random name
-  run_description: nil
-  log_dir: '~/out_dir/grokking'
   log_filename: 'log.txt'
   summaries_filename: 'summaries.txt'
   allow_overwrite_log: true

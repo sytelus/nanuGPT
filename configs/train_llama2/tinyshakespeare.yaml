@@ -1,14 +1,7 @@
 __include__: ['base_config.yaml']
 
 general:
-  dtype: 'bfloat16'         # float32, float16, bfloat16
-  out_dir: '$OUT_DIR/llama2_tinyshakespeare'
-
-logging:
-  enable_wandb: true
-  project_name: 'tinyllama_shakespeare'
-  run_name: tinyshakespeare_llama2_bf16  # select random name
-  run_description: 'TinyLlama on TinyShakespeare'
+  project_name: 'llama2_tinyshakespeare'
 
 model:
   module: 'nanugpt.models.tinyllama.get_model'

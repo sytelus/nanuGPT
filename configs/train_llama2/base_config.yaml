@@ -1,5 +1,9 @@
 # base config is designed for GPT2/OpenWebText with NanoGPT defaults
 general:
+  project_name: 'train_gpt2'
+  run_name: '_time:' # default run name is timestamp
+  run_description: nil
+  out_dir: '~/out_dir/$project_name/$run_name'
   device_type: 'cuda'            # auto select if blank or cpu, cuda
   distributed_backend: 'nccl'       # nccl, gloo, mpi, horovod)
   distributed_init_method: 'env://' # for horovod, use 'tcp://localhost:23456'
@@ -7,14 +11,17 @@ general:
   seed: 42
   dtype: 'bfloat16'         # float32, float16, bfloat16
   enable_distributed: null # automatically set to true if WORLD_SIZE > 1
-  out_dir: '~/out_dir/train_llama2'
+
+_env: # creates env vars
+  project_name: '_copy: /general/project_name'
+  run_name: '_copy: /general/run_name'
 
 logging:
-  enable_wandb: false
-  project_name: train_llama2
-  run_name: nil  # select random name
-  run_description: nil
+  project_name: '_copy: /general/project_name'
+  run_name: '_copy: /general/run_name'
   log_dir: '_copy: /general/out_dir'
+  run_description: '_copy: /general/run_description'
+  enable_wandb: false
   log_filename: 'log.txt'
   summaries_filename: 'summaries.txt'
   allow_overwrite_log: true

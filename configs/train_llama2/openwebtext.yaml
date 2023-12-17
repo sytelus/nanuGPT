@@ -1,14 +1,7 @@
 __include__: ['base_config.yaml']
 
 general:
-  out_dir: '~/out_dir/llama2_124m_owt'
-
-logging:
-  project_name: 'tinyllama_124m_owt'
-  enable_wandb: true
-  summaries_stdout: true
-  run_name: 'llama2_124m_owt'  # select random name
-  run_description: 'Llama2 124M baseline on OpenWebText'
+  project_name: 'llama2_owt'
 
 data:
   module_kwargs:

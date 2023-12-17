@@ -1,14 +1,7 @@
 __include__: ['base_config.yaml']
 
 general:
-  out_dir: '~/out_dir/gpt2_124m_tinystories'
-
-logging:
-  project_name: 'gpt2_124m_tinystories'
-  enable_wandb: true
-  summaries_stdout: true
-  run_name: 'gpt2_124m_ts_opt'
-  run_description: nil
+  project_name: 'gpt2o_tinystories'
 
 data:
   module_kwargs:

@@ -1,14 +1,7 @@
 __include__: ['base_config.yaml']
 
 general:
-  out_dir: '~/out_dir/gpt2_124m_wikitext-103'
-
-logging:
-  project_name: 'gpt2_124m_wikitext-103'
-  enable_wandb: true
-  summaries_stdout: true
-  run_name: 'gpt2_124m_wt103_opt'
-  run_description: nil
+  project_name: 'gpt2o_wt103'
 
 data:
   module_kwargs:

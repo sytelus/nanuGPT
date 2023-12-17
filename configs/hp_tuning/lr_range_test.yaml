@@ -1,3 +1,5 @@
+# This config is suppossed to be appended to training config to find LR
+# So there is no general, logging etc sections here
 
 training:
   max_steps: 100

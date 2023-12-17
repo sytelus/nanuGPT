@@ -1,10 +1,21 @@
+
+general:
+  project_name: 'tokenization'
+  run_name: '_time:' # default run name is timestamp
+  run_description: nil
+  out_dir: '~/out_dir/$project_name/$run_name'
+
+_env: # creates env vars
+  project_name: '_copy: /general/project_name'
+  run_name: '_copy: /general/run_name'
+
 logging:
+  project_name: '_copy: /general/project_name'
+  run_name: '_copy: /general/run_name'
+  log_dir: '_copy: /general/out_dir'
+  run_description: '_copy: /general/run_description'
   enable_wandb: false
   summaries_stdout: true
-  project_name: 'tokenization'
-  run_name: null  # select random name
-  run_description: null
-  log_dir: null # wo=ill be set to output folder
   log_filename: 'log.txt'
   summaries_filename: 'summaries.txt'
   allow_overwrite_log: true
@@ -30,4 +41,4 @@ data:
 
   data_loader_seed: 8
 
-  tokenized_out_dir: null # '$DATA_ROOT/datasets/tokenized/tinystories_v2/tiktoken/'
+  tokenized_out_dir: null # specified by the override config

@@ -1,14 +1,7 @@
 __include__: ['base_config.yaml']
 
 general:
-  out_dir: '~/out_dir/llama2_124m_wikitext103'
-
-logging:
-  project_name: 'tinyllama_124m_wikitext103'
-  enable_wandb: true
-  summaries_stdout: true
-  run_name: 'llama2-124m_wikitext103'  # select random name
-  run_description: 'Llama2-124M WikiText-103 using llama2 tokenizer and bfloat16'
+  project_name: 'llama2_wt103'
 
 data:
   module_kwargs:

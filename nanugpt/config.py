@@ -7,10 +7,14 @@ import os
 from distutils.util import strtobool
 import copy
 import yaml
+from datetime import datetime
 
 _PREFIX_NODE = '_copy' # for copy node content command (must be dict)
 _PREFIX_PATH = '_copy:' # for copy node value command (must be scaler)
 _PREFIX_INHERIT = '_inherit' # for inherit node command, if true then inherit values else don't
+_PREFIX_ENV = '_env' # command that sets the environment variables specified as key, values in dict
+_PREFIX_TIME = '_time:' # command that evaluates to datetime string specified the format
+
 
 def resolve_all(root_d:MutableMapping):
     _resolve_all(root_d, root_d, '/', set())
@@ -37,11 +41,17 @@ def _resolve_all(root_d:MutableMapping, cur:MutableMapping, cur_path:str, prev_p
 
     for k in cur.keys():
         # if this key needs path resolution, get target and replace the value
-        rpath = _req_resolve(cur[k])
+        rpath = _copy_command_val(cur[k])
         if rpath:
             cur[k] = _resolve_path(root_d,
                         _rel2full_path(_join_path(cur_path, k), rpath), prev_paths)
-        # if replaced value is again dictionary, recurse on it
+
+        time_fmt = _time_command_val(cur[k])
+        if time_fmt is not None:
+            time_fmt = '%Y%m%d-%H%M%S' if not time_fmt else time_fmt
+            cur[k] = datetime.now().strftime(time_fmt)
+
+        # if value is again dictionary, recurse on it
         if isinstance(cur[k], MutableMapping):
             _resolve_all(root_d, cur[k], _join_path(cur_path, k), prev_paths)
 
@@ -59,11 +69,18 @@ def _merge_source(source:Mapping, dest:MutableMapping)->None:
                 _merge_source(source[sk], dest[sk])
             # else at least dest value is not dict and should not be overriden
 
-def _req_resolve(v:Any)->Optional[str]:
+def _copy_command_val(v:Any)->Optional[str]:
     """If the value is actually a path we need resolve then return that path or return None"""
     if isinstance(v, str) and v.startswith(_PREFIX_PATH):
         # we will almost always have space after _copy command
         return v[len(_PREFIX_PATH):].strip()
+    return None
+
+def _time_command_val(v:Any)->Optional[str]:
+    """If the value is time command then return the specified format or return None"""
+    if isinstance(v, str) and v.startswith(_PREFIX_TIME):
+        # we will almost always have space after _copy command
+        return v[len(_PREFIX_TIME):].strip()
     return None
 
 def _join_path(path1:str, path2:str):
@@ -149,7 +166,7 @@ def _resolve_path(root_d:MutableMapping, path:str, prev_paths:set)->Any:
             raise KeyError(f'Path "{path}" cannot be resolved because "{cur_path}" is not a dictionary so "{part}" cannot exist in it')
 
     # last child is our answer
-    rpath = _req_resolve(d)
+    rpath = _copy_command_val(d)
     if rpath:
         next_path = _rel2full_path(cur_path, rpath)
         if next_path == path:
@@ -176,6 +193,12 @@ def deep_update(d:MutableMapping, u:Mapping, create_map:Callable[[],MutableMappi
             d[k] = v
     return d
 
+def set_env_vars(root_d:MutableMapping):
+    if _PREFIX_ENV in root_d:
+        for k, v in root_d[_PREFIX_ENV].items():
+            assert isinstance(v, str), f'Environment variable value in config key "{k}" must be string but got {v}'
+            os.environ[k] = v
+
 class Config(UserDict):
     def __init__(self, config_filepath:Optional[str]=None,
                  default_config_filepath:Optional[str]=None,
@@ -183,7 +206,7 @@ class Config(UserDict):
                  app_desc:Optional[str]=None,
                  use_args=True,
                  first_arg_filename=True,
-                 param_args: Sequence = [], resolve_redirects=True) -> None:
+                 param_args: Sequence = [], run_commands=True) -> None:
         """Create config from specified yaml files and override args.
 
         Config is simply a dictionary of key, value which can form hirarchical
@@ -204,7 +227,7 @@ class Config(UserDict):
             app_desc {[str]} -- [app description that will show up in --help] (default: {None})
             use_args {bool} -- [if true then command line parameters will override parameters from config files] (default: {False})
             param_args {Sequence} -- [parameters specified as ['--key1',val1,'--key2',val2,...] which will override parameters from config file.] (default: {[]})
-            resolve_redirects -- [if True then _copy commands in yaml are executed]
+            run_commands -- [if True then commands such as _copy, _env in yaml are executed]
             config_content -- if provided, this overrides content from the files, but not the command line args
             first_arg_filename -- if True then first arg is treated as config file name, else it is treated as normal arg
         """
@@ -229,21 +252,22 @@ class Config(UserDict):
             for filepath in config_filepath.strip().split(';'):
                 self._load_from_file(filepath.strip())
         if config_content is not None:
-            deep_update(self, config_content, lambda: Config(resolve_redirects=False, first_arg_filename=False))
+            deep_update(self, config_content, lambda: Config(run_commands=False, first_arg_filename=False))
 
         # Create a copy of ourselves and do the resolution over it.
         # This resolved_conf then can be used to search for overrides that
         # wouldn't have existed before resolution.
         resolved_conf = copy.deepcopy(self)
-        if resolve_redirects:
+        if run_commands:
             resolve_all(resolved_conf)
 
         # Let's do final overrides from args
         self._update_from_args(param_args, resolved_conf)      # merge from params
         self._update_from_args(self.extra_args, resolved_conf) # merge from command line
 
-        if resolve_redirects:
+        if run_commands:
             resolve_all(self)
+            set_env_vars(self)
 
         self.config_filepath = config_filepath
 
@@ -256,7 +280,7 @@ class Config(UserDict):
             with open(filepath, 'r') as f:
                 config_yaml = yaml.load(f, Loader=yaml.Loader)
             self._process_includes(config_yaml, filepath)
-            deep_update(self, config_yaml, lambda: Config(resolve_redirects=False, first_arg_filename=False))
+            deep_update(self, config_yaml, lambda: Config(run_commands=False, first_arg_filename=False))
             print('config loaded from: ', filepath)
 
     def _process_includes(self, config_yaml, filepath:str):
@@ -290,7 +314,7 @@ class Config(UserDict):
             if sub_path in resolved_section:
                 resolved_section = resolved_section[sub_path]
                 if not sub_path in section:
-                    section[sub_path] = Config(resolve_redirects=False, first_arg_filename=False)
+                    section[sub_path] = Config(run_commands=False, first_arg_filename=False)
                 section = section[sub_path]
             else:
                 return 1 # path not found, ignore this
