@@ -10,7 +10,7 @@ data:
 
 training:
   #device_batch_size: 60
-  max_steps: 37500
+  max_steps: 16000 # 37500 for ctx=1024
   #global_batch_size: 480
 
 # optimizer:

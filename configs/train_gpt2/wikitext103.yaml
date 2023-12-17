@@ -19,7 +19,7 @@ data:
 
 training:
   #device_batch_size: 32
-  max_steps: 4500 # for 8k, val loss stops improving after 4k
+  max_steps: 2500 # for 8k, val loss stops improving after 4k for ctx=1024
   #global_batch_size:: 512
 
 optimizer:

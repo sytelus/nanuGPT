@@ -79,7 +79,7 @@ optimizer:
 scheduler:
   module: 'nanugpt.schedulers.linear.get_scheduler'
   module_kwargs:
-    warmup_iters: 2000
+    warmup_iters: 1000 # 2000 for ctx=1024
     max_iters: '_copy: /training/max_steps'
     end_factor: 1.0E-2
 
