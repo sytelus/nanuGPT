@@ -29,10 +29,9 @@ training:
   max_steps: 4500 # for 8k, val loss stops improving after 4k
   #global_batch_size:: 512
 
-# optimizer:
-#   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
-#   module_kwargs:
-#     learning_rate: 1.5E-4
+optimizer:
+  module_kwargs:
+    learning_rate: 73.0E-4 # LR found by LRRT
 
 # scheduler:
 #   module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
