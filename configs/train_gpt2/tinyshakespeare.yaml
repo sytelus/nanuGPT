@@ -6,8 +6,8 @@ general:
 
 logging:
   enable_wandb: true
-  run_name: baseline_bf16  # select random name
-  run_description: Reproduce val error of 1.4 per Karpathy
+  run_name: baseline_lr_2.5E-3  # select random name
+  run_description: ''
   project_name: gpt2_tinyshakespeare
 
 model:
@@ -42,7 +42,7 @@ training:
 optimizer:
   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
   module_kwargs:
-    learning_rate: 1.0E-3 # multiply LR by number of GPUs
+    learning_rate: 2.5E-3 # LRRT found 2.5E-3, Karpathy used 1.0E-3
     weight_decay: 0.1
     beta1: 0.9
     beta2: 0.99

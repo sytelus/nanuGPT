@@ -45,6 +45,15 @@
             "args": ["configs/train_gpt2/tinyshakespeare.yaml"]
         },
         {
+            "name": "LRRT GPT2-Shakespear",
+            "type": "python",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["configs/train_gpt2/tinyshakespeare.yaml;configs/hp_tuning/lr_range_test.yaml",
+                    "--logging.run_name lrrt_tinyshakespeare"]
+        },
+        {
             "name": "Train GPT2-Tinystories",
             "type": "python",
             "request": "launch",

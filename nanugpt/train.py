@@ -91,7 +91,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                     "run/device_batch_size": device_batch_size,
                     "run/global_batch_size": global_batch_size,
                     "run/local_batch_size": grad_acc_steps * device_batch_size,
-                    "run/tokens_per_step": global_batch_size * context_length
+                    "run/tokens_per_step": global_batch_size * context_length,
+                    "run/max_steps": max_steps,
                     })
 
     # get dataset
