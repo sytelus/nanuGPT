@@ -6,10 +6,10 @@ general:
 model:
   module: 'nanugpt.models.nanogpt.get_model'
   module_kwargs:
-    n_layer: 8
-    n_embd: 512
-    n_head: 8
-    context_length: 512
+    n_layer: 6
+    n_embd: 384
+    n_head: 6
+    context_length: 256
 
     mlp_dropout: 0.2 # dropout for feedforward layer
     attn_dropout: 0.2 # dropout for attention layer
@@ -29,9 +29,9 @@ tokenizer:
     encoding_name: 'utf-8'
 
 training:
-  device_batch_size: 32
-  max_steps: 1500  # Karpathy's original value is 5000 but dataset overfits after 2300 steps for global batch size of 64
-  global_batch_size: 128
+  device_batch_size: 64
+  max_steps: 2500  # Karpathy's original value is 5000 but dataset overfits after 2300 steps
+  global_batch_size: 64
 
 optimizer:
   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
@@ -44,7 +44,7 @@ optimizer:
 scheduler:
   module: 'nanugpt.schedulers.linear.get_scheduler'
   module_kwargs:
-    warmup_iters: 64
+    warmup_iters: 100
     max_iters: '_copy: /training/max_steps'
     end_factor: 1.0E-2
 
