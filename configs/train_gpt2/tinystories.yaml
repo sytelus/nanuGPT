@@ -13,18 +13,14 @@ training:
   max_steps: 16000 # 37500 for ctx=1024
   #global_batch_size: 480
 
-# optimizer:
-#   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
-#   module_kwargs:
-#     learning_rate: 6.0E-4
-#     weight_decay: 0.1
-#     beta1: 0.9
-#     beta2: 0.95
-#     eps: 1.0E-8 # pytorch default
+optimizer:
+  module_kwargs:
+    learning_rate: 600.0E-4 # LR found by LRRT
 
-# scheduler:
-#   module: 'nanugpt.schedulers.linear.get_scheduler'
-#   module_kwargs:
-#     warmup_iters: 2000
-#     end_factor: 1.0E-2
+scheduler:
+  module: 'nanugpt.schedulers.linear.get_scheduler'
+  module_kwargs:
+    warmup_iters: 1500
+    end_factor: 1.0E-3
+
 

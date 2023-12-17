@@ -70,7 +70,7 @@ training:
 optimizer:
   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
   module_kwargs:
-    learning_rate: 70.0E-4
+    learning_rate: 600.0E-4
     weight_decay: 0.1
     beta1: 0.9
     beta2: 0.95
@@ -81,7 +81,7 @@ scheduler:
   module_kwargs:
     warmup_iters: 1000 # 2000 for ctx=1024
     max_iters: '_copy: /training/max_steps'
-    end_factor: 1.0E-2
+    end_factor: 1.0E-3
 
 generate:
   checkpoint_path: '_copy: /general/out_dir'
