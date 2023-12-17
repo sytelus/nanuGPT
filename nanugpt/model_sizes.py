@@ -52,7 +52,7 @@ model_sizes = {
     'gpt3_1.3b': {
         'n_layer': 24,
         'n_embd': 2048,
-        'n_head': 24,
+        'n_head': 16,
         'context_length': 2048
     },
     'gpt3_2.7b': {
