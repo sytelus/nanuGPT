@@ -6,17 +6,17 @@ general:
 
 logging:
   enable_wandb: true
-  run_name: baseline_lr_2.5E-3  # select random name
-  run_description: ''
   project_name: gpt2_tinyshakespeare
+  run_name: 'gpt2_124m_tinyshakespeare_opt'
+  run_description: nil
 
 model:
   module: 'nanugpt.models.nanogpt.get_model'
   module_kwargs:
-    n_layer: 6
-    n_embd: 384
-    n_head: 6
-    context_length: 256
+    n_layer: 8
+    n_embd: 512
+    n_head: 8
+    context_length: 512
 
     mlp_dropout: 0.2 # dropout for feedforward layer
     attn_dropout: 0.2 # dropout for attention layer
@@ -27,6 +27,7 @@ data:
   module_kwargs:
     tokenized_train_path: '$DATA_ROOT/tokenized/tinyshakespeare/byte/train.bin'
     tokenized_val_path: '$DATA_ROOT/tokenized/tinyshakespeare/byte/val.bin'
+    eval_batch_size: 64
 
 tokenizer:
   _inherit: false # remove base config's settings
@@ -35,9 +36,9 @@ tokenizer:
     encoding_name: 'utf-8'
 
 training:
-  device_batch_size: 64
-  max_steps: 2500  # Karpathy's original value is 5000 but dataset overfits after 2300 steps
-  global_batch_size: 64
+  device_batch_size: 32
+  max_steps: 80  # Karpathy's original value is 5000 but dataset overfits after 2300 steps for global batch size of 64
+  global_batch_size: 2048
 
 optimizer:
   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'

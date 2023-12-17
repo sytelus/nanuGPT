@@ -4,18 +4,18 @@ general:
   out_dir: '~/out_dir/gpt2_124m_owt'
 
 logging:
-  project_name: 'gpt2_124m_owt'
+  project_name: 'gpt2_124m_owt_opt'
   enable_wandb: true
   summaries_stdout: true
   run_name: 'gpt2_124m_owt'  # select random name
-  run_description: 'GPT2 124M on OpenWebText'
+  run_description: nil
 
 data:
   module_kwargs:
     tokenized_train_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/train.bin'
     tokenized_val_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/val.bin'
 
-optimizer:
-  module_kwargs:
-    learning_rate: 15.0E-4 # LR found by LRRT
+# optimizer:
+#   module_kwargs:
+#     learning_rate: 15.0E-4 # LR found by LRRT
 

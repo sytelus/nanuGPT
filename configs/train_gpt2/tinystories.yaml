@@ -7,8 +7,8 @@ logging:
   project_name: 'gpt2_124m_tinystories'
   enable_wandb: true
   summaries_stdout: true
-  run_name: 'gpt124m_tinystories'  # null -> select random name
-  run_description: 'GPT124M tinystories'
+  run_name: 'gpt2_124m_ts_opt'
+  run_description: nil
 
 data:
   module_kwargs:
