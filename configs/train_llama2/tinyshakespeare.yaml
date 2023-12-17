@@ -25,7 +25,7 @@ tokenizer:
 
 training:
   device_batch_size: 64
-  max_steps: 500  # Karpathy's original value is 5000 but dataset overfits after 2300 steps
+  max_steps: 1000  # Karpathy's original value is 5000 but dataset overfits after 2300 steps
   global_batch_size: 64
 
 optimizer:
@@ -39,7 +39,7 @@ optimizer:
 scheduler:
   module: 'nanugpt.schedulers.linear.get_scheduler'
   module_kwargs:
-    warmup_iters: 20
+    warmup_iters: 40
     max_iters: '_copy: /training/max_steps'
     end_factor: 1.0E-2
 
