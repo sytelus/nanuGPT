@@ -70,7 +70,7 @@ training:
 optimizer:
   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
   module_kwargs:
-    learning_rate: 15.0E-4
+    learning_rate: 70.0E-4
     weight_decay: 0.1
     beta1: 0.9
     beta2: 0.95
