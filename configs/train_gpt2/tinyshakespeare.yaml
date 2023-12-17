@@ -49,7 +49,7 @@ scheduler:
     end_factor: 1.0E-2
 
 eval:
-  eval_every: 250
+  eval_every: 50
   eval_iters: 200 # number of samples to evaluate for dataset
   save_checkpoint: false
   checkoint_after: 0 # starts saving checkpoint after these steps
