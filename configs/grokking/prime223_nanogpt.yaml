@@ -13,5 +13,5 @@ optimizer:
   module: 'nanugpt.optimizers.adam_w.get_optim'
 
 scheduler:
-  module: 'nanugpt.schedulers.linear.get_scheduler'
+  module: 'nanugpt.schedulers.constant.get_scheduler'
 

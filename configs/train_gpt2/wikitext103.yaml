@@ -30,5 +30,5 @@ optimizer:
 #   module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
 #   module_kwargs:
 #     warmup_iters: 3000
-#     min_lr: 1.0E-5
+#     end_factor: 1.0E-2
 

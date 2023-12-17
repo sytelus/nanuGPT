@@ -1,4 +1,4 @@
-import math
+from typing import Optional
 import numpy as np
 
 from torch.optim.lr_scheduler import LRScheduler
@@ -6,16 +6,19 @@ from torch.optim.lr_scheduler import LRScheduler
 from nanugpt import glogging as logging
 
 class ConstantWithCooldownScheduler(LRScheduler):
-    def __init__(self, optimizer, const_lr:float, warmup_iters: int, max_steps: int, cooldown_iters: int,
+    def __init__(self, optimizer, const_lr:float,
+                 warmup_iters: int, max_iters: Optional[int], cooldown_iters: int,
+                 end_factor: float,
                  last_epoch=-1, verbose=False):
 
         self.const_lr = const_lr
 
         self.warmup_iters = warmup_iters
         self.cooldown_iters = cooldown_iters
-        self.max_steps = max_steps
-        self.schedule_iters = max(max_steps - warmup_iters - cooldown_iters, 0)
+        self.end_factor = end_factor
+        self.max_iters = max_iters if max_iters is not None else warmup_iters + cooldown_iters
 
+        assert warmup_iters + cooldown_iters <= self.max_iters, f"warmup_iters + cooldown_iters {warmup_iters}+{cooldown_iters} must be less than max_iters {self.max_iters}"
         super().__init__(optimizer, last_epoch, verbose)
 
     def get_lr(self):
@@ -25,24 +28,31 @@ class ConstantWithCooldownScheduler(LRScheduler):
         # get initial LR set in each group in optimizer
         init_lrs = np.fromiter((group['initial_lr'] for group in self.optimizer.param_groups), dtype=np.float32)
 
-         # 1) linear warmup for warmup_iters steps
+         # linear warmup for warmup_iters steps
         if self.last_epoch < self.warmup_iters:
             return (init_lrs * self.last_epoch / self.warmup_iters).tolist()
 
-        # 2) if it > max_steps, return cooldown learning rate
-        if self.last_epoch-self.warmup_iters > (self.max_steps - self.cooldown_iters):
-            cooldown_start = self.max_steps - self.last_epoch - 1
-            return (init_lrs * (cooldown_start / self.cooldown_iters)).tolist()
+        if self.last_epoch >= self.max_iters: # return min LR
+            return (init_lrs * self.end_factor).tolist()
 
-        # 3) in between, use constant learning rate
+        # if within cooldown, return linear decay down to min learning rate
+        if self.last_epoch > (self.max_iters - self.cooldown_iters):
+            min_lr = init_lrs * self.end_factor
+            decay_ratio = (self.max_iters - self.last_epoch - 1) / self.cooldown_iters
+            return ((init_lrs - min_lr) * decay_ratio + min_lr).tolist()
+
+        # in between, use constant learning rate
         return np.full_like(init_lrs, self.const_lr).tolist()
 
 
-def get_scheduler(optimizer, const_lr:float, warmup_iters: int, max_steps: int, cooldown_iters: int):
+def get_scheduler(optimizer, const_lr:float,
+                  warmup_iters: int, max_iters: Optional[int], cooldown_iters: int,
+                  end_factor:float):
     return ConstantWithCooldownScheduler(
-        optimizer=optimizer,
+            optimizer=optimizer,
             const_lr=const_lr,
             warmup_iters=warmup_iters,
-            max_steps=max_steps,
-            cooldown_iters=cooldown_iters
+            max_iters=max_iters,
+            cooldown_iters=cooldown_iters,
+            end_factor=end_factor,
         )

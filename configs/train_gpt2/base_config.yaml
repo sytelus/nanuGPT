@@ -80,8 +80,8 @@ scheduler:
   module: 'nanugpt.schedulers.nanogpt_cosine.get_scheduler'
   module_kwargs:
     warmup_iters: 2000
-    lr_decay_iters: '_copy: /training/max_steps'
-    min_lr: 6.0E-5
+    max_iters: '_copy: /training/max_steps'
+    end_factor: 1.0E-2
 
 generate:
   checkpoint_path: '_copy: /general/out_dir'
