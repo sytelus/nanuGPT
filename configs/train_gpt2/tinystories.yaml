@@ -23,7 +23,7 @@ training:
 #     eps: 1.0E-8 # pytorch default
 
 # scheduler:
-#   module: 'nanugpt.schedulers.cosine.get_scheduler'
+#   module: 'nanugpt.schedulers.linear.get_scheduler'
 #   module_kwargs:
 #     warmup_iters: 2000
 #     end_factor: 1.0E-2
