@@ -110,6 +110,7 @@ std_metrics['default'] = [
                             {"name": "train/best_loss", "step_metric":"train/step", "summary":"last", "goal":"min"},
                             {"name": "train/best_loss_step", "step_metric":"train/step", "summary":"last", "goal":"max"},
                             {"name": "train/ppl", "step_metric":"train/step", "summary":"last", "goal":"min"},
+                            {"name": "train/pre_clip_norm", "step_metric":"train/step", "summary":"last"},
                             {"name": "train/step_interval", "step_metric":"train/step", "summary":"last"},
                             {"name": "train/pred_loss", "step_metric":"train/step", "summary":"last"},
 
@@ -121,6 +122,8 @@ std_metrics['default'] = [
                             {"name": "train/step_ppl", "step_metric":"train/step", "summary":"last", "goal":"min"},
 
                             {"name": "val/best_loss", "step_metric":"train/step", "summary":"last", "goal":"min"},
+                            {"name": "val/val/generalization_gap", "step_metric":"train/step", "summary":"last", "goal":"min"},
+
                             {"name": "val/best_loss_step", "step_metric":"train/step", "summary":"last", "goal":"max"},
                             {"name": "val/loss", "step_metric":"train/step", "summary":"last", "goal":"min"},
                             {"name": "val/loss", "step_metric":"train/step", "summary":"last", "goal":"min"},

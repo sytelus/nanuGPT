@@ -205,9 +205,10 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         # --- end of gradient accumulation loop ---
 
         # clip the gradient
+        pre_clip_norm = -1.0
         if grad_clip != 0.0:
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            pre_clip_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip).item()
 
         # step the optimizer and scaler if training in fp16
         scaler.step(optimizer)
@@ -270,6 +271,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                 "train/loss_inversions": 100.0*loss_inversions/(step+1),
                 "train/loss_improvement_steps": 100.0*loss_improvement_steps/(step+1),
                 "train/pred_loss": pred_loss,
+                "train/pre_clip_norm": pre_clip_norm,
                 "run/lr": optimizer.param_groups[0]['lr'],
                 'run/tflops': transformer_tflops,
                 "run/elapsed_hr": elapsed_hr,
@@ -294,6 +296,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
             metrics.update({
                 "val/loss": val_loss,
+                "val/generalization_gap": val_loss - train_loss,
                 "val/acc": val_acc,
                 "val/ppl": math.exp(val_loss),
                 "val/best_loss": best_val_loss,
