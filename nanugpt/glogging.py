@@ -333,24 +333,23 @@ class Logger:
                         'sys/cpu_count': psutil.cpu_count(),
                         'sys/utils.free_disk_space': utils.free_disk_space(),
 
-                        'env/env_rank': os.environ.get('RANK', None),
-                        'env/env_local_rank': os.environ.get('LOCAL_RANK', None),
-                        'env/env_world_size': os.environ.get('WORLD_SIZE', None),
-                        'env/env_master_addr': os.environ.get('MASTER_ADDR', None),
-                        'env/env_master_port': os.environ.get('MASTER_PORT', None),
-                        'env/env_OMP_NUM_THREADS': os.environ.get('OMP_NUM_THREADS', None),
-                        'env/env_CUDA_HOME': os.environ.get('CUDA_HOME', None),
-                        'env/nccl_available': torch.distributed.is_nccl_available(), # type: ignore
-
+                        'env/RANK': os.environ.get('RANK', None),
+                        'env/LOCAL_RANK': os.environ.get('LOCAL_RANK', None),
+                        'env/WORLD_SIZE': os.environ.get('WORLD_SIZE', None),
+                        'env/MASTER_ADDR': os.environ.get('MASTER_ADDR', None),
+                        'env/MASTER_PORT': os.environ.get('MASTER_PORT', None),
+                        'env/OMP_NUM_THREADS': os.environ.get('OMP_NUM_THREADS', None),
+                        'env/CUDA_HOME': os.environ.get('CUDA_HOME', None),
+                        'env/PYTORCH_CUDA_ALLOC_CONF': os.environ.get('PYTORCH_CUDA_ALLOC_CONF', None),
+                        'env/CUDA_VISIBLE_DEVICES': os.environ.get('CUDA_VISIBLE_DEVICES', None),
+                        'cuda/nccl_available': torch.distributed.is_nccl_available(), # type: ignore
                         'cuda/device_name': torch.cuda.get_device_name() if torch.cuda.is_available() else '<not_cuda>',
                         'cuda/device_count': torch.cuda.device_count(),
                         'cuda/cudnn.enabled': torch.backends.cudnn.enabled, # type: ignore
                         'cuda/cudnn.benchmark': torch.backends.cudnn.benchmark, # type: ignore
                         'cuda/cudnn.deterministic': torch.backends.cudnn.deterministic, # type: ignore
                         'cuda/cudnn.version': torch.backends.cudnn.version(), # type: ignore
-                        'cuda/CUDA_VISIBLE_DEVICES': os.environ['CUDA_VISIBLE_DEVICES']
-                                if 'CUDA_VISIBLE_DEVICES' in os.environ else 'NotSet',
-
+                        'cuda/CUDA_VISIBLE_DEVICES': os.environ.get('CUDA_VISIBLE_DEVICES', None),
                         'dist/get_world_size': torch.distributed.get_world_size() if torch.distributed.is_initialized() else None, # type: ignore
                         'dist/get_rank': torch.distributed.get_rank() if torch.distributed.is_initialized() else None, # type: ignore
                         'dist/torch.distributed.is_initialized': torch.distributed.is_initialized(), # type: ignore
