@@ -228,8 +228,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             dist.reduce(int_dist, dst=0,op=dist.ReduceOp.SUM)
             if torch_info.is_master:
                 loss_sum,fwd_bwd_interval_sum, pre_clip_norm_sum = tuple(fp32_dist.tolist())
-                fwd_bwd_interval = fwd_bwd_interval_sum
-                pre_clip_norm = pre_clip_norm_sum
+                # use sum of all worker values so we have more accurate idea of outliers
+                fwd_bwd_interval, pre_clip_norm = fwd_bwd_interval_sum, pre_clip_norm_sum
                 correct_sum, step_preds_count, step_sample_count,step_token_count = tuple(int_dist.tolist())
 
         total_samples += step_sample_count

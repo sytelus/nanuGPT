@@ -5,7 +5,6 @@ import dataclasses
 from contextlib import AbstractContextManager, nullcontext
 from packaging import version
 import json
-import atexit
 
 import torch
 

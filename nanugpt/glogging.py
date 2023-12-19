@@ -377,6 +377,21 @@ class Logger:
         if self.has_shutdown:
             return
 
+        # log current exception
+        try:
+            if sys.exc_info()[0] is not None:
+                exc_type, exc_value, traceback = sys.exc_info()
+                self.error("Current Exception:", exception_instance=exc_value, stack_info=True)
+
+                # Check for CUDA OOM error
+                if isinstance(exc_value, torch.cuda.CudaError) and 'out of memory' in str(exc_value):
+                    # Check if the platform is Linux
+                    if not utils.is_windows():
+                        cuda_summary = torch.cuda.memory_summary()
+                        self.info(cuda_summary)
+        except Exception as e:
+            self.error("Exception occured while logging current exception:", exception_instance=e, stack_info=True)
+
         if write_total_time:
             self.summary({
                             'run/log_filepath': self.log_filepath,
