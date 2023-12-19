@@ -280,6 +280,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         # is it time to evaluate? We evaluate after 1st step to get initial loss.
         eval_performed = False
         if torch_info.is_master and ((step+1) % eval_every == 0 or step+1 >= max_steps):
+            torch.cuda.empty_cache() # clear cache before evaluation
+
             eval_performed = True
             eval_count += 1
             eval_interval = timeit.default_timer() - last_eval_time
@@ -308,6 +310,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                     "test/acc": test_acc,
                 })
             last_eval_time = timeit.default_timer()
+
+            torch.cuda.empty_cache() # clear cache after evaluation
 
         # if this is last step or enough time has passed, save checkpoint
         if save_checkpoint and \
