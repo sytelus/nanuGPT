@@ -222,13 +222,14 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         if torch_info.is_distributed:
             dist.barrier()
             # reduce tensors to rank 0 to get numbers from all ranks
-            fp32_dist = torch.tensor([loss_sum, fwd_bwd_interval], dtype=torch.float32, device=device)
+            fp32_dist = torch.tensor([loss_sum, fwd_bwd_interval, pre_clip_norm], dtype=torch.float32, device=device)
             int_dist = torch.tensor([correct_sum, step_preds_count, step_sample_count, step_token_count], dtype=torch.int64, device=device)
             dist.reduce(fp32_dist, dst=0, op=dist.ReduceOp.SUM)
             dist.reduce(int_dist, dst=0,op=dist.ReduceOp.SUM)
             if torch_info.is_master:
-                loss_sum,fwd_bwd_interval_sum = tuple(fp32_dist.tolist())
+                loss_sum,fwd_bwd_interval_sum, pre_clip_norm_sum = tuple(fp32_dist.tolist())
                 fwd_bwd_interval = fwd_bwd_interval_sum
+                pre_clip_norm = pre_clip_norm_sum
                 correct_sum, step_preds_count, step_sample_count,step_token_count = tuple(int_dist.tolist())
 
         total_samples += step_sample_count
