@@ -5,7 +5,7 @@
 general:
   project_name: 'train_gpt2o'
   run_name: '_time:' # default run name is timestamp
-  run_description: nil
+  run_description: null
   out_dir: '~/out_dir/$project_name/$run_name'
   device_type: 'cuda'            # auto select if blank or cpu, cuda
   distributed_backend: 'nccl'       # nccl, gloo, mpi, horovod)
@@ -88,7 +88,7 @@ generate:
   checkpoint_name: 'checkpoint_best.pt'
 
 eval:
-  eval_every: 1000
+  eval_every: 100
   eval_iters: 200 # number of samples to evaluate for dataset
   save_checkpoint: true
   checkoint_after: 0 # starts saving checkpoint after these steps

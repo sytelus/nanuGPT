@@ -1,7 +1,7 @@
 general:
   project_name: 'tokenization'
   run_name: '_time:' # default run name is timestamp
-  run_description: nil
+  run_description: null
   out_dir: '~/out_dir/$project_name/$run_name'
   device_type: 'cuda'            # auto select if blank or cpu, cuda
   distributed_backend: 'nccl'       # nccl, gloo, mpi, horovod)
@@ -48,7 +48,7 @@ data:
     eval_batch_size: 32768 # 2^15=32768
     data_loader_seed: 8
     context_length: '_copy: /model/module_kwargs/context_length'
-    prime: &prime nil # to be set by overriden config
+    prime: &prime null # to be set by overriden config
 
 tokenizer:
   module: 'nanugpt.tokenizers.grokking_tokenizer.get_tokenizer_factory'
