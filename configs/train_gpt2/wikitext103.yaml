@@ -18,15 +18,13 @@ data:
 #     context_length: 1024
 
 training:
-  max_steps: 2500 # for 8k steps, val loss stops improving after 4k for ctx=1024
+  max_steps: 5000 # for 8k steps, val loss stops improving after 4k for ctx=1024
 
 optimizer:
   module_kwargs:
-    learning_rate: 50.0E-4 # LRRT is good unil 500E-4 but NaNs starts flowing at 200E-4
+    learning_rate: 12.0E-4 # LRRT is good unil 500E-4 but NaNs starts flowing at 200E-4
 
 scheduler:
-  module: 'nanugpt.schedulers.linear.get_scheduler'
   module_kwargs:
-    warmup_iters: 250
-    end_factor: 1.0E-3
+    warmup_iters: 500
 

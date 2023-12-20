@@ -1,9 +1,6 @@
-# base config is designed for GPT2/OpenWebText with finetuning of model sizes, global batch sizes and LR
-# specifically, model config is in powers of 2, context length increased to 2k, global batch size increased to 1024
-
-
+# base config is designed for GPT2/OpenWebText with NanoGPT defaults
 general:
-  project_name: 'train_gpt2o'
+  project_name: 'train_gpt2'
   run_name: '_time:' # default run name is timestamp
   run_description: null
   out_dir: '~/out_dir/$project_name/$run_name'
@@ -34,10 +31,10 @@ logging:
 model:
   module: 'nanugpt.models.nanogpt.get_model'
   module_kwargs:
-    n_layer: 16
-    n_embd: 1024
-    n_head: 16
-    context_length: 2048
+    n_layer: 12
+    n_embd: 768
+    n_head: 12
+    context_length: 1024
 
 tokenizer:
   module: 'nanugpt.tokenizers.tiktoken_wrap.get_tokenizer_factory'
@@ -52,7 +49,7 @@ data:
   module_kwargs:
     dtype: 'uint16'
     device_batch_size: '_copy: /training/device_batch_size'
-    eval_batch_size: 16
+    eval_batch_size: 32 # 2^15=32768
     data_loader_seed: 8
     context_length: '_copy: /model/module_kwargs/context_length'
     tokenized_train_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/train.bin'
@@ -60,17 +57,17 @@ data:
     tokenized_test_path: null
 
 training:
-  device_batch_size: 8
-  max_steps: 180000    # for OpenWebText/9B tokens
+  device_batch_size: 12
+  max_steps: 600000    # for OpenWebText/9B tokens
   enable_train_log: true
   log_every: 20
   grad_clip: 1.0 # disabled if 0.0
-  global_batch_size: 1024
+  global_batch_size: 480
 
 optimizer:
   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
   module_kwargs:
-    learning_rate: 600.0E-4
+    learning_rate: 6.0E-4
     weight_decay: 0.1
     beta1: 0.9
     beta2: 0.95
@@ -79,9 +76,9 @@ optimizer:
 scheduler:
   module: 'nanugpt.schedulers.linear.get_scheduler'
   module_kwargs:
-    warmup_iters: 1000 # 2000 for ctx=1024
+    warmup_iters: 2000
     max_iters: '_copy: /training/max_steps'
-    end_factor: 1.0E-3
+    end_factor: 1.0E-1
 
 generate:
   checkpoint_path: '_copy: /general/out_dir'
