@@ -25,6 +25,8 @@ from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 import logging
 from packaging import version
+import pdb
+import traceback
 
 import yaml
 
@@ -704,3 +706,10 @@ def infinite_iter(iterable:Iterable[Any])->Any:
             yield next(it)
         except StopIteration:
             it = iter(iterable)
+
+def auto_debug_handler(exctype, value, tb):
+    traceback.print_exception(exctype, value, tb)
+    pdb.post_mortem(tb)
+
+def auto_debug():
+    sys.excepthook = auto_debug_handler
