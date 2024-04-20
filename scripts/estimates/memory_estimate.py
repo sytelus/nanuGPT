@@ -70,10 +70,10 @@ def get_mem_size(d_model, n_layers, vocab_size, n_heads, bsz, seq_len):
     bufs = 4 * B
     weights = 4 * N
     grads = 4 * N
-    adam = 8 * N
+    adam = (4+4) * N
     logits = 2 * bsz * seq_len * vocab_size
 
-    kernels = 8_519_680 # bytes, CuBLASS workspace, see appendix of post
+    kernels = 8_519_680 # bytes, CuBLASS creates its own workspace, see appendix of post
 
     GB = 1024 ** 3
     MB = 1024 ** 2
