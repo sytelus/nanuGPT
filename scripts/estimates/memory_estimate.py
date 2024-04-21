@@ -1,55 +1,61 @@
 # Adopted from: https://colab.research.google.com/drive/1Zr53EaAi5LQueyhbZv4OMZrkaQGuOWe0?usp=sharing#scrollTo=PE-G5hNjl0dF
 
-def get_num_params(d_model, n_layers, vocab_size, include_embedding=True, bias=False):
-    bias = bias * 1
+def get_num_params(d_model:int, n_layers:int, vocab_size:int, include_embedding, layer_norm_bias:bool, tied_emb:bool):
+    wpe = seq_len * d_model # possitional embedding
 
-    wpe = seq_len * d_model
-    # wte shared with head so don't count
-    model_ln = d_model + d_model * bias
-    head_params = d_model * vocab_size
+    linear_head = d_model * vocab_size   # final projection to vocab size layer
+    wte = linear_head if tied_emb else 0 # token embedding
+
+    # layer norm has one param for each feature
+    layer_norm = d_model + (d_model if layer_norm_bias else 0)
+
 
     # atn_block
-    qkv = d_model * 3 * d_model
-    w_out = d_model ** 2
-    ln = model_ln
-    attn_params = qkv + w_out + ln
+    qkv = d_model * 3 * d_model # matrix that project q,k,v first
+    w_out = d_model * d_model # weight matrix that project the output of the attention block
+    attn_params = qkv + w_out + layer_norm*2  # layer norm is applied before and after attention
 
     # ff
-    ff = d_model * d_model * 4
-    ln = model_ln
-    ff_params = ff * 2 + ln
+    ff1 = d_model * (d_model * 4)
+    ff2 = d_model * (d_model * 4)
+    ff_params = ff1 + ff2
 
-    params = (attn_params + ff_params) * n_layers + model_ln + head_params
+    params = (attn_params + ff_params) * n_layers + layer_norm + linear_head # final layer norm and linear head
     if include_embedding:
-        params += wpe
+        params += wpe + wte
     return params
 
-def get_activations_mem(d_model, n_layers, vocab_size, n_heads, bsz, seq_len):
+def get_activations_mem(d_model, n_layers, vocab_size, n_heads, bsz, seq_len,
+                        ff_factor=4,
+                        layer_norm_size=4, attn_fp_size=2, softmax_fp_size=4,
+                        ff_fp_size=2, loss_fp_size=2):
     # activations
-    layer_norm = bsz * seq_len * d_model * 4  # FP32
+    tokens = bsz * seq_len * d_model  # Number of elements (comes up a lot)
 
-    tokens = bsz * seq_len * d_model   # Number of elements (comes up a lot)
+    layer_norm = tokens * layer_norm_size # layer norms are usually kept at FP32
 
-    # attn block
-    QKV = tokens * 2  # FP16
-    QKT = 2 * tokens * 2  # FP16
-    softmax = bsz * n_heads * seq_len ** 2 * 4  # FP32
-    PV = softmax / 2 + tokens * 2  # FP16
-    out_proj = tokens * 2  # FP16
-    attn_act = layer_norm + QKV + QKT + softmax + PV + out_proj
+
+    # attn block - these activations for individual layers are kept live so grads can be computed on backward pass
+    proj = bsz * seq_len * d_model * 3 * attn_fp_size # Q, K, V
+    attn_product = bsz * n_heads * seq_len * seq_len * attn_fp_size # QK^T
+    softmax = bsz * n_heads * seq_len * seq_len * softmax_fp_size
+    val_product = bsz * seq_len * d_model * attn_fp_size # softmax(QK^T)V
+    out_proj = tokens * attn_fp_size
+    attn_act = layer_norm + proj + attn_product + softmax + val_product + out_proj
 
     # FF block
-    ff1 = tokens * 2  # FP16
-    gelu = tokens * 4 * 2  # FP16
-    ff2 = tokens * 4 * 2  # FP16
+    ff1 = tokens * ff_fp_size  # FP16
+    gelu = tokens * ff_factor * ff_fp_size  # FP16
+    ff2 = tokens * ff_factor * ff_fp_size  # FP16
     ff_act = layer_norm + ff1 + gelu + ff2
 
-    final_layer = tokens * 2  # FP16
+    final_layer = tokens * ff_fp_size  # FP16
     model_acts = layer_norm + (attn_act + ff_act) * n_layers + final_layer
 
     # extras
-    cross_entropy1 = bsz * seq_len * vocab_size * 2  # FP16
-    cross_entropy2 = cross_entropy1 * 2  # FP32?
+    cross_entropy1 = bsz * seq_len * vocab_size * loss_fp_size
+    # Pytorch stores FP32 version as well?
+    cross_entropy2 = bsz * seq_len * vocab_size * 4
 
     # bwds = cross_entropy2
     extras = cross_entropy1 + cross_entropy2
@@ -57,14 +63,15 @@ def get_activations_mem(d_model, n_layers, vocab_size, n_heads, bsz, seq_len):
     return mem
 
 
-def get_inputs_mem(bsz, seq_len):
-    return bsz * seq_len * 8 * 2  # int64 input and targets
+def get_inputs_mem(bsz, seq_len, token_size):
+    return bsz * seq_len * token_size * 2  # int64 input and targets
 
 
 def get_mem_size(d_model, n_layers, vocab_size, n_heads, bsz, seq_len):
     MB = 1024 ** 2
-    N = get_num_params(d_model, n_layers, vocab_size)
+    N = get_num_params(d_model, n_layers, vocab_size, True, True, True)
     B = n_layers * seq_len ** 2
+    token_size = 4  #32-bit token
 
     # all in bytes
     bufs = 4 * B
@@ -81,41 +88,44 @@ def get_mem_size(d_model, n_layers, vocab_size, n_heads, bsz, seq_len):
     BYTES = 1
     unit = GB
 
-    # Steady State
-    model = bufs + weights
-    inputs_mem = get_inputs_mem(bsz, seq_len)
-    total_mem = model + grads + adam + kernels * 2 + inputs_mem
-    print(f"Model memory (bytes): {total_mem:,.0f}", )
+    # # Steady State
+    # model = bufs + weights
+    # inputs_mem = get_inputs_mem(bsz, seq_len)
+    # total_mem = model + grads + adam + kernels * 2 + inputs_mem
+    # print(f"Model memory (bytes): {total_mem:,.0f}", )
 
     # First call
-    n_params = get_num_params(d_model, n_layers, vocab_size)
-    inputs_mem = get_inputs_mem(bsz, seq_len)
-    actv_mem = get_activations_mem(d_model, n_layers, vocab_size, n_heads, bsz, seq_len) / unit
+    n_params = get_num_params(d_model, n_layers, vocab_size, True, True, True)
+    inputs_mem = get_inputs_mem(bsz, seq_len, token_size)
+    actv_mem = get_activations_mem(d_model, n_layers, vocab_size, n_heads, bsz, seq_len)
 
-    mem_pre_forward = ((kernels * 2) + inputs_mem +  weights + bufs) / unit
-    print(f'{mem_pre_forward=:,.3f}')
+    # mem_pre_forward = ((kernels * 2) + inputs_mem +  weights + bufs) / unit
+    # print(f'{mem_pre_forward=:,.3f}')
 
-    mem_post_forward = mem_pre_forward + actv_mem / unit
-    print(f'{mem_post_forward=:,.3f}')
+    # mem_post_forward = mem_pre_forward + actv_mem / unit
+    # print(f'{mem_post_forward=:,.3f}')
 
-    mem_post_step = mem_pre_forward + (grads + adam) / unit
-    print(f'{mem_post_step=:,.3f}')
+    # mem_post_step = mem_pre_forward + (grads + adam) / unit
+    # print(f'{mem_post_step=:,.3f}')
 
-    # Other calls
-    mem_pre_forward = ((kernels * 2) + get_inputs_mem(bsz, seq_len) +  weights + bufs + adam + grads)  / unit
-    print(f'{mem_pre_forward=:,.3f}')
+    # # Other calls
+    # mem_pre_forward = ((kernels * 2) + get_inputs_mem(bsz, seq_len) +  weights + bufs + adam + grads)  / unit
+    # print(f'{mem_pre_forward=:,.3f}')
 
-    mem_post_forward = mem_pre_forward + actv_mem
-    print(f'{mem_post_forward=:,.3f}')
+    # mem_post_forward = mem_pre_forward + actv_mem
+    # print(f'{mem_post_forward=:,.3f}')
 
-    mem_post_step = mem_pre_forward
-    print(f'{mem_post_step=:,.3f}')
+    # mem_post_step = mem_pre_forward
+    # print(f'{mem_post_step=:,.3f}')
 
     # peak estimation
     # http://erees.dev/transformer-memory/#total-peak-memory
     # additional part is the extra Nl
-    mem_post_step_peak_allocated = mem_post_forward + (bsz * seq_len * vocab_size * 4) / unit
-    print(f'{mem_post_step_peak_allocated=:,.3f}')
+    # mem_post_step_peak_allocated = mem_post_forward + (bsz * seq_len * vocab_size * 4) / unit
+    extra = (bsz * seq_len * vocab_size * 4) # 32-bit extra
+    mem_post_step_peak_allocated = kernels*2 + bufs + inputs_mem + n_params*4 + actv_mem + logits + grads + adam + extra
+
+    print(f'{mem_post_step_peak_allocated}')
 
 
 # GPT2

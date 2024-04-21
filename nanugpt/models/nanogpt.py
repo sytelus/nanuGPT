@@ -168,17 +168,21 @@ class GPT(nn.Module):
     def __init__(self, config: GPTConfig):
         super().__init__()
         assert config.vocab_size is not None
-        assert config.block_size is not None
+        assert config.block_size is not None # seq_len
         self.config = config
 
         self.transformer = nn.ModuleDict(dict(
-            wte = nn.Embedding(config.vocab_size, config.n_embd),
+            wte = nn.Embedding(config.vocab_size, config.n_embd), # n_embd === hidden_size === d_model
             wpe = nn.Embedding(config.block_size, config.n_embd),
             embed_dropout = nn.Dropout(config.embed_dropout),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             ln_f = LayerNorm(config.n_embd, bias=config.layer_norm_bias),
         ))
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=config.mlp_bias)
+
+        # LM head is last layer which projects the final hidden state to vocab_size
+        # we keep bias False to match with embedding layer which has no bias
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
         # This behavior is deprecated and will be an error in future versions"
@@ -222,6 +226,8 @@ class GPT(nn.Module):
         x = self.transformer.embed_dropout(tok_emb + pos_emb)
         for block in self.transformer.h:
             x = block(x)
+
+        # apply layer norm. Typically layer norm is applied before and after attention but not after MLP.
         x = self.transformer.ln_f(x) # [batch, seq_len, emb_dim]
 
         if not only_last:

@@ -129,9 +129,12 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                           enable_fused=torch_info.is_cuda,
                           **optimizer_config['module_kwargs'])
 
+    # note that model should be initialized before call to DDP
+    # as DDP broadcasts initial weight from rank 0 to all other ranks
     if torch_info.is_distributed:
         model = DistributedDataParallel(model,
-                                        device_ids=[torch_info.local_rank])
+                                        device_ids=[torch_info.local_rank],
+                                        gradient_as_bucket_view=True,) # grads are kept in reducer buckets avoiding 2x memory usage
 
     # scheduler provides warmup and then constant lr
     scheduler = get_scheduler(optimizer, **scheduler_config['module_kwargs'])
