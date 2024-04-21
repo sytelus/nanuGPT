@@ -1,4 +1,5 @@
 # Adopted from: https://colab.research.google.com/drive/1Zr53EaAi5LQueyhbZv4OMZrkaQGuOWe0?usp=sharing#scrollTo=PE-G5hNjl0dF
+# Blog post: https://erees.dev/transformer-memory/
 
 def get_num_params(d_model:int, n_layers:int, vocab_size:int, include_embedding, layer_norm_bias:bool, tied_emb:bool):
     wpe = seq_len * d_model # possitional embedding
