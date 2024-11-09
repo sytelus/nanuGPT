@@ -8,13 +8,13 @@ from nanugpt import glogging as logging
 class CosineScheduler(LRScheduler):
     def __init__(self, optimizer, warmup_iters: int, max_iters: int,
                  end_factor: float,
-                 last_epoch=-1, verbose=False):
+                 last_epoch=-1):
         self.end_factor = end_factor
         self.warmup_iters = warmup_iters
         self.max_iters = max_iters  # after this LR stays constant to value of init_lrs * end_factor
 
         assert warmup_iters <= max_iters, f"warmup_iters {warmup_iters} must be less than max_iters {max_iters}"
-        super().__init__(optimizer, last_epoch, verbose)
+        super().__init__(optimizer, last_epoch)
 
     def get_lr(self):
         if not self._get_lr_called_within_step: # type: ignore

@@ -9,7 +9,7 @@ class ConstantWithCooldownScheduler(LRScheduler):
     def __init__(self, optimizer, const_lr:float,
                  warmup_iters: int, max_iters: Optional[int], cooldown_iters: int,
                  end_factor: float,
-                 last_epoch=-1, verbose=False):
+                 last_epoch=-1):
 
         self.const_lr = const_lr
 
@@ -19,7 +19,7 @@ class ConstantWithCooldownScheduler(LRScheduler):
         self.max_iters = max_iters if max_iters is not None else warmup_iters + cooldown_iters
 
         assert warmup_iters + cooldown_iters <= self.max_iters, f"warmup_iters + cooldown_iters {warmup_iters}+{cooldown_iters} must be less than max_iters {self.max_iters}"
-        super().__init__(optimizer, last_epoch, verbose)
+        super().__init__(optimizer, last_epoch)
 
     def get_lr(self):
         if not self._get_lr_called_within_step: # type: ignore

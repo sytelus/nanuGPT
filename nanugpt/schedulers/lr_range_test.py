@@ -9,10 +9,10 @@ from nanugpt import glogging as logging
 
 class LRRangeTestScheduler(LRScheduler):
     def __init__(self, optimizer, max_steps:int, range_coeff:float=5.0,
-                 last_epoch=-1, verbose=False):
+                 last_epoch=-1):
         self.max_steps = max_steps
         self.range_coeff = range_coeff
-        super().__init__(optimizer, last_epoch, verbose)
+        super().__init__(optimizer, last_epoch)
 
     def get_lr(self):
         if not self._get_lr_called_within_step:
