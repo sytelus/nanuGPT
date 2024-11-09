@@ -141,7 +141,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
     # initialize a GradScaler. If enabled=False scaler is a no-op
     # we need loss scaling only for fp16 due to reduced precision, not bf16 or fp32
-    scaler = torch.cuda.amp.GradScaler(enabled=(torch_info.pt_dtype == torch.float16))
+    scaler = torch.cuda.GradScaler("cuda", enabled=(torch_info.pt_dtype == torch.float16))
 
     if torch_info.is_master:
         out_dir = utils.full_path(out_dir, create=True)

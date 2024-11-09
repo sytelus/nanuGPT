@@ -145,7 +145,7 @@ def measure_global_batch(config:Mapping,
 
     # initialize a GradScaler. If enabled=False scaler is a no-op
     # we need loss scaling only for fp16 due to reduced precision, not bf16 or fp32
-    scaler = torch.cuda.amp.GradScaler(enabled=(torch_info.pt_dtype == torch.float16))
+    scaler = torch.amp.GradScaler("cuda", enabled=(torch_info.pt_dtype == torch.float16))
 
     batch_iter = iter(infinite_batches(train_loader))
 
