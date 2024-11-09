@@ -151,7 +151,8 @@ def create_wandb_logger(project_name, run_name,
                         metrics:List[Dict[str, Any]],
                         description:Optional[str]=None):
 
-    wandb.login() # use API key from WANDB_API_KEY env variable
+    wandb_host = os.environ.get('WANDB_HOST', None)
+    wandb.login(host=wandb_host) # use API key from WANDB_API_KEY env variable
 
     run = wandb.init(project=project_name, name=run_name,
                      save_code=True, notes=description)
