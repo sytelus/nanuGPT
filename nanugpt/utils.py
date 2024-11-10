@@ -43,11 +43,46 @@ if 'pydevd' in sys.modules:
 def is_debugging()->bool:
     return 'vs_code_debugging' in os.environ and os.environ['vs_code_debugging']=='True'
 
+
+def expandvars_win(input_path: str) -> str:
+    from pathlib import Path
+    # 1. Check if OS is Windows
+    if os.name != 'nt':
+        return input_path
+
+    # 2. Detect if input string has $
+    if '$' not in input_path:
+        return input_path
+
+    # 3. Use PathLib to get individual parts of the path
+    parts = Path(input_path).parts
+    expanded_parts = []
+
+    for part in parts:
+        # 4. Check if part starts with $ and handle environment variable
+        if part.startswith('$'):
+            var_name = part[1:]  # Get variable name without $
+            env_value = os.getenv(var_name)
+            if env_value:  # Replace if variable exists
+                # Use Path(env_value) directly and split it into parts
+                env_parts = Path(env_value).parts
+                expanded_parts.extend(env_parts)  # Add individual parts of env_value
+            else:
+                expanded_parts.append(part)  # Keep original part if not found
+        else:
+            expanded_parts.append(part)
+
+    # 5. Join back all parts using Path to handle correct separators and resolve the final path
+    final_path = Path(*expanded_parts)
+    return str(final_path)
+
+
 def full_path(path:str, create=False)->str:
     assert path
     path = os.path.realpath(
             os.path.expanduser(
-                os.path.expandvars(path)))
+                expandvars_win(
+                    os.path.expandvars(path))))
     if create:
         os.makedirs(path, exist_ok=True)
     return path
