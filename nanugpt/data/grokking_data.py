@@ -5,6 +5,8 @@ from torch.utils.data import DataLoader
 
 from nanugpt.tokenizers.grokking_tokenizer import GrokkingTokenizer, get_tokenizer_factory, DIVISION_MODULO_OPERATIONS, ALL_OPERATIONS
 
+# Implements get_data interface for Grokking dataset
+
 def operation_mod_p_data(operation: str, p: int, tokenizer: GrokkingTokenizer):
     """
     a◦b (mod p) for 0 <= a < p, 1 <= b < p if operation in DIVISION_MODULO_OPERATIONS
