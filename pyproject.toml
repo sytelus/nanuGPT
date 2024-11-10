@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=65.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nanugpt"
+version = "0.3.6"
+authors = [
+    { name = "Shital Shah" }
+]
+description = "Simple, reliable and well tested training code for quick experiments with transformer based models"
+readme = "README.md"
+license = { text = "MIT" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research"
+]
+dependencies = [
+    "einops",
+    "tiktoken",
+    "wandb",
+    "mlflow",
+    "sentencepiece",
+    "tokenizers",
+    "transformers",
+    "datasets",
+    "tqdm",
+    "matplotlib",
+    "rich"
+]
+
+[project.urls]
+Homepage = "https://github.com/sytelus/nanugpt"

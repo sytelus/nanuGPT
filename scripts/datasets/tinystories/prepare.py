@@ -10,13 +10,13 @@ if __name__ == '__main__':
     dataset_save_dir = os.environ.get('DATA_ROOT', os.path.dirname(__file__))
 
     tokenize_dataset.tokenize(hf_name_path="roneneldan/TinyStories",
-                            dataset_name="tinystories_v1",
+                            text_column="text",
+                            tokenizer_factory=utils.get_tokenizer_factory(4),
                             tokenized_out_dir=tokenized_out_dir,
-                            data_files={
+                            hf_data_files={
                                 "train": "TinyStories-train.txt",
                                 "validation": "TinyStories-valid.txt",
                             },
-                            dataset_save_dir=utils.full_path(os.path.join(dataset_save_dir, 'tinystories_v1'), create=True),
                             )
 
     tokenize_dataset.tokenize(dataset_path="roneneldan/TinyStories",
