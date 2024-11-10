@@ -6,6 +6,12 @@ from torch.utils.data import Dataset
 
 from nanugpt import utils
 
+"""
+This module implements the `get_data` interface for tokenized data allowing
+for fast and memory efficient data loading. The data is loaded in a memmap file
+and accessed by a custom Dataset and DataLoader which have same interface as
+PyTorch's Dataset and DataLoader.
+"""
 class MemmapDataset(Dataset):
     """Wraps memmap array as a torch Dataset so that we can access sequence starting at any index"""
     def __init__(self, data:np.memmap, context_length:int):

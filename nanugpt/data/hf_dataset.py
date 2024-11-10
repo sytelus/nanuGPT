@@ -10,40 +10,81 @@ from nanugpt.tokenizers.tokenizer_base import TokenizerBase
 from nanugpt import utils
 from nanugpt import glogging as logging
 
+"""
+Module implementing `get_data` interface for HuggingFace datasets. Appropriate val and test splits are created if necessary. The dataloader is setup with on-the-fly tokenization.
+
+Additional `get_datasets` function is provided to return the raw dataset.
+
+This module allows to use most HugingFace text datasets without requiring pre-tokenization.
+"""
 
 def get_datasets(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Optional[str], hf_data_files:Optional[str], hf_revision:Optional[str],
              train_split:Optional[str], val_split:Optional[str], test_split:Optional[str], hf_cache_dir:Optional[str],
              hf_sample_by:Optional[str],
              val_fraction:Optional[float], test_fraction:Optional[float],
              data_loader_seed:int)->Tuple[DatasetDict, Optional[str], Optional[str], Optional[str]] :
+    """
+    Load HuggingFace dataset. The huggingface dataset is specified by dataset name and can be further filtered by specifying the subset name (which could be specific cawls, smaller samples etc) and/or specific directory and/or specific files. This is done by `load_dataset` function.
 
-    if hf_name_path != 'text' and os.path.isdir(utils.full_path(hf_name_path)):
+    For locally saved HF datasets, we use `load_from_disk`. Note that these are cached datasets which should use `load_dataset` which will hit the cache automatically. Instead these are usually the datasets created by `save_to_disk` which creates arrow files.
+
+    Another type of local datasets is bunch of text, csv, json etc files. The can by loaed by `load_dataset` but with `path="text"` etc. In this case, the `hf_data_files` should be a dictionary with keys as splits and values as list of file paths.
+
+    Parameters:
+    hf_name_path (str): Local path or name of the HuggingFace dataset (example: "HuggingFaceFW/fineweb").
+    hf_dataset_name (Optional[str]): Subset name to limit to (example: "sample-10BT").
+    hf_data_dir (Optional[str]): Directory to limit the search for data files that is in "Files and versions" tab (example: "sample/10BT").
+    hf_data_files (Optional[str]): Data files to limit to (example: "012_00000.parquet")
+    hf_revision (Optional[str]): Dataset revision to use.
+    train_split (Optional[str]): Name of the training split.
+    val_split (Optional[str]): Name of the validation split.
+    test_split (Optional[str]): Name of the test split.
+    hf_cache_dir (Optional[str]): Directory to cache the dataset.
+    hf_sample_by (Optional[str]): Sampling method.
+    val_fraction (Optional[float]): Fraction of the dataset to use for validation.
+    test_fraction (Optional[float]): Fraction of the dataset to use for testing.
+    data_loader_seed (int): Seed for data shuffling.
+
+    Returns:
+    Tuple[DatasetDict, Optional[str], Optional[str], Optional[str]]:
+        A tuple containing the dataset dictionary and the names of the train, validation, and test splits.
+    """
+
+    # if name is valid local path, load from disk using load_from_disk
+    if os.path.isdir(os.path.expanduser(os.path.expandvars(hf_name_path))):
         hf_name_path = utils.full_path(hf_name_path)
         logging.info(f'Loading dataset from disk {hf_name_path}...')
         dataset = load_from_disk(hf_name_path)
     else:
-        if hf_name_path == 'text' and isinstance(hf_data_files, MutableMapping):
-            logging.info(f'Loading text file(s) from disk {hf_name_path}...')
+        # if we are trying to load text, csv, json etc from local disk, hf_name_path should be "text" etc
+        # in this case, make sure local paths are expanded
+        if '/' not in hf_name_path and isinstance(hf_data_files, MutableMapping):
             # dict keys are splits
-            hf_data_files = dict(hf_data_files) # HuggingFace doesn't like MutableMapping and must have dict
+            # HuggingFace doesn't like MutableMapping and must have dict
+            hf_data_files = dict(hf_data_files) # type: ignore
+            # expand paths
             for split, filepath in hf_data_files.items():
                 hf_data_files[split] = [utils.full_path(f) for f in hf_data_files[split]]
 
+            logging.info(f'Loading text file(s) from {hf_name_path}...')
+
+        # now load using load_dataset
         logging.info(f'Loading HuggingFace dataset {hf_name_path}...')
         dataset = load_dataset(hf_name_path, name=hf_dataset_name, data_dir=hf_data_dir,
                                data_files=hf_data_files, revision=hf_revision,
                                cache_dir=hf_cache_dir, sample_by=hf_sample_by)
 
-    # standardize to DatasetDict
+    # If HF API returns just one dataset, convert it to DatasetDict
     if not isinstance(dataset, DatasetDict):
         dataset = DatasetDict({train_split: dataset})
 
+    # log size of each split
     logging.info(f'Loaded dataset {hf_name_path}')
     dataset_split_names = set(dataset.keys())
     for split in dataset_split_names:
         logging.summary({f'data/{split}_original_rows': len(dataset[split])})
 
-    # Validate split names
+    # Make sure we have train split
     if train_split is None: # auto-detect
         if 'train' in dataset:
             train_split = 'train'
@@ -56,6 +97,7 @@ def get_datasets(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Op
     val_fraction = val_fraction or 0.
     test_fraction = test_fraction or 0.
 
+    # if dataset doesn't have val_split, we need to create it from train_split
     if val_split is None:
         # detect val split
         usual_val_split_names = {'validation', 'valid', 'dev', 'val'}

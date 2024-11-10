@@ -15,12 +15,25 @@ from nanugpt.tokenizers.tokenizer_base import TokenizerBase
 from nanugpt import utils
 from nanugpt.data.hf_dataset import get_datasets
 
+"""
+Tokenizes HuggingFace datasets.
+"""
 
 def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Optional[str], hf_data_files:Optional[str],
              train_split:Optional[str], val_split:Optional[str], test_split:Optional[str], hf_cache_dir:Optional[str],
              val_fraction:Optional[float], test_fraction:Optional[float],
              text_column:str, tokenizer_factory:Callable[[], TokenizerBase],
              tokenized_out_dir:str, data_loader_seed:int, hf_sample_by:Optional[str], hf_revision:Optional[str])->None:
+
+    """
+    This function uses same params as get_datasets in hf_dataset.py to load the HF dataset which may be on HF hub or local or bunch of files in folder on disk.
+
+    Two additional params are:
+    - text_column: str: name of the column in the dataset that contains the text to tokenize
+    - tokenizer_factory: Callable[[], TokenizerBase]: a function that returns an instance of the tokenizer to use
+
+    """
+
 
     common.check_env_vars()
 

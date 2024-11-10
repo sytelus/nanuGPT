@@ -5,7 +5,9 @@ from torch.utils.data import DataLoader
 
 from nanugpt.tokenizers.grokking_tokenizer import GrokkingTokenizer, get_tokenizer_factory, DIVISION_MODULO_OPERATIONS, ALL_OPERATIONS
 
-# Implements get_data interface for Grokking dataset
+"""
+The `get_data` implementation for generating `operation_mod_p` data for grokking experiments.
+"""
 
 def operation_mod_p_data(operation: str, p: int, tokenizer: GrokkingTokenizer):
     """

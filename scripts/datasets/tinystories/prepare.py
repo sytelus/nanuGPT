@@ -9,7 +9,7 @@ if __name__ == '__main__':
 
     dataset_save_dir = os.environ.get('DATA_ROOT', os.path.dirname(__file__))
 
-    tokenize_dataset.tokenize(dataset_path="roneneldan/TinyStories",
+    tokenize_dataset.tokenize(hf_name_path="roneneldan/TinyStories",
                             dataset_name="tinystories_v1",
                             tokenized_out_dir=tokenized_out_dir,
                             data_files={

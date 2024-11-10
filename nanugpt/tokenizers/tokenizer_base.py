@@ -1,6 +1,9 @@
 from abc import abstractmethod
 from typing import List, Mapping, Optional
 
+"""
+Defines the interface for al tokenizers.
+"""
 class TokenizerBase:
     @abstractmethod
     def batch_encode(self, batch:list)->Mapping:
