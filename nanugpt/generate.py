@@ -55,7 +55,8 @@ class Generator:
 
         logger.info(f"Using checkpoint file: {checkpoint_filepath}")
 
-        checkpoint = torch.load(checkpoint_filepath, map_location=self.device)
+        checkpoint = torch.load(checkpoint_filepath,
+                                map_location=self.device, weights_only=True)
 
         # load checkpoint
         state_dict = checkpoint['model']

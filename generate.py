@@ -10,7 +10,7 @@ if __name__ == "__main__":
     config = Config(default_config_filepath='configs/train_gpt2/tinyshakespeare.yaml')
     logging_config = config['logging']
     logging_config['enable_wandb'] = False
-    logger = logging.Logger(master_process=True, **logging_config)
+    logger = logging.Logger(master_process=False, **logging_config)
 
     gen = Generator(config, logger)
     results = gen.generate(['\n'], 200)
