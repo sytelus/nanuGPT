@@ -119,7 +119,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     model, model_config = common.create_model(config, logger, device, vocab_size=len(tokenizer))
     model_kwargs = model_config['module_kwargs']
     n_all, n_trainable, n_embedding, n_non_embedding_trainable = utils.module_params_count(model)
-    device_step_tflops = utils.transformer_tflops(batch_size=local_batch_size,
+    device_step_flops = utils.transformer_flops(batch_size=local_batch_size,
         params_nonembedding_trainable=n_non_embedding_trainable,
         context_length=context_length,
         n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer'],
@@ -131,7 +131,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                     'model/params_trai': n_trainable,
                     'model/params_non_emb_train': n_non_embedding_trainable,
                     'model/context_length': model_kwargs['context_length'],
-                    'model/device_step_tflops': device_step_tflops,
+                    'model/device_step_flops': device_step_flops,
                    })
 
     # optimizer
@@ -264,7 +264,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             pred_loss = lin_predictor.predict(loss_pred_model, [max_steps-1])[0]
             step_interval = timeit.default_timer() - step_start_time
             train_time_hr += step_interval / 3600.0
-            run_tflops = utils.transformer_tflops(batch_size=total_samples,
+            run_flops = utils.transformer_flops(batch_size=total_samples,
                 params_nonembedding_trainable=n_non_embedding_trainable,
                 context_length=context_length,
                 n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer'],
@@ -290,7 +290,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                 "train/pred_loss": pred_loss,
                 "train/pre_clip_norm": pre_clip_norm,
                 "run/lr": optimizer.param_groups[0]['lr'],
-                "run/tflops": run_tflops,
+                "run/flops": run_flops,
                 "run/elapsed_hr": elapsed_hr,
                 "run/eta_hr": elapsed_hr * (max_steps-step-1) / (step+1),
                 "run/checkpoint_since_hr": (timeit.default_timer() - last_checkpoint_time)/3600.0,

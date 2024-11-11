@@ -99,7 +99,7 @@ std_metrics = {}
 std_metrics['default'] = [
                             {"name": "run/elapsed_hr", "step_metric":"train/step", "summary":"last"},
                             {"name": "run/eta_hr", "step_metric":"train/step", "summary":"last"},
-                            {"name": "run/tflops", "step_metric":"train/step", "summary":"last"},
+                            {"name": "run/flops", "step_metric":"train/step", "summary":"last"},
                             {"name": "run/checkpoint_since_hr", "step_metric":"train/step", "summary":"last"},
                             {"name": "run/total_time_hr", "step_metric":"train/step", "summary":"last"},
                             {"name": "train/step", "step_metric":"run/elapsed_hr", "summary":"last"},
@@ -137,7 +137,7 @@ std_metrics['default'] = [
 
                             {"name": "run/lr", "step_metric":"train/step", "summary":"last"},
                             {"name": "run/w_norm", "step_metric":"train/step", "summary":"last", "goal":"min"},
-                            {"name": "run/tflops", "step_metric":"train/step", "summary":"last", "goal":"max"},
+                            {"name": "run/flops", "step_metric":"train/step", "summary":"last", "goal":"max"},
                             {"name": "tokens_per_sec", "step_metric":"train/step", "summary":"last", "goal":"max"},
                     ]
 std_metrics['classification'] = std_metrics['default'] +[
