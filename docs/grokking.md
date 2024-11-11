@@ -1,1 +1,14 @@
-. You can get training loss of `0` (memorization) and eventually validation of loss of `0` as well (generalization)! It's beatiful to see but more importantly you can train it anywhere any time in matter of minutes. You can hack around and try out your hypothesis. To try this run,
+# Training Model for Grokking
+
+You can reproduce [Grokking](https://arxiv.org/abs/2201.02177) phenomenon in just 10 minutes of training on a single RTX 3080.
+
+We train a tiny transformer that can learn to compute a simple math expression reaching train and eventually val loss of ~0. Synthetic dataset is generated and tokenized on-the-fly .
+
+To run the baseline grokking experiment, simply run:
+
+```python
+python train.py configs/grokking/prime223.yaml
+```
+
+You should see training loss of `0` (memorization) fairly soon and eventually validation of loss of `0` (generalization)!
+

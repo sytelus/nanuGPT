@@ -78,54 +78,13 @@ python train.py configs/train_gpt2/tinyshakespeare.yaml
 python generate.py configs/train_gpt2/tinyshakespeare.yaml
 ```
 
-Above will train model using all the works of Shakespear as data in 5 minutes on single RTX 3080 just like in original NanoGPT.
+Above will train model using all the works of Shakespear as data in 5 minutes on single RTX 3080 just like in original NanoGPT. See [Tinyshakespeare baseline](docs/tinyshakespeare.md).
 
-## Training on Tinystories
-
-First download row datasets, convert it to Arrow format:
-
-```bash
-bash scripts/datasets/tinystories/download.sh
-python scripts/datasets/tinystories/tinystories2arrow.py
-```
-
-You can then tokenize, train and generate from the model like this:
-
-```python
-# tokenize using GPT2 tokenizer
-python tokenize_dataset.py configs/tokenize/tinystories_tiktoken_gpt2.yaml
-
-# run training using GPT2 124M model
-python train.py configs/train_gpt2/tinystories.yaml
-
-# generate completitions for the prompt
-python generate.py configs/train_gpt2/tinystories.yaml
-```
-
-## Training on WikiText-103
-
-```bash
-# download raw dataset
-python scripts/datasets/wikitext-103/download.py
-# tokenize using GPT2 tokenizer
-python tokenize_dataset.py configs/tokenize/wikitext103_tiktoken_gpt2.yaml
-# train
-python train.py configs/train_gpt2/wikitext103.yaml
-```
-
-## Training on OpenWebText
-
-### Synthetic Arithmatic Dataset
-
-You can reproduce [Grokking](https://arxiv.org/abs/2201.02177) phenomenon in just 10 minutes of training on a single RTX 3080. Here, we train a tiny transformer that can learn to compute a simple math expression reaching train and eventually val loss of ~0. Synthetic dataset is generated and tokenized on the fly. To try this, run:
-
-```python
-python train.py configs/grokking/prime223.yaml
-```
-
-### Other Datasets
-
-For lucky people with more compute, there are configs available to replicate benchmarks on WikiText103, TinyStories and OpenWebText.
+[How to train on Tinystories](docs/tinystories.md)
+[How to train on WikiText-103](docs/wt103.md)
+[How to train on WikiText-103](docs/wt103.md)
+[How to train on OpenWebText](docs/openwebtext.md)
+[How to train on Grokking dataset](docs/grokking.md)
 
 ### Config
 
@@ -133,11 +92,11 @@ All config files can be found in `configs/` and things are self-explanatory. Som
 
 ### Tokenization
 
-The code uses all cores and achieves 157k tokens/sec/core end-to-end. This corresponds to tokenizing OpenWebText in roughly 0.5hr on 128 core machine.
+The code uses all cores and achieves 65k tokens/sec/core end-to-end on Intel Xenon w5-3425 and 223k tokens/sec/core on Neoverse-v2. Typically you can tokenize OpenWebText in roughly 0.5hr on 128 core server-grade machine.
 
 ### Logging
 
-NanuGPT vastly improves on logging, i.e., we log everything we can! The idea is that once run is done, you can examine the log to do lot of post-hoc debugging. You can also enable Weights and Biases (wandb) by enabling in config and creating environment variable for `WANDB_API_KEY`.
+NanuGPT has huge focus on detailed logging, i.e., log everything we can! The idea is that once run is done, you can examine the log to do lot of post-hoc debugging. You can also enable Weights and Biases (wandb) by enabling in config and creating environment variable for `WANDB_API_KEY` and optionally `WANDB_HOST`.
 
 The consol logs are colored for quick glances.
 
@@ -147,4 +106,4 @@ If you are using VSCode, please do take advantage of dropdown next to play butto
 
 ## Credits
 
-This repository uses code from [nanoGPT](https://github.com/karpathy/nanoGPT) and [grokking](https://github.com/danielmamay/grokking) as foundation. The code here is inspired from the philosophy and style of these authors. Beyond that, you might find very little novelty here.
+This repository uses code from [nanoGPT](https://github.com/karpathy/nanoGPT) and [grokking](https://github.com/danielmamay/grokking) as starting point. The code here is inspired from the philosophy and style of these authors.

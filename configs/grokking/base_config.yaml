@@ -1,5 +1,5 @@
 general:
-  project_name: 'tokenization'
+  project_name: 'grokking'
   run_name: '_time:' # default run name is timestamp
   run_description: null
   out_dir: '~/out_dir/$project_name/$run_name'
@@ -79,6 +79,7 @@ scheduler:
     cooldown_iters: 0
     max_iters: null
     end_factor: 1.0E-2
+    const_lr: '_copy: /optimizer/module_kwargs/learning_rate'
 
 eval:
   eval_every: 100
