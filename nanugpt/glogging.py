@@ -335,6 +335,12 @@ class Logger:
                         'sys/is_anomaly_enabled': torch.is_anomaly_enabled(),
                         'sys/memory_gb': psutil.virtual_memory().available / (1024.0 ** 3),
                         'sys/cpu_count': psutil.cpu_count(),
+                        'sys/cpu_freq': psutil.cpu_freq()._asdict(),
+                        'sys/cpu_percent': psutil.cpu_percent(interval=1),
+                        'sys/cpu_stats': psutil.cpu_stats()._asdict(),
+                        'sys/cpu_count_logical': psutil.cpu_count(logical=True),
+                        'sys/cpu_count_physical': psutil.cpu_count(logical=False),
+                        'sys/cpu_name': os.popen('wmic cpu get name').read().strip().split('\n')[1] if os.name == 'nt' else os.popen('lscpu | grep "Model name"').read().strip().split(':')[1].strip(),
                         'sys/utils.free_disk_space': utils.free_disk_space(),
 
                         'env/RANK': os.environ.get('RANK', None),
