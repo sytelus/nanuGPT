@@ -1,5 +1,8 @@
 __include__: ['base_config.yaml']
 
+general:
+  project_name: 'tokenization_openwebtext'
+
 tokenizer:
   module: 'nanugpt.tokenizers.tiktoken_wrap.get_tokenizer_factory'
   module_kwargs:

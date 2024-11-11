@@ -28,8 +28,11 @@ class Generator:
             if k.startswith(unwanted_prefix):
                 state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
 
-        # load model and tokenizer
-        self.model, self.tokenizer = common.create_model_tokenizer(config, logger, self.device, state_dict=state_dict)
+        # create tokenizer
+        self.tokenizer, tokenizer_config = common.create_tokenizer(config, logger)
+
+        # create model
+        self.model, model_config = common.create_model(config, logger, self.device, vocab_size=len(self.tokenizer), state_dict=state_dict)
         self.model.eval()
 
     @torch.no_grad()

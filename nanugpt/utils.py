@@ -360,11 +360,11 @@ def for_parallel(l:list, f:Callable[[Any], Any], num_cpus=multiprocessing.cpu_co
 
     return result
 
-def transformer_tflops(batch_size:int, dt:float,
+def transformer_tflops(batch_size:int,
                       forward_iters:int, backward_iters:int,
                       params_nonembedding_trainable:int,
                       n_layer:int, n_embd:int, context_length:int)->float:
-    """ estimate model flops utilization in TFLOPS """
+    """ estimate model flops for given batch size TFLOPS """
 
     forward_flops_1sample = 2 * (n_layer * n_embd * context_length + params_nonembedding_trainable)
     backward_flops_1sample = 2 * forward_flops_1sample
@@ -372,10 +372,7 @@ def transformer_tflops(batch_size:int, dt:float,
     forward_flops = forward_flops_1sample * batch_size * forward_iters
     backward_flops = backward_flops_1sample * batch_size * backward_iters
 
-    # express our flops throughput as ratio of A100 bfloat16 peak flops
-    flops_achieved = (forward_flops + backward_flops) / dt
-
-    return flops_achieved / 1.0E12 # TFLOPS
+    return forward_flops + backward_flops / 1.0E12 # TFLOPS
 
 def cpu_count()->int:
     return multiprocessing.cpu_count()

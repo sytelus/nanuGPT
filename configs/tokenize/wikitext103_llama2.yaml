@@ -1,5 +1,8 @@
 __include__: ['base_config.yaml']
 
+general:
+  project_name: 'tokenization_wikitext-103'
+
 tokenizer:
   module: 'nanugpt.tokenizers.hf_tokenizer.get_tokenizer_factory'
   module_kwargs:

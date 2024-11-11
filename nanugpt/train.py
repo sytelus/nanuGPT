@@ -86,12 +86,13 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     grad_acc_steps = utils.calc_grad_acc(global_batch_size, device_batch_size, torch_info.world_size)
     # readjust global batch size
     global_batch_size = grad_acc_steps * device_batch_size * torch_info.world_size
+    local_batch_size = grad_acc_steps * device_batch_size
 
     logger.summary({
                     "run/grad_acc_steps": grad_acc_steps,
                     "run/device_batch_size": device_batch_size,
                     "run/global_batch_size": global_batch_size,
-                    "run/local_batch_size": grad_acc_steps * device_batch_size,
+                    "run/local_batch_size": local_batch_size,
                     "run/tokens_per_step": global_batch_size * context_length,
                     "run/max_steps": max_steps,
                     "run/start_time": start_time,
@@ -117,14 +118,20 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     # create model
     model, model_config = common.create_model(config, logger, device, vocab_size=len(tokenizer))
     model_kwargs = model_config['module_kwargs']
-
     n_all, n_trainable, n_embedding, n_non_embedding_trainable = utils.module_params_count(model)
+    device_step_tflops = utils.transformer_tflops(batch_size=local_batch_size,
+        params_nonembedding_trainable=n_non_embedding_trainable,
+        context_length=context_length,
+        n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer'],
+        forward_iters=grad_acc_steps, backward_iters=1
+    )
     logger.summary({'model/params_all': n_all,
                     'model/params_non_emb': n_all-n_embedding,
                     'model/params_emb': n_embedding,
                     'model/params_trai': n_trainable,
                     'model/params_non_emb_train': n_non_embedding_trainable,
-                    'model/context_length': model_kwargs['context_length']
+                    'model/context_length': model_kwargs['context_length'],
+                    'model/device_step_tflops': device_step_tflops,
                    })
 
     # optimizer
@@ -144,7 +151,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
     # initialize a GradScaler. If enabled=False scaler is a no-op
     # we need loss scaling only for fp16 due to reduced precision, not bf16 or fp32
-    scaler = torch.amp.GradScaler("cuda", enabled=(torch_info.pt_dtype == torch.float16))
+    scaler = torch.amp.GradScaler("cuda", enabled=(torch_info.pt_dtype == torch.float16)) # type: ignore
 
     if torch_info.is_master:
         out_dir = utils.full_path(out_dir, create=True)
@@ -180,7 +187,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             if torch_info.is_distributed:
                 # Instead of model.no_sync(), we do Karpathy's hack
                 # On last step, flag model to require backward grad sync
-                model.require_backward_grad_sync = (micro_step == grad_acc_steps - 1)
+                model.require_backward_grad_sync = (micro_step == grad_acc_steps - 1) # type: ignore
 
             # note that we don't take context length into account here
             # if we have N tokens in dataset, we move window N times and do
@@ -252,18 +259,17 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             loss_improvement_steps += 1
 
         if torch_info.is_master:
-            transformer_tflops = utils.transformer_tflops(batch_size=step_sample_count,
-                params_nonembedding_trainable=n_non_embedding_trainable,
-                context_length=context_length, dt=fwd_bwd_interval,
-                n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer'],
-                forward_iters=grad_acc_steps, backward_iters=1
-            )
-
             elapsed_hr = (timeit.default_timer() - loop_start_time)/3600.0
             loss_pred_model = lin_predictor.fit(list(range(step-len(prev_train_losses)+1, step+1)), prev_train_losses)
             pred_loss = lin_predictor.predict(loss_pred_model, [max_steps-1])[0]
             step_interval = timeit.default_timer() - step_start_time
             train_time_hr += step_interval / 3600.0
+            run_tflops = utils.transformer_tflops(batch_size=total_samples,
+                params_nonembedding_trainable=n_non_embedding_trainable,
+                context_length=context_length,
+                n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer'],
+                forward_iters=grad_acc_steps, backward_iters=1
+            )
             metrics.update({
                 "train/step": step,
                 "train/loss": train_loss,
@@ -284,7 +290,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                 "train/pred_loss": pred_loss,
                 "train/pre_clip_norm": pre_clip_norm,
                 "run/lr": optimizer.param_groups[0]['lr'],
-                'run/tflops': transformer_tflops,
+                "run/tflops": run_tflops,
                 "run/elapsed_hr": elapsed_hr,
                 "run/eta_hr": elapsed_hr * (max_steps-step-1) / (step+1),
                 "run/checkpoint_since_hr": (timeit.default_timer() - last_checkpoint_time)/3600.0,

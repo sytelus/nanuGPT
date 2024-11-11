@@ -137,7 +137,7 @@ std_metrics['default'] = [
 
                             {"name": "run/lr", "step_metric":"train/step", "summary":"last"},
                             {"name": "run/w_norm", "step_metric":"train/step", "summary":"last", "goal":"min"},
-                            {"name": "transformer_tflops", "step_metric":"train/step", "summary":"last", "goal":"max"},
+                            {"name": "run/tflops", "step_metric":"train/step", "summary":"last", "goal":"max"},
                             {"name": "tokens_per_sec", "step_metric":"train/step", "summary":"last", "goal":"max"},
                     ]
 std_metrics['classification'] = std_metrics['default'] +[
