@@ -20,12 +20,12 @@ logging:
   run_name: '_copy: /general/run_name'
   log_dir: '_copy: /general/out_dir'
   run_description: '_copy: /general/run_description'
-  enable_wandb: false
-  summaries_stdout: true
+  enable_wandb: true
   log_filename: 'log.txt'
   summaries_filename: 'summaries.txt'
   allow_overwrite_log: true
   metrics_type: 'classification'
+  summaries_stdout: true
 
 model:
   module: 'nanugpt.models.tiny_transformer.get_model'
