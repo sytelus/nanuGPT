@@ -10,7 +10,7 @@ class Generator:
     def __init__(self, config:Mapping, logger) -> None:
         self.context_length = config['model']['module_kwargs']['context_length']
 
-        self.device, self.amp_ctx, self.logger, torch_info = common.setup_device(config, logger)
+        self.device, self.amp_ctx, torch_info = common.setup_device(config, logger)
 
         # load checkpoint log
         checkpoint_log_filepath = os.path.join(config['general']['out_dir'], 'checkpoint_log.yaml')
