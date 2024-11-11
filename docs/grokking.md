@@ -18,7 +18,12 @@ Stats:
 ```text
 Model params (all): 457,578
 Model params (non emb): 426,986
-Train tokens: 30,309,625
+Dataset train tokens: 123,765
+Dataset val tokens: 123,765
+Dataset train samples: 24,753
+Dataset val samples: 24,753
+Vocab Size: 234
+Trained on total tokens: 30,309,625
 Train samples: 24,753
 Global batch size: 512
 Train steps: 12,000

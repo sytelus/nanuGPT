@@ -23,14 +23,18 @@ Stats:
 ```text
 Model params (all): 10,819,968
 Model params (non emb): 10,621,824
-Train tokens: 40,960,000
-Train samples: 160,000
-Global batch size: 512
-Train steps: 2,499
+Dataset train tokens: 998,021
+Dataset val tokens: 110,153
+Dataset train samples: 6499
+Dataset val samples: 723
+Vocab Size: 260
+Trained on total tokens: 40,960,000
+Global batch size: 64
+Train steps: 2500
 Context length: 256
-Train loss: 1.0899850130081177
-Val loss: 1.2700303447246553
-Run time: 0.02099152487363123 hr (1x NVIDIA A100 80GB PCIe)
+Train loss: 1.0831478834152222
+Val loss: 1.2721147787570954
+Run time: 0.016054142607241 hr (1x NVIDIA A100 80GB PCIe)
 ```
 
 [Detailed Logs](results/grokking/prime223/log.txt)
