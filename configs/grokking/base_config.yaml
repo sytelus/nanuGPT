@@ -78,7 +78,7 @@ scheduler:
     warmup_iters: 10
     cooldown_iters: 0
     max_iters: null
-    end_factor: 1.0E-2
+    end_factor: 1.0E-2 # factor to multiply at the end
     const_lr: '_copy: /optimizer/module_kwargs/learning_rate'
 
 eval:

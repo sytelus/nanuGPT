@@ -6,6 +6,9 @@ data:
     val_fraction: null # if null, use 1 - training_fraction
     prime: &prime 223
 
+training:
+  max_steps: 12000
+
 tokenizer:
   module_kwargs:
     prime: *prime

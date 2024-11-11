@@ -16,9 +16,10 @@ class ConstantWithCooldownScheduler(LRScheduler):
         self.warmup_iters = warmup_iters
         self.cooldown_iters = cooldown_iters
         self.end_factor = end_factor
-        self.max_iters = max_iters if max_iters is not None else warmup_iters + cooldown_iters
+        self.max_iters = max_iters
 
-        assert warmup_iters + cooldown_iters <= self.max_iters, f"warmup_iters + cooldown_iters {warmup_iters}+{cooldown_iters} must be less than max_iters {self.max_iters}"
+        assert (self.max_iters is None and self.cooldown_iters == 0) or (self.max_iters is not None and self.cooldown_iters >= 0), "max_iters must be specified if cooldown_iters > 0"
+        assert self.max_iters is None or warmup_iters + cooldown_iters <= self.max_iters, f"warmup_iters + cooldown_iters {warmup_iters}+{cooldown_iters} must be less than max_iters {self.max_iters}"
         super().__init__(optimizer, last_epoch)
 
     def get_lr(self):
@@ -32,11 +33,11 @@ class ConstantWithCooldownScheduler(LRScheduler):
         if self.last_epoch < self.warmup_iters:
             return (init_lrs * self.last_epoch / self.warmup_iters).tolist()
 
-        if self.last_epoch >= self.max_iters: # return min LR
+        if self.max_iters is not None and self.last_epoch >= self.max_iters: # return min LR
             return (init_lrs * self.end_factor).tolist()
 
         # if within cooldown, return linear decay down to min learning rate
-        if self.last_epoch > (self.max_iters - self.cooldown_iters):
+        if self.max_iters is not None and self.last_epoch > (self.max_iters - self.cooldown_iters):
             min_lr = init_lrs * self.end_factor
             decay_ratio = (self.max_iters - self.last_epoch - 1) / self.cooldown_iters
             return ((init_lrs - min_lr) * decay_ratio + min_lr).tolist()
