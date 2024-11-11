@@ -1,6 +1,6 @@
 # Training on Tinystories
 
-You can train on Tinystories V2 dataset like this:
+You can train on Tinystories dataset like this:
 
 ```bash
 # download raw datasets and convert it to Arrow format

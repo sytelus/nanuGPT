@@ -17,7 +17,7 @@ python train.py configs/train_gpt2/tinyshakespeare.yaml
 python generate.py configs/train_gpt2/tinyshakespeare.yaml
 ```
 
-![Training and Validation Loss](results/grokking/prime223/prime223_baseline.png)
+![Training and Validation Loss](results/tinyshakespeare/tinyshakespeare_baseline.png)
 Stats:
 
 ```text
@@ -37,4 +37,4 @@ Val loss: 1.2721147787570954
 Run time: 0.016054142607241 hr (1x NVIDIA A100 80GB PCIe)
 ```
 
-[Detailed Logs](results/grokking/prime223/log.txt)
+[Detailed Logs](results/grokking/tinyshakespeare/log.txt)
