@@ -43,7 +43,6 @@ if 'pydevd' in sys.modules:
 def is_debugging()->bool:
     return 'vs_code_debugging' in os.environ and os.environ['vs_code_debugging']=='True'
 
-
 def expandvars_win(input_path: str) -> str:
     from pathlib import Path
     # 1. Check if OS is Windows

@@ -5,20 +5,56 @@ import torch
 
 from nanugpt import utils
 from nanugpt import common
+from nanugpt.glogging import Logger
 
 class Generator:
-    def __init__(self, config:Mapping, logger) -> None:
+    def __init__(self, config:Mapping, logger:Logger) -> None:
         self.context_length = config['model']['module_kwargs']['context_length']
 
         self.device, self.amp_ctx, torch_info = common.setup_device(config, logger)
 
-        # load checkpoint log
-        checkpoint_log_filepath = os.path.join(config['general']['out_dir'], 'checkpoint_log.yaml')
+        checkpoint_dir = utils.full_path(config['generate']['checkpoint_path'])
+        checkpoint_log_filepath = os.path.join(checkpoint_dir, 'checkpoint_log.yaml')
+        # if file does not exist, try to find most recent checkpoint in out_dir
+        if not os.path.exists(checkpoint_log_filepath):
+            logger.warn(f"No checkpoint log found at {checkpoint_dir}, looking into latest subdirectory...")
+            subdirs = [os.path.join(checkpoint_dir, d) for d in os.listdir(checkpoint_dir) if os.path.isdir(os.path.join(checkpoint_dir, d))]
+            if len(subdirs) > 0:
+                # sort subdirectories by modification time
+                subdirs = sorted(subdirs, key=os.path.getmtime)
+                checkpoint_log_filepath = None
+                for subdir in reversed(subdirs):
+                    if os.path.exists(os.path.join(subdir, 'checkpoint_log.yaml')):
+                        checkpoint_dir = subdir
+                        checkpoint_log_filepath = os.path.join(subdir, 'checkpoint_log.yaml')
+                        break
+                if checkpoint_log_filepath is None:
+                    raise FileNotFoundError(f"No checkpoint log found in any subdirs at {checkpoint_dir}")
+            else:
+                raise FileNotFoundError(f"No checkpoints or subdirectories found in {checkpoint_dir}")
+        else:
+            checkpoint_dir = utils.full_path(checkpoint_dir)
+
+        # log the checkpoint directory
+        logger.info(f"Using checkpoint directory: {checkpoint_dir}")
+
+        # check if checkpoint log exists
+        if not os.path.exists(checkpoint_log_filepath):
+            raise FileNotFoundError(f"No checkpoint log found at {checkpoint_log_filepath}")
+
         checkpoint_log = utils.load_yaml(checkpoint_log_filepath)
         if len(checkpoint_log) == 0:
             raise ValueError(f"No checkpoints found in {checkpoint_log_filepath}")
 
-        checkpoint_filepath = checkpoint_log[-1]['checkpoint_filepath']
+        # if checkpoint file name is not specified in config, use the most recent one
+        checkpoint_filename = config['generate'].get('checkpoint_filepath', None)
+        if checkpoint_filename:
+            checkpoint_filepath = os.path.join(checkpoint_dir, utils.full_path(checkpoint_filename))
+        else:
+            checkpoint_filepath = checkpoint_log[-1]['checkpoint_filepath']
+
+        logger.info(f"Using checkpoint file: {checkpoint_filepath}")
+
         checkpoint = torch.load(checkpoint_filepath, map_location=self.device)
 
         # load checkpoint

@@ -81,8 +81,8 @@ scheduler:
     end_factor: 1.0E-1
 
 generate:
-  checkpoint_path: '_copy: /general/out_dir'
-  checkpoint_name: 'checkpoint_best.pt'
+  checkpoint_path: '~/out_dir/$project_name'
+  checkpoint_name: null # filename or use last from checkpoint_log.yaml, also can be set 'checkpoint_best.pt'
 
 eval:
   eval_every: 100

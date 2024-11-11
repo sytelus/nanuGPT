@@ -6,6 +6,7 @@ from nanugpt.generate import Generator
 
 if __name__ == "__main__":
     # specify config file to use as first argument in commandline
+    # directory set in config file in generate/checkpoint_dir is used to load model
     config = Config(default_config_filepath='configs/train_gpt2/tinyshakespeare.yaml')
     logging_config = config['logging']
     logging_config['enable_wandb'] = False

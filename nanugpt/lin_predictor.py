@@ -18,9 +18,9 @@ def fit(x, y)->LinearRegression:
 
     return model
 
-def predict(model:LinearRegression, x):
+def predict(model:LinearRegression, x): # x->(n_samples, n_features)
     xa = np.array(x).reshape(-1, 1)
-    return model.predict(xa)
+    return model.predict(xa)    # -> (n_samples,)
 
 def evaluate(model:LinearRegression, x, y):
     xa = np.array(x).reshape(-1, 1)

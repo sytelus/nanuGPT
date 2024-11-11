@@ -261,7 +261,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         if torch_info.is_master:
             elapsed_hr = (timeit.default_timer() - loop_start_time)/3600.0
             loss_pred_model = lin_predictor.fit(list(range(step-len(prev_train_losses)+1, step+1)), prev_train_losses)
-            pred_loss = lin_predictor.predict(loss_pred_model, [max_steps-1])[0]
+            pred_loss = float(lin_predictor.predict(loss_pred_model, [max_steps-1])[0])
             step_interval = timeit.default_timer() - step_start_time
             train_time_hr += step_interval / 3600.0
             run_flops = utils.transformer_flops(batch_size=total_samples,
