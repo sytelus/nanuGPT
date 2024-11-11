@@ -47,6 +47,7 @@ class Batches:
             return next(self.iter)
 
 def train(config:Mapping, logger:Optional[logging.Logger]=None):
+    start_time = timeit.default_timer()
     global_batch_size = config['training']['global_batch_size']
     project_name = config['logging']['project_name']
     run_name = config['logging']['run_name']
@@ -93,6 +94,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                     "run/local_batch_size": grad_acc_steps * device_batch_size,
                     "run/tokens_per_step": global_batch_size * context_length,
                     "run/max_steps": max_steps,
+                    "run/start_time": start_time,
                     })
 
     # get dataset
@@ -122,6 +124,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                     'model/params_emb': n_embedding,
                     'model/params_trai': n_trainable,
                     'model/params_non_emb_train': n_non_embedding_trainable,
+                    'model/context_length': model_kwargs['context_length']
                    })
 
     # optimizer
@@ -156,6 +159,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     checkpoint_log = []
     loop_start_time = last_eval_time = timeit.default_timer()
     batches = Batches(train_loader)
+    train_time_hr = 0.0
 
     # run steps
     while step < max_steps:
@@ -258,6 +262,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             elapsed_hr = (timeit.default_timer() - loop_start_time)/3600.0
             loss_pred_model = lin_predictor.fit(list(range(step-len(prev_train_losses)+1, step+1)), prev_train_losses)
             pred_loss = lin_predictor.predict(loss_pred_model, [max_steps-1])[0]
+            step_interval = timeit.default_timer() - step_start_time
+            train_time_hr += step_interval / 3600.0
             metrics.update({
                 "train/step": step,
                 "train/loss": train_loss,
@@ -266,7 +272,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                 "train/best_loss": best_train_loss,
                 "train/best_loss_step": best_train_loss_step,
                 "train/epoch": step * grad_acc_steps / train_batch_count,
-                "train/step_interval": timeit.default_timer() - step_start_time,
+                "train/step_interval": step_interval,
+                "train/train_time_hr": train_time_hr,
                 "train/fwd_bwd_interval": fwd_bwd_interval,
                 "train/samples": total_samples,
                 "train/step_samples": step_sample_count,
@@ -356,6 +363,12 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         checkpoint_log_filepath = os.path.join(out_dir, "checkpoint_log.yaml")
         utils.save_yaml(checkpoint_log, checkpoint_log_filepath)
         logger.log_artifact('checkpoint_log', 'file', file_or_dir=checkpoint_log_filepath)
+        end_time = timeit.default_timer()
+        logger.summary({
+            'run/end_time': end_time,
+            'run/total_time_hr': (end_time - start_time)/3600.0
+        })
+
 
         if torch_info.is_distributed:
             dist.destroy_process_group()

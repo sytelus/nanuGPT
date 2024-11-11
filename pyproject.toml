@@ -2,11 +2,17 @@
 requires = ["setuptools>=65.0"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+where = ["."]
+
 [project]
 name = "nanugpt"
 version = "0.3.6"
 authors = [
-    { name = "Shital Shah" }
+    { name = "Shital Shah", email = "sytelus@gmail.com" }
+]
+maintainers = [
+    { name = "Shital Shah", email = "sytelus@gmail.com" }
 ]
 description = "Simple, reliable and well tested training code for quick experiments with transformer based models"
 readme = "README.md"
@@ -17,6 +23,7 @@ classifiers = [
     "Operating System :: OS Independent",
     "Intended Audience :: Science/Research"
 ]
+keywords = ["gpt", "nanogpt", "tinystories", "grokking", "openwebtext", "pretraining"]
 dependencies = [
     "einops",
     "tiktoken",
@@ -33,3 +40,5 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/sytelus/nanugpt"
+Repository = "https://github.com/sytelus/nanugpt"
+
