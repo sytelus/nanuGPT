@@ -1,7 +1,7 @@
 __include__: ['base_config.yaml']
 
 general:
-  project_name: 'gpt2o_owt'
+  project_name: 'gpt2_owt'
 
 data:
   module_kwargs:

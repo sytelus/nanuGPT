@@ -1,7 +1,7 @@
 __include__: ['base_config.yaml']
 
 general:
-  project_name: 'gpt2o_tinyshakespeare'
+  project_name: 'gpt2_tinyshakespeare'
 
 model:
   module: 'nanugpt.models.nanogpt.get_model'
