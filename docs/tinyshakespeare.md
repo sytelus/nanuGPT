@@ -8,7 +8,7 @@ mkdir -p $DATA_ROOT/datasets/tinyshakespeare
 wget -P $DATA_ROOT/datasets/tinyshakespeare https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt
 
 # tokenize input file using byte tokenizer
-python tokenize_dataset.py configs/tokenize/tinyshakespeare.yaml
+python tokenize_dataset.py configs/tokenize/tinyshakespeare_byte.yaml
 
 # run training using GPT2 124M model
 python train.py configs/train_gpt2/tinyshakespeare.yaml

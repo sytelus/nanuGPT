@@ -19,7 +19,7 @@ model:
 data:
   module_kwargs:
     tokenized_train_path: '$DATA_ROOT/tokenized/tinyshakespeare/byte/train.bin'
-    tokenized_val_path: '$DATA_ROOT/tokenized/tinyshakespeare/byte/val.bin'
+    tokenized_val_path: '$DATA_ROOT/tokenized/tinyshakespeare/byte/validation.bin'
     eval_batch_size: 64
 
 tokenizer:

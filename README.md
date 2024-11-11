@@ -69,7 +69,7 @@ You can then tokenize, train and generate from the model like this:
 
 ```python
 # tokenize input file using byte tokenizer
-python tokenize_dataset.py configs/tokenize/tinyshakespeare.yaml
+python tokenize_dataset.py configs/tokenize/tinyshakespeare_byte.yaml
 
 # run training using GPT2 124M model
 python train.py configs/train_gpt2/tinyshakespeare.yaml
