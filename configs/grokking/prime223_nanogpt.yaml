@@ -1,5 +1,7 @@
 __include__: ['base_config.yaml']
 
+# Use prime 223 but with nanoGPT style model instead of author's original model
+
 model:
   module: 'nanugpt.models.tiny_transformer.get_model'
 

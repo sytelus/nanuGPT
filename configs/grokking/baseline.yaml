@@ -1,5 +1,7 @@
 __include__: ['base_config.yaml']
 
+# Reproduces author results with `weight_decay=0` which takes long time (100k steps vs 10k steps)
+
 data:
   module_kwargs:
     prime: &prime 97

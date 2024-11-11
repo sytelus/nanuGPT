@@ -1,5 +1,7 @@
 __include__: ['base_config.yaml']
 
+# standard baseline with prime 223, reproduces grokking in 10k steps
+
 data:
   module_kwargs:
     training_fraction: 0.5
@@ -7,7 +9,7 @@ data:
     prime: &prime 223
 
 training:
-  max_steps: 12000
+  max_steps: 10000
 
 tokenizer:
   module_kwargs:

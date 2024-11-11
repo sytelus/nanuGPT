@@ -1,5 +1,7 @@
 __include__: ['base_config.yaml']
 
+# Use prime 50021 which allows to generate a lot more data
+
 data:
   module_kwargs:
     training_fraction: 0.5

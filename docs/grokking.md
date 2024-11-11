@@ -10,5 +10,13 @@ To run the baseline grokking experiment, simply run:
 python train.py configs/grokking/prime223.yaml
 ```
 
-You should see training loss of `0` (memorization) fairly soon and eventually validation of loss of `0` (generalization)!
+You should see training loss of `0` (memorization) fairly soon and eventually validation of loss of `0` (generalization) like this:
+
+![Training and Validation Loss](results/grokking/prime223/prime223_baseline.png)
+
+[See Logs](results/grokking/prime223/log.txt)
+
+There are also [few other configs](/configs/grokking) you can try.
+
+
 
