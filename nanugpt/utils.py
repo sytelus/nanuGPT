@@ -360,16 +360,17 @@ def for_parallel(l:list, f:Callable[[Any], Any], num_cpus=multiprocessing.cpu_co
     return result
 
 def transformer_flops(batch_size:int,
-                      forward_iters:int, backward_iters:int,
                       params_nonembedding_trainable:int,
                       n_layer:int, n_embd:int, context_length:int)->float:
-    """ estimate model FLOPs for given batch size """
+    """ estimate model FLOPs for given batch size"""
 
+    # FLOPs/token from https://www.adamcasson.com/posts/transformer-flops
     forward_flops_1sample = 2 * (n_layer * n_embd * context_length + params_nonembedding_trainable)
     backward_flops_1sample = 2 * forward_flops_1sample
 
-    forward_flops = forward_flops_1sample * batch_size * forward_iters
-    backward_flops = backward_flops_1sample * batch_size * backward_iters
+    # convert FLOPs/token to FLOPs/batch (FLOPs/token is for inference with cache)
+    forward_flops = forward_flops_1sample * batch_size * context_length
+    backward_flops = backward_flops_1sample * batch_size * context_length
 
     return float(forward_flops + backward_flops)
 

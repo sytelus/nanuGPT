@@ -119,18 +119,18 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     model, model_config = common.create_model(config, logger, device, vocab_size=len(tokenizer))
     model_kwargs = model_config['module_kwargs']
     n_all, n_trainable, n_embedding, n_non_embedding_trainable = utils.module_params_count(model)
+    context_length = model_kwargs['context_length']
     device_step_flops = utils.transformer_flops(batch_size=local_batch_size,
         params_nonembedding_trainable=n_non_embedding_trainable,
         context_length=context_length,
-        n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer'],
-        forward_iters=grad_acc_steps, backward_iters=1
+        n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer']
     )
     logger.summary({'model/params_all': n_all,
                     'model/params_non_emb': n_all-n_embedding,
                     'model/params_emb': n_embedding,
                     'model/params_trai': n_trainable,
                     'model/params_non_emb_train': n_non_embedding_trainable,
-                    'model/context_length': model_kwargs['context_length'],
+                    'model/context_length': context_length,
                     'model/device_step_flops': device_step_flops,
                    })
 
@@ -267,8 +267,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             run_flops = utils.transformer_flops(batch_size=total_samples,
                 params_nonembedding_trainable=n_non_embedding_trainable,
                 context_length=context_length,
-                n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer'],
-                forward_iters=grad_acc_steps, backward_iters=1
+                n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer']
             )
             metrics.update({
                 "train/step": step,
