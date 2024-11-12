@@ -36,5 +36,3 @@ Train loss: 1.0831478834152222
 Val loss: 1.2721147787570954
 Run time: 0.016054142607241 hr (1x NVIDIA A100 80GB PCIe)
 ```
-
-[Detailed Logs](results/grokking/tinyshakespeare/log.txt)
