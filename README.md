@@ -80,6 +80,16 @@ python generate.py configs/train_gpt2/tinyshakespeare.yaml
 
 Above will train model using all the works of Shakespear as data in 5 minutes on single RTX 3080 just like in original NanoGPT. See [Tinyshakespeare baseline](docs/tinyshakespeare.md).
 
+## Using Multi GPUs
+
+To run on multiple GPUs, instead of `python` use `torchrun` like this:
+
+```bash
+torchrun --nproc_per_node=8 --standalone train.py configs/train_gpt2/tinyshakespeare.yaml
+```
+
+## Using Other Datasets
+
 [How to train on Tinystories](docs/tinystories.md)
 
 [How to train on WikiText-103](docs/wt103.md)
