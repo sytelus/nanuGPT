@@ -10,7 +10,7 @@ data:
 
 training:
   device_batch_size: 64 # default 12, GH200: 72
-  max_steps: 8618    # for OpenWebText/9,035,582,198 tokens
+  max_steps: 17235    # for OpenWebText/9,035,582,198 tokens
   enable_train_log: true
   log_every: 2
   grad_clip: 1.0 # disabled if 0.0
@@ -19,18 +19,18 @@ training:
 optimizer:
   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
   module_kwargs:
-    learning_rate: 18.0E-4 # default 6.0E-4, GH200 12.0E-4
+    learning_rate: 6.0E-4 # default 6.0E-4, GH200 12.0E-4
     weight_decay: 0.1
     beta1: 0.9
     beta2: 0.95
     eps: 1.0E-8 # pytorch default
 
 scheduler:
-  module: 'nanugpt.schedulers.constant.get_scheduler'
+  module: 'nanugpt.schedulers.linear.get_scheduler'
   module_kwargs:
-    warmup_iters: 250
-    cooldown_iters: 2000
-    const_lr: 18.0E-4
+    warmup_iters: 700
+    end_factor: 1.0E-6
+
 
 eval:
   eval_every: 10
