@@ -5,7 +5,7 @@ def get_num_params(d_model:int, n_layers:int, vocab_size:int, include_embedding,
     wpe = seq_len * d_model # possitional embedding
 
     linear_head = d_model * vocab_size   # final projection to vocab size layer
-    wte = linear_head if tied_emb else 0 # token embedding
+    wte = linear_head if not tied_emb else 0 # token embedding
 
     # layer norm has one param for each feature
     layer_norm = d_model + (d_model if layer_norm_bias else 0)

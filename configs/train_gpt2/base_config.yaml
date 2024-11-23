@@ -57,17 +57,17 @@ data:
     tokenized_test_path: null
 
 training:
-  device_batch_size: 72 # default 12, GH200: 72
+  device_batch_size: 12 # default 12, GH200: 72
   max_steps: 600000    # for OpenWebText/9B tokens
   enable_train_log: true
   log_every: 20
   grad_clip: 1.0 # disabled if 0.0
-  global_batch_size: 504 # default 480
+  global_batch_size: 480 # default 480
 
 optimizer:
   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
   module_kwargs:
-    learning_rate: 12.0E-4 # default 6.0E-4
+    learning_rate: 6.0E-4 # default 6.0E-4, GH200 12.0E-4
     weight_decay: 0.1
     beta1: 0.9
     beta2: 0.95
