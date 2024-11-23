@@ -1,0 +1,41 @@
+__include__: ['base_config.yaml']
+
+general:
+  project_name: 'gpt2_owt'
+
+data:
+  module_kwargs:
+    tokenized_train_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/train.bin'
+    tokenized_val_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/val.bin'
+
+training:
+  device_batch_size: 64 # default 12, GH200: 72
+  max_steps: 33    # for OpenWebText/9B tokens
+  enable_train_log: true
+  log_every: 1
+  grad_clip: 1.0 # disabled if 0.0
+  global_batch_size: 524288 # default 480
+
+optimizer:
+  module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
+  module_kwargs:
+    learning_rate: 18.0E-4 # default 6.0E-4, GH200 12.0E-4
+    weight_decay: 0.1
+    beta1: 0.9
+    beta2: 0.95
+    eps: 1.0E-8 # pytorch default
+
+scheduler:
+  module: 'nanugpt.schedulers.constant.get_scheduler'
+  module_kwargs:
+    warmup_iters: 250
+    cooldown_iters: 2000
+    const_lr: 18.0E-4
+
+eval:
+  eval_every: 2
+  eval_iters: 200 # number of samples to evaluate for dataset
+  save_checkpoint: true
+  checkoint_after: 0 # starts saving checkpoint after these steps
+  checkpoint_every_hr: 0.5 # multiple of eval_every, save checkpoint after these steps from last checkpoint when val loss is better
+  checkpoint_keep_best: false # keep only the best checkpoint, otherwise keep all with  _{step}.pt
