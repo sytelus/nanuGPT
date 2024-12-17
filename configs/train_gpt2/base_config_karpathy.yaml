@@ -1,4 +1,5 @@
-# base config is designed for GPT2/OpenWebText with NanoGPT defaults
+# Config translated from Karpathy's original nanoGPT implementation
+
 general:
   project_name: 'train_gpt2'
   run_name: '_time:' # default run name is timestamp

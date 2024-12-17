@@ -1,5 +1,7 @@
 __include__: ['base_config.yaml']
 
+# Config translated from https://github.com/karpathy/llm.c/blob/master/scripts/pyrun_gpt2_124M.sh
+
 general:
   project_name: 'gpt2_owt'
 
@@ -10,7 +12,7 @@ data:
 
 training:
   device_batch_size: 64 # default 12, GH200: 72
-  max_steps: 17235    # for OpenWebText/9,035,582,198 tokens
+  max_steps: 18865    # for OpenWebText/9,035,582,198 tokens
   enable_train_log: true
   log_every: 2
   grad_clip: 1.0 # disabled if 0.0
@@ -33,7 +35,7 @@ scheduler:
 
 
 eval:
-  eval_every: 10
+  eval_every: 250
   eval_iters: 200 # number of samples to evaluate for dataset
   save_checkpoint: true
   checkoint_after: 0 # starts saving checkpoint after these steps
