@@ -18,6 +18,28 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+class NewGELU(nn.Module):
+    """Careful there are a few versions of GeLU, this one is the exact one used by OpenAI"""
+    def forward(self, input):
+        return 0.5 * input * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (input + 0.044715 * torch.pow(input, 3.0))))
+
+@dataclass
+class GPTConfig:
+    block_size: int = 1024
+    vocab_size: int = 50304 # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
+    n_layer: int = 12
+    n_head: int = 12
+    n_embd: int = 768
+    mlp_bias: bool = True
+    attn_proj_bias: bool = True
+    attn_kv_bias: bool = False  # Karpathy has this to PyTorch default which is True
+    layer_norm_bias: bool = True
+    attn_dropout: float = 0.0 # applied on softmax of QK^T
+    mlp_dropout: float = 0.0
+    resid_dropout: float = 0.0
+    embed_dropout: float = 0.0
+    initializer_range: float = 0.02
+
 class LayerNorm(nn.Module):
     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
 
@@ -35,7 +57,7 @@ class LayerNorm(nn.Module):
 
 class CausalSelfAttention(nn.Module):
 
-    def __init__(self, config):
+    def __init__(self, config:GPTConfig):
         super().__init__()
 
         # ensure each head gets same bits of the embedding dim
@@ -45,6 +67,8 @@ class CausalSelfAttention(nn.Module):
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.attn_kv_bias)
         # output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.attn_proj_bias)
+        self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = 1 # type: ignore
+
         # regularization
         self.attn_dropout = nn.Dropout(config.attn_dropout)
         self.resid_dropout = nn.Dropout(config.resid_dropout)
@@ -73,7 +97,10 @@ class CausalSelfAttention(nn.Module):
         # causal self-attention; Self-attend: (batch_size, n_heads, seq_len, head_size) x (batch_size, n_heads, head_size, seq_len) -> (batch_size, n_heads, seq_len, seq_len)
         if self.flash:
             # efficient attention using Flash Attention CUDA kernels
-            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.flash_attn_dropout_val if self.training else 0, is_causal=True)
+            y = torch.nn.functional.scaled_dot_product_attention(q, k, v,
+                    attn_mask=None,
+                    dropout_p=self.flash_attn_dropout_val if self.training else 0.0,
+                    is_causal=True)
         else:
             # manual implementation of attention
 
@@ -112,23 +139,25 @@ class CausalSelfAttention(nn.Module):
 
 class MLP(nn.Module):
 
-    def __init__(self, config):
+    def __init__(self, config:GPTConfig):
         super().__init__()
         self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.mlp_bias)
-        self.gelu    = nn.GELU()
+        self.gelu    = NewGELU()    # nn.GELU()
         self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.mlp_bias)
-        self.dropout = nn.Dropout(config.mlp_dropout)
+        self.dropout = nn.Dropout(config.mlp_dropout) if config.mlp_dropout else None
+        self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = 1 # type: ignore
 
     def forward(self, x):
         x = self.c_fc(x)
         x = self.gelu(x)
         x = self.c_proj(x)
-        x = self.dropout(x)
+        if self.dropout:
+            x = self.dropout(x)
         return x
 
 class Block(nn.Module):
 
-    def __init__(self, config):
+    def __init__(self, config:GPTConfig):
         super().__init__()
         # Original transformer had two layer norms, one after self-attention and one after MLP.
         # It also had two residual connections, one after self-attention and one after MLP.
@@ -146,42 +175,28 @@ class Block(nn.Module):
         x = x + self.mlp(self.ln_2(x))
         return x
 
-@dataclass
-class GPTConfig:
-    block_size: int = 1024
-    vocab_size: int = 50304 # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
-    n_layer: int = 12
-    n_head: int = 12
-    n_embd: int = 768
-    mlp_bias: bool = True
-    attn_proj_bias: bool = True
-    attn_kv_bias: bool = False
-    layer_norm_bias: bool = True
-    attn_dropout: float = 0.0 # applied on softmax of QK^T
-    mlp_dropout: float = 0.0
-    resid_dropout: float = 0.0
-    embed_dropout: float = 0.0
-    initializer_range: float = 0.02
-
 class GPT(nn.Module):
 
-    def __init__(self, config: GPTConfig):
+    def __init__(self, config:GPTConfig):
         super().__init__()
         assert config.vocab_size is not None
         assert config.block_size is not None # seq_len
         self.config = config
 
-        self.transformer = nn.ModuleDict(dict(
+        modules:dict = dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd), # n_embd === hidden_size === d_model
             wpe = nn.Embedding(config.block_size, config.n_embd),
-            embed_dropout = nn.Dropout(config.embed_dropout),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             ln_f = LayerNorm(config.n_embd, bias=config.layer_norm_bias),
-        ))
+        )
+        if config.embed_dropout:
+            modules['embed_dropout'] = nn.Dropout(config.embed_dropout)
+        self.transformer = nn.ModuleDict(modules)
 
         # LM head is last layer which projects the final hidden state to vocab_size
         # we keep bias False to match with embedding layer which has no bias
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.lm_head.LLMC_SKIP_INIT = 1 # don't init this one, we will tie weights # type: ignore
 
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
@@ -189,13 +204,16 @@ class GPT(nn.Module):
         # not 100% sure what this is, so far seems to be harmless. TODO investigate
         self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
-        # init all weights
+        # init all weights, use a torch rng object to be very careful
+        self.init_rng = torch.Generator()
+        self.init_rng.manual_seed(42)
         self.apply(self._init_weights)
 
+        # below was removed in llm.c update
         # apply special scaled init to the residual projections, per GPT-2 paper
-        for pn, p in self.named_parameters():
-            if pn.endswith('c_proj.weight'):
-                torch.nn.init.normal_(p, mean=0.0, std=self.config.initializer_range/math.sqrt(2 * config.n_layer))
+        # for pn, p in self.named_parameters():
+        #     if pn.endswith('c_proj.weight'):
+        #         torch.nn.init.normal_(p, mean=0.0, std=self.config.initializer_range/math.sqrt(2 * config.n_layer))
 
 
     def _init_weights(self, module):
@@ -205,12 +223,17 @@ class GPT(nn.Module):
         # for fan_in=768, default stddev would be 0.036.
         # TODO: not sure if below is good idea and is independent of the size of the model
         if isinstance(module, nn.Linear):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=self.config.initializer_range)
+            # apply special scaled init to the residual projections, per GPT-2 paper
+            std = self.config.initializer_range if not hasattr(module, 'LLMC_RESIDUAL_SCALE_FLAG') else self.config.initializer_range/math.sqrt(2 * self.config.n_layer)
+            # we want to skip initializing lm_head, which shares parameters with wte
+            # and wte was already initialized down below during the Embedding init
+            if not hasattr(module, 'LLMC_SKIP_INIT'):
+                torch.nn.init.normal_(module.weight, mean=0.0, std=std, generator=self.init_rng)
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
         # default init for embedding layer in Pytorch is init.normal_ which is N(0, 1)
         elif isinstance(module, nn.Embedding):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=self.config.initializer_range)
+            torch.nn.init.normal_(module.weight, mean=0.0, std=self.config.initializer_range, generator=self.init_rng)
 
     def forward(self, idx, only_last=False):
         device = idx.device
@@ -223,7 +246,10 @@ class GPT(nn.Module):
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (batch_size, seq_len, n_embd)
         pos_emb = self.transformer.wpe(pos) # position embeddings of shape (seq_len, n_embd)
-        x = self.transformer.embed_dropout(tok_emb + pos_emb)
+        if self.config.embed_dropout:
+            x = self.transformer.embed_dropout(tok_emb + pos_emb)
+        else:
+            x = tok_emb + pos_emb
         for block in self.transformer.h:
             x = block(x)
 
