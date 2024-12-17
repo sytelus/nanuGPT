@@ -88,7 +88,9 @@ def full_path(path:str, create=False)->str:
 
 
 def setup_sys(seed, max_threads=None):
-    os.environ['NUMEXPR_MAX_THREADS'] = str(psutil.cpu_count(logical=False) // 2) if max_threads is None else str(max_threads)
+    cpu_count = psutil.cpu_count(logical=False)
+    os.environ['NUMEXPR_MAX_THREADS'] = str((cpu_count if cpu_count else 0) // 2) \
+        if max_threads is None else str(max_threads)  # type: ignore
     np.random.seed(seed)
     random.seed(seed)
 
@@ -225,7 +227,7 @@ class TorchInfo:
     device_type:str
     dtype:str # floating point type
     device_name:str # this can include GPU ID
-    rank: int
+    global_rank: int
     local_rank: int
     world_size: int
     is_master: bool
@@ -262,26 +264,26 @@ def setup_torch(seed:int,
         torch.set_float32_matmul_precision('high')
 
     if enable_distributed:
-        assert torch.distributed.is_available(), 'Distributed training not available. Set enable_distributed=False.'
+        assert torch.distributed.is_available(), 'Distributed training not available. Set enable_distributed=False.'    # type: ignore
         env_rank = os.environ.get('RANK', '-1')
         if env_rank=='-1':
             raise ValueError('RANK environment variable not set BUT enable_distributed=True. You probably want to launch this script using torch.distributed.launch.')
 
-        torch.distributed.init_process_group(backend=distributed_backend, init_method=distributed_init_method)
+        torch.distributed.init_process_group(backend=distributed_backend, init_method=distributed_init_method)  # type: ignore
 
         is_distributed = True
-        rank = torch.distributed.get_rank()
+        global_rank = torch.distributed.get_rank()  # type: ignore
         local_rank = int(os.environ['LOCAL_RANK'])
-        world_size = torch.distributed.get_world_size()
-        is_master = rank == 0
-        seed_offset = rank
+        world_size = torch.distributed.get_world_size() # type: ignore
+        is_master = global_rank == 0
+        seed_offset = global_rank
 
         if is_cuda:
             torch.cuda.set_device(local_rank)
             device_name = f'cuda:{local_rank}'
     else:
         is_distributed = False
-        rank = 0
+        global_rank = 0
         local_rank = 0
         world_size = 1
         is_master = True
@@ -291,11 +293,11 @@ def setup_torch(seed:int,
         torch.cuda.manual_seed(seed+seed_offset)
     torch.manual_seed(seed+seed_offset)
 
-    assert (not enable_distributed) or (enable_distributed and torch.distributed.is_initialized()), 'Distributed training not initialized. Call torch.distributed.init_process_group() first.'
+    assert (not enable_distributed) or (enable_distributed and torch.distributed.is_initialized()), 'Distributed training not initialized. Call torch.distributed.init_process_group() first.' # type: ignore
 
     return TorchInfo(is_cuda=is_cuda, is_distributed=is_distributed,
                      device_type=device_type, dtype=dtype, device_name=device_name,
-                     rank=rank, local_rank=local_rank, world_size=world_size,
+                     global_rank=global_rank, local_rank=local_rank, world_size=world_size,
                      is_master=is_master, seed_offset=seed_offset,
                      pt_dtype=pt_dtype)
 
@@ -679,7 +681,8 @@ def setup_logger(name:Optional[str]=None, log_file:Optional[str]=None,
     logger.addHandler(console_handler)
 
     if log_file is not None:
-        file_handler = logging.handlers.TimedRotatingFileHandler(log_file, delay=True, when="midnight", encoding="utf-8")
+        file_handler = logging.handlers.TimedRotatingFileHandler(log_file, # type: ignore
+            delay=True, when="midnight", encoding="utf-8")
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 

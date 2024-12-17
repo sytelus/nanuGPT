@@ -102,7 +102,7 @@ class MemmapDataloader:
     def __len__(self):
         return self.batch_count
 
-def get_data(local_rank:int, # everything except local rank comes from config
+def get_data(global_rank:int, # everything except global_rank comes from config
              context_length:int, dtype,
              device_batch_size:int, eval_batch_size:int,
              data_loader_seed:int,
@@ -126,8 +126,8 @@ def get_data(local_rank:int, # everything except local rank comes from config
 
     # shuffle on val and test is needed as we do sampling for evaluation
     return MemmapDataloader(train_dataset, device_batch_size,
-                            seed=data_loader_seed+local_rank, shuffle=shuffle, wrap_around=wrap_around), \
+                            seed=data_loader_seed+global_rank, shuffle=shuffle, wrap_around=wrap_around), \
             MemmapDataloader(val_dataset, eval_batch_size,
-                             seed=data_loader_seed+local_rank, shuffle=shuffle, wrap_around=wrap_around), \
+                             seed=data_loader_seed+global_rank, shuffle=shuffle, wrap_around=wrap_around), \
             MemmapDataloader(test_dataset, eval_batch_size,
-                             seed=data_loader_seed+local_rank, shuffle=shuffle, wrap_around=wrap_around) if test_dataset else None
+                             seed=data_loader_seed+global_rank, shuffle=shuffle, wrap_around=wrap_around) if test_dataset else None

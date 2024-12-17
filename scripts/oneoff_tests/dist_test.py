@@ -12,18 +12,18 @@ import torch.distributed as dist
 
 if __name__ == "__main__":
     dist.init_process_group(backend='nccl', init_method='env://')
-    print("Hello from rank {}".format(dist.get_rank()))
+    print("Hello from global_rank {}".format(dist.get_rank()))
 
     t = torch.tensor([1,3], device='cuda:{}'.format(dist.get_rank()))
-    print("Rank {} has {}".format(dist.get_rank(), t))
+    print("global_rank {} has {}".format(dist.get_rank(), t))
 
     dist.barrier()
 
-    dist.reduce(t, dst=0, op=dist.ReduceOp.SUM) # only rank 0 will get reduction result
+    dist.reduce(t, dst=0, op=dist.ReduceOp.SUM) # only global_rank 0 will get reduction result
 
     dist.barrier()
 
-    print("Rank {} has {}".format(dist.get_rank(), t))
+    print("global_rank {} has {}".format(dist.get_rank(), t))
 
     dist.destroy_process_group()
 
