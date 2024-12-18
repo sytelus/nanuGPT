@@ -36,6 +36,9 @@ class MemmapDataset(Dataset):
         self.seq_len = seq_len if seq_len else self.context_length
         assert self.seq_len <= len(self.data), "seq_len must be less than or equal to length of data"
 
+    def token_count(self):
+        return len(self.data)
+
     def __len__(self):
         return self.seq_count
 
@@ -113,10 +116,10 @@ class MemmapDataloader:
         # convert tokens to x, y sequences using tensor views
         # x is first batch_size*context_length tokens
         # y is next token
-        x = torch.from_numpy(tokens[:-1].astype(np.int64)).view(self.batch_size, -1)
-        y = torch.from_numpy(tokens[1:].astype(np.int64)).view(self.batch_size, -1)
+        x = torch.from_numpy(tokens[:-1].astype(np.int64)).view(self.batch_size, self.dataset.context_length)
+        y = torch.from_numpy(tokens[1:].astype(np.int64)).view(self.batch_size, self.dataset.context_length)
 
-        self.idx += x.numel()
+        self.idx = (self.idx + x.numel()) % self.dataset.token_count()
         self.batch_index += 1
 
         return x, y
@@ -153,14 +156,15 @@ def get_data(global_rank:int, world_size:int, # everything except global_rank an
     test_offset = int((len(test_dataset)-1) * float(global_rank) / world_size) \
                 if test_dataset and not shuffle else 0
 
-    # shuffle on val and test is needed as we do sampling for evaluation
+
     return MemmapDataloader(train_dataset, device_batch_size,
                             start_seq_index=train_offset,
                             seed=data_loader_seed+global_rank, shuffle=shuffle), \
             MemmapDataloader(val_dataset, eval_batch_size,
                             start_seq_index=val_offset,
-                             seed=data_loader_seed+global_rank, shuffle=shuffle), \
+                            # shuffle on val and test is needed as we do sampling for evaluation
+                            seed=data_loader_seed+global_rank, shuffle=True), \
             MemmapDataloader(test_dataset, eval_batch_size,
                             start_seq_index=test_offset,
-                             seed=data_loader_seed+global_rank, shuffle=shuffle) if test_dataset else None
+                            seed=data_loader_seed+global_rank, shuffle=True) if test_dataset else None
 
