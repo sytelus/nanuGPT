@@ -11,6 +11,7 @@ class TiktokenWrap(TokenizerBase):
 
     def batch_encode(self, texts:List[str])->Mapping:
         return {'input_ids': self.tokenizer.encode_ordinary_batch(texts)}
+        # EOT is appended in tokenize_dataset.py
 
     def batch_decode(self, ids:List[List[int]])->List[str]:
         return self.tokenizer.decode_batch(ids)

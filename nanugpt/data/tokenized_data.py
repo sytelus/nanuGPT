@@ -1,3 +1,4 @@
+from typing import Optional
 import math
 import numpy as np
 
@@ -15,10 +16,10 @@ PyTorch's Dataset and DataLoader.
 class MemmapDataset(Dataset):
     """
     Wraps memmap array as a torch Dataset so that we can access sequence starting at any index.
-    The dataset is still accessed token by token by specifying index but we always get
-    context_length tokens starting at index.
+    The dataset is still accessed token by token by specifying index but we seq_len tokens at a time.
+    If seq_len is not specified, it is assumed to be equal to context_length.
     """
-    def __init__(self, data:np.memmap, context_length:int):
+    def __init__(self, data:np.memmap, context_length:int, seq_len:Optional[int]=None):
         super().__init__()
         self.data = data
         self.context_length = context_length
@@ -26,14 +27,35 @@ class MemmapDataset(Dataset):
         assert len(data) >= context_length, "dataset tokens must be at least context_length, got %d" % len(data)
         # imagine moving a window of size context_length over data
         self.seq_count = len(data)-context_length+1
+        # how many tokens shall we return at a time is controlled by seq_len
+        self.set_seq_len(seq_len)
+
         assert self.seq_count >= 2, "dataset must have at least 2 sequences to generate x,y pairs, got %d" % self.seq_count
+
+    def set_seq_len(self, seq_len:Optional[int]):
+        self.seq_len = seq_len if seq_len else self.context_length
+        assert self.seq_len <= len(self.data), "seq_len must be less than or equal to length of data"
 
     def __len__(self):
         return self.seq_count
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx:int):
         # requrn sequence at idx
-        return self.data[idx:idx+self.context_length]
+        # if length of slice extends beyond end of data,
+        # wrap around and concatenate from start and return the sequence
+        if idx+self.seq_len > len(self.data):
+            # calculate how many tokens to wrap around and keep wraping around until we get seq_len tokens
+            tokens = self.data[idx:]
+            remaining = idx+self.seq_len-len(self.data)
+            while remaining > len(self.data):
+                tokens = np.concatenate((tokens, self.data))
+                remaining -= len(self.data)
+            if remaining > 0:
+                tokens = np.concatenate((tokens, self.data[:remaining]))
+            return tokens
+
+        # return sequence of seq_len tokens
+        return self.data[idx:idx+self.seq_len]
 
 class MemmapDataloader:
     """
@@ -51,46 +73,51 @@ class MemmapDataloader:
     def __init__(self, memmap_dataset:MemmapDataset, batch_size:int,
                  seed:int, shuffle:bool, start_seq_index:int=0):
         self.dataset = memmap_dataset
-        # wrap around allows to train on small dataset with small context length but
-        # using large batch size
-        self.shuffle = shuffle
 
+        # random generator for shuffling
+        self.rand_gen = torch.Generator().manual_seed(seed)
+        self.shuffle = shuffle
         self.n_seqs = len(self.dataset)
 
         self.batch_size = batch_size
         # how many batches will we return in one epochs (last batch may get wrapped around)
-        self.batch_count = math.ceil(self.n_seqs/self.batch_size)
-        # random generator for shuffling
-        self.rand_gen = torch.Generator().manual_seed(seed)
+        self.batch_count = math.ceil(float(self.n_seqs)/self.batch_size/self.dataset.context_length)
+        self.batch_index = 0
 
         assert start_seq_index < self.n_seqs-1, "start_seq_index must be 1 less than number of sequences"
         assert start_seq_index == 0 or not shuffle, "start_seq_index must be 0 if shuffle is on"
         self.idx = start_seq_index # index of sequence to start with
+
+        # add 1 for shifted y sequence
+        self.dataset.set_seq_len(batch_size * self.dataset.context_length + 1)
 
     def __iter__(self):
         return self
 
     def __next__(self):
         # If we reached 2nd last sequence, wrap around
-        if self.idx >= self.n_seqs-1:
-            self.idx = 0
+        if self.batch_index >= self.batch_count:
+            self.batch_index = 0
+            # we are not changing self.idx as we want to wrap around
             raise StopIteration
 
         if self.shuffle:
-            # chose from 0..n_seqs-2, wrap around by n_seqs-1 (so that we have 1 seq left at end)
-            # start_seq_index is not used in shuffle mode
-            ix = (torch.randint(self.n_seqs-1, (1,), generator=self.rand_gen) \
-                    + torch.arange(self.batch_size)) % (self.n_seqs-1)
+            # chose from 0..n_seqs-2
+            start = int(torch.randint(self.n_seqs-1, (1,), generator=self.rand_gen).item())
         else:
             # we are sequentially returning batches
-            ix = (self.idx + torch.arange(self.batch_size)) % (self.n_seqs-1)
+            start = self.idx
 
-        self.idx += len(ix)
+        tokens = self.dataset[start]
 
-        # sequence at index is x and sequence at next token is y
-        # TODO: Use one tensor and two views to save on memory
-        x = torch.stack([torch.from_numpy((self.dataset[i]).astype(np.int64)) for i in ix])
-        y = torch.stack([torch.from_numpy((self.dataset[i+1]).astype(np.int64)) for i in ix])
+        # convert tokens to x, y sequences using tensor views
+        # x is first batch_size*context_length tokens
+        # y is next token
+        x = torch.from_numpy(tokens[:-1].astype(np.int64)).view(self.batch_size, -1)
+        y = torch.from_numpy(tokens[1:].astype(np.int64)).view(self.batch_size, -1)
+
+        self.idx += x.numel()
+        self.batch_index += 1
 
         return x, y
 
@@ -103,7 +130,7 @@ def get_data(global_rank:int, world_size:int, # everything except global_rank an
              data_loader_seed:int,
              tokenized_train_path:str, tokenized_val_path:str,
              tokenized_test_path=None,
-             shuffle=True,):
+             shuffle=False,):
 
     if tokenized_train_path:
         tokenized_train_path = utils.full_path(tokenized_train_path)
@@ -111,6 +138,7 @@ def get_data(global_rank:int, world_size:int, # everything except global_rank an
         tokenized_val_path = utils.full_path(tokenized_val_path)
     if tokenized_test_path:
         tokenized_test_path = utils.full_path(tokenized_test_path)
+
     train_dataset = MemmapDataset(np.memmap(tokenized_train_path, dtype=dtype, mode='r'),
                                   context_length)
     val_dataset = MemmapDataset(np.memmap(tokenized_val_path, dtype=dtype, mode='r'),
@@ -120,16 +148,19 @@ def get_data(global_rank:int, world_size:int, # everything except global_rank an
 
     train_offset = int((len(train_dataset)-1) * float(global_rank) / world_size) \
                 if not shuffle else 0
-    # TODO: Use offsets for val and test as well
+    val_offset = int((len(val_dataset)-1) * float(global_rank) / world_size) \
+                if not shuffle else 0
+    test_offset = int((len(test_dataset)-1) * float(global_rank) / world_size) \
+                if test_dataset and not shuffle else 0
 
     # shuffle on val and test is needed as we do sampling for evaluation
     return MemmapDataloader(train_dataset, device_batch_size,
                             start_seq_index=train_offset,
                             seed=data_loader_seed+global_rank, shuffle=shuffle), \
             MemmapDataloader(val_dataset, eval_batch_size,
-                            start_seq_index=0,
+                            start_seq_index=val_offset,
                              seed=data_loader_seed+global_rank, shuffle=shuffle), \
             MemmapDataloader(test_dataset, eval_batch_size,
-                            start_seq_index=0,
+                            start_seq_index=test_offset,
                              seed=data_loader_seed+global_rank, shuffle=shuffle) if test_dataset else None
 

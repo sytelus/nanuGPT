@@ -65,7 +65,7 @@ def tokenize(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
             if self._tok is None:
                 self._tok = tokenizer_factory()
             ids = self._tok.batch_encode([text])['input_ids'][0]
-            ids.append(self._tok.eot_token_id())
+            ids.append(self._tok.eot_token_id()) # Always append EOT at end so two docs are separated
             return {'ids': ids, 'len': len(ids)}
 
     # tokenize all splits in the dataset
