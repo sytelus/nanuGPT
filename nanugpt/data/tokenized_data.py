@@ -13,15 +13,20 @@ and accessed by a custom Dataset and DataLoader which have same interface as
 PyTorch's Dataset and DataLoader.
 """
 class MemmapDataset(Dataset):
-    """Wraps memmap array as a torch Dataset so that we can access sequence starting at any index"""
+    """
+    Wraps memmap array as a torch Dataset so that we can access sequence starting at any index.
+    The dataset is still accessed token by token by specifying index but we always get
+    context_length tokens starting at index.
+    """
     def __init__(self, data:np.memmap, context_length:int):
         super().__init__()
         self.data = data
         self.context_length = context_length
         # we need minimum of 2 sequences to generate x and y
-        assert len(data) >= context_length + 1, "dataset tokens must be at least context_length + 1, got %d" % len(data)
+        assert len(data) >= context_length, "dataset tokens must be at least context_length, got %d" % len(data)
         # imagine moving a window of size context_length over data
         self.seq_count = len(data)-context_length+1
+        assert self.seq_count >= 2, "dataset must have at least 2 sequences to generate x,y pairs, got %d" % self.seq_count
 
     def __len__(self):
         return self.seq_count
@@ -31,71 +36,60 @@ class MemmapDataset(Dataset):
         return self.data[idx:idx+self.context_length]
 
 class MemmapDataloader:
-    # iterator to simulate dataloader
+    """
+    DataLoader looks at the dataset as sequences of size context_length.
+    It is simply iterator that returns batch_size number of sequences at each iteration.
+    There are a few corner cases:
+        1. What if number of sequences is less than batch_size?
+            Wrap around and keep filling the batch. As we get more batches, we might get to
+            uniform distribution of sequences.
+        2. With shuffle off: What if we are near the end and cannot fill the batch?
+            Wrap around and fill the batch. Don't return truncated batch.
+        3. With shuffle on: Should we fill batch from continuous sequences? Or get random sequences?
+            Getting random sequences is expensive. So, we should get continuous sequences.
+    """
     def __init__(self, memmap_dataset:MemmapDataset, batch_size:int,
-                 seed:int, shuffle:bool, wrap_around:bool):
-        if shuffle and not wrap_around:
-            raise ValueError("wrap_around must be True if shuffle is True")
+                 seed:int, shuffle:bool, start_seq_index:int=0):
         self.dataset = memmap_dataset
-        self.wrap_around = wrap_around
+        # wrap around allows to train on small dataset with small context length but
+        # using large batch size
         self.shuffle = shuffle
 
-        # For N tokens, dataset size is S=N-context_len+1, i.e.,
-        # we move window of size context_len over data but leave
-        # For S consecutive sequences, we have S-1 pairs of consecutive x and y
-        # So, total number of sequences is S-1
-        self.n_seqs = len(self.dataset)-1
+        self.n_seqs = len(self.dataset)
 
-        # if batch size is greater than number of sequences, we will return trucated batch
-        # unless wrap_around is True
-        self.batch_size = min(batch_size, self.n_seqs) if not wrap_around else batch_size
-        # how many batches will we return in one epochs
+        self.batch_size = batch_size
+        # how many batches will we return in one epochs (last batch may get wrapped around)
         self.batch_count = math.ceil(self.n_seqs/self.batch_size)
         # random generator for shuffling
         self.rand_gen = torch.Generator().manual_seed(seed)
-        self.idx = 0 # index of batch
+
+        assert start_seq_index < self.n_seqs-1, "start_seq_index must be 1 less than number of sequences"
+        assert start_seq_index == 0 or not shuffle, "start_seq_index must be 0 if shuffle is on"
+        self.idx = start_seq_index # index of sequence to start with
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        # If we returned same as count of batches then reset the iterator
-        if self.idx >= len(self):
+        # If we reached 2nd last sequence, wrap around
+        if self.idx >= self.n_seqs-1:
             self.idx = 0
             raise StopIteration
 
         if self.shuffle:
-            # chose random indices for sequences that will be in batch
-            ix = torch.randint(self.n_seqs, (self.batch_size,), generator=self.rand_gen)
-
-            # wrap_around is ignored if shuffle is True
+            # chose from 0..n_seqs-2, wrap around by n_seqs-1 (so that we have 1 seq left at end)
+            # start_seq_index is not used in shuffle mode
+            ix = (torch.randint(self.n_seqs-1, (1,), generator=self.rand_gen) \
+                    + torch.arange(self.batch_size)) % (self.n_seqs-1)
         else:
             # we are sequentially returning batches
+            ix = (self.idx + torch.arange(self.batch_size)) % (self.n_seqs-1)
 
-            # adjust batch size if we don't have enough tokens left
-            start_seq_index = self.idx * self.batch_size
-            avail_seq_count = self.n_seqs - start_seq_index
-            this_batch_size = min(self.batch_size, avail_seq_count)
-
-            # first get indices for available sequences
-            ix = torch.arange(start_seq_index, start_seq_index+this_batch_size)
-
-            # if wrap around and remaining_seq_count > 0, then get remaining sequences from start
-            if self.wrap_around:
-                start_seq_index = 0
-                remaining_batch_size = self.batch_size - this_batch_size
-                while remaining_batch_size > 0:
-                    avail_seq_count = self.n_seqs - start_seq_index
-                    this_batch_size = min(remaining_batch_size, avail_seq_count)
-                    ix = torch.cat((ix, torch.arange(start_seq_index, start_seq_index+this_batch_size)))
-                    start_seq_index += this_batch_size
-                    remaining_batch_size -= this_batch_size
+        self.idx += len(ix)
 
         # sequence at index is x and sequence at next token is y
         x = torch.stack([torch.from_numpy((self.dataset[i]).astype(np.int64)) for i in ix])
         y = torch.stack([torch.from_numpy((self.dataset[i+1]).astype(np.int64)) for i in ix])
-
-        self.idx += 1
 
         return x, y
 
@@ -108,8 +102,7 @@ def get_data(global_rank:int, # everything except global_rank comes from config
              data_loader_seed:int,
              tokenized_train_path:str, tokenized_val_path:str,
              tokenized_test_path=None,
-             shuffle=True,
-             wrap_around=True):
+             shuffle=True,):
 
     if tokenized_train_path:
         tokenized_train_path = utils.full_path(tokenized_train_path)
@@ -126,8 +119,8 @@ def get_data(global_rank:int, # everything except global_rank comes from config
 
     # shuffle on val and test is needed as we do sampling for evaluation
     return MemmapDataloader(train_dataset, device_batch_size,
-                            seed=data_loader_seed+global_rank, shuffle=shuffle, wrap_around=wrap_around), \
+                            seed=data_loader_seed+global_rank, shuffle=shuffle), \
             MemmapDataloader(val_dataset, eval_batch_size,
-                             seed=data_loader_seed+global_rank, shuffle=shuffle, wrap_around=wrap_around), \
+                             seed=data_loader_seed+global_rank, shuffle=shuffle), \
             MemmapDataloader(test_dataset, eval_batch_size,
-                             seed=data_loader_seed+global_rank, shuffle=shuffle, wrap_around=wrap_around) if test_dataset else None
+                             seed=data_loader_seed+global_rank, shuffle=shuffle) if test_dataset else None
