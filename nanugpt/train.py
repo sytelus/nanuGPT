@@ -104,10 +104,13 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                                                      **data_config['module_kwargs'])
     train_batch_count = len(train_loader)
     logger.summary({
+                    'data/train_dataset_tokens': train_loader.dataset.token_count(),
+                    'data/val_dataset_tokens': val_loader.dataset.token_count(),
+                    'data/test_dataset_tokens': test_loader.dataset.token_count() if test_loader is not None else 0,
                     'data/train_dataset_len': len(train_loader.dataset),
                     'data/val_dataset_len': len(val_loader.dataset),
                     'data/test_dataset_len': len(test_loader.dataset) if test_loader is not None else 0,
-                    'data/train_dataloader_len': train_batch_count,
+                    'data/train_dataloader_len': len(train_loader),
                     'data/val_dataloader_len': len(val_loader),
                     'data/test_dataloader_len': len(test_loader) if test_loader is not None else 0
                     })
