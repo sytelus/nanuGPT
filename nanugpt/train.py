@@ -99,7 +99,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                     })
 
     # get dataset
-    train_loader, val_loader, test_loader = get_data(local_rank=torch_info.local_rank,
+    train_loader, val_loader, test_loader = get_data(global_rank=torch_info.global_rank,
+                                                     world_size=torch_info.world_size,
                                                      **data_config['module_kwargs'])
     train_batch_count = len(train_loader)
     logger.summary({

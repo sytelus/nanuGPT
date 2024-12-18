@@ -88,6 +88,7 @@ class MemmapDataloader:
         self.idx += len(ix)
 
         # sequence at index is x and sequence at next token is y
+        # TODO: Use one tensor and two views to save on memory
         x = torch.stack([torch.from_numpy((self.dataset[i]).astype(np.int64)) for i in ix])
         y = torch.stack([torch.from_numpy((self.dataset[i+1]).astype(np.int64)) for i in ix])
 
@@ -96,7 +97,7 @@ class MemmapDataloader:
     def __len__(self):
         return self.batch_count
 
-def get_data(global_rank:int, # everything except global_rank comes from config
+def get_data(global_rank:int, world_size:int, # everything except global_rank and world_size comes from config
              context_length:int, dtype,
              device_batch_size:int, eval_batch_size:int,
              data_loader_seed:int,
@@ -117,10 +118,18 @@ def get_data(global_rank:int, # everything except global_rank comes from config
     test_dataset = MemmapDataset(np.memmap(tokenized_test_path, dtype=dtype, mode='r'),
                                   context_length) if tokenized_test_path else None
 
+    train_offset = int((len(train_dataset)-1) * float(global_rank) / world_size) \
+                if not shuffle else 0
+    # TODO: Use offsets for val and test as well
+
     # shuffle on val and test is needed as we do sampling for evaluation
     return MemmapDataloader(train_dataset, device_batch_size,
+                            start_seq_index=train_offset,
                             seed=data_loader_seed+global_rank, shuffle=shuffle), \
             MemmapDataloader(val_dataset, eval_batch_size,
+                            start_seq_index=0,
                              seed=data_loader_seed+global_rank, shuffle=shuffle), \
             MemmapDataloader(test_dataset, eval_batch_size,
+                            start_seq_index=0,
                              seed=data_loader_seed+global_rank, shuffle=shuffle) if test_dataset else None
+
