@@ -1,3 +1,5 @@
+#! /bin/bash
+
 # this script starts the worker script in slurm
 
 set -eu -o xtrace -o pipefail # fail if any command failes, log all commands

@@ -1,3 +1,4 @@
+#! /bin/bash
 
 # run this from project root
 

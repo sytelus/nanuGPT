@@ -1,3 +1,5 @@
+#! /bin/bash
+
 set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
 
 # required and optional variable
