@@ -5,7 +5,7 @@
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 
 export START_SCRIPT="train.py"
-export START_SCRIPT_ARGS="configs/train_gpt2/openwebtext.yaml"
+export START_SCRIPT_ARGS="configs/train_gpt2/openwebtext.yaml --general.out_dir $JOB_OUT_DIR"
 
 # SETUP BELOW VALUES!!
 

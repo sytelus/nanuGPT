@@ -19,6 +19,22 @@ for var in "${REQUIRED_VARS[@]}"; do
 done
 ### ---------- End check required environment variables
 
+# master address and port is required for torch.distributed so communication with other nodes can happen
+# SLURM_LAUNCH_NODE_IPADDR should be set but we create fallback to HEAD_NODE_IPADDR
+HEAD_NODE_IPADDR=$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n 1)
+SLURM_LAUNCH_NODE_IPADDR=${SLURM_LAUNCH_NODE_IPADDR:-HEAD_NODE_IPADDR}
+SLURM_STEP_GPUS=${SLURM_STEP_GPUS:-0}
+export MASTER_ADDR="${MASTER_ADDR:-$SLURM_LAUNCH_NODE_IPADDR}"
+# Split GPU IDs into an array and find the minimum value
+IFS=',' read -ra gpu_array <<< "${SLURM_STEP_GPUS}"
+min_gpu_id=${gpu_array[0]}
+for gpu_id in "${gpu_array[@]}"; do
+    if (( gpu_id < min_gpu_id )); then
+        min_gpu_id=$gpu_id
+    fi
+done
+export MASTER_PORT=$((6000 + min_gpu_id))
+
 # add the package install directory to the python path
 # this directory is shared between all nodes
 if [ ! -z "$PACKAGE_INSTALL_DIR" ]; then
@@ -30,10 +46,7 @@ cd "${TARGET_SOURCE_DIR}"
 # normally don't use torchrun as it doesn't scale as well as direct launch
 if [ "${USE_TORCHRUN}" = "1" ]; then
     # build the torchrun command
-    TORCH_RUN_ARGS="--nproc_per_node $GPUS_PER_NODE --nnodes $SLURM_JOB_NUM_NODES --node_rank $SLURM_NODEID --master_addr $SLURM_LAUNCH_NODE_IPADDR"
-    if [ -n "${MASTER_PORT}" ]; then
-        TORCH_RUN_ARGS="${TORCH_RUN_ARGS} --master_port $MASTER_PORT"
-    fi
+    TORCH_RUN_ARGS="--nproc_per_node $GPUS_PER_NODE --nnodes $SLURM_JOB_NUM_NODES --node_rank $SLURM_NODEID --master_addr $SLURM_LAUNCH_NODE_IPADDR --master_port $MASTER_PORT"
     eval "torchrun $TORCH_RUN_ARGS $START_SCRIPT $START_SCRIPT_ARGS"
 else
     # setup vars needed for torch.dist.init_process_group
