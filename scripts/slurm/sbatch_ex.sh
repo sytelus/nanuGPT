@@ -53,6 +53,7 @@ fi
 # All tasks in job works off of the same source directory
 # We wll also install package requirements from this directory
 export TARGET_SOURCE_DIR="${JOB_OUT_DIR}/source_dir"
+rm -rf "$TARGET_SOURCE_DIR"
 mkdir -p "$TARGET_SOURCE_DIR"
 pushd "$SOURCE_DIR"
 if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
@@ -64,6 +65,7 @@ popd
 
 export SLURM_SCRIPT_DIR="${JOB_OUT_DIR}/slurm_scripts"
 # copy all slurm scripts to job out dir so we can use them in cluster
+rm -rf "$SLURM_SCRIPT_DIR"
 mkdir -p "$SLURM_SCRIPT_DIR"
 cp "$SCRIPT_DIR/*.sh" "$SLURM_SCRIPT_DIR/"
 
