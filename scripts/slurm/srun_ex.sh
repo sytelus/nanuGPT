@@ -37,6 +37,14 @@ if [ ${USE_TORCHRUN} -eq 0 ]; then
     MPI_ARG="--mpi=none"
 fi
 
+ALL_CONTAINER_MOUNTS="${JOB_OUT_DIR}:${JOB_OUT_DIR}"
+if [ ! -z "${CONTAINER_MOUNTS}" ]; then
+    ALL_CONTAINER_MOUNTS="${ALL_CONTAINER_MOUNTS},${CONTAINER_MOUNTS}"
+fi
+if [ ! -z "${SYS_CONTAINER_MOUNTS}" ]; then
+    ALL_CONTAINER_MOUNTS="${ALL_CONTAINER_MOUNTS},${SYS_CONTAINER_MOUNTS}"
+fi
+
 if [ ${INSTALL_PACKAGE} -eq 1 ]; then
     echo "Installing package in container context..."
     export PACKAGE_INSTALL_DIR="${JOB_OUT_DIR}/package_installs"
@@ -50,9 +58,7 @@ if [ ${INSTALL_PACKAGE} -eq 1 ]; then
             -o "${JOB_OUT_DIR}/srun_package_install_log_${RESTART_COUNT}.txt" \
             -e "${JOB_OUT_DIR}/srun_package_install_err_${RESTART_COUNT}.txt" \
             --container-image "${CONTAINER_IMAGE_PATH}" \
-            --container-mounts "${CONTAINER_MOUNTS} \
-                                ${JOB_OUT_DIR}:${JOB_OUT_DIR} \
-                                ${SYS_CONTAINER_MOUNTS}" \
+            --container-mounts "${ALL_CONTAINER_MOUNTS}" \
             --container-writable --no-container-mount-home --no-container-remap-root \
             --wait=60 --kill-on-bad-exit=1 --label \
             bash -c "
@@ -70,9 +76,7 @@ srun --ntasks=${NTASKS} --ntasks-per-node=${GPUS_PER_NODE} ${MPI_ARG} \
     -o "${JOB_OUT_DIR}/srun_log_${RESTART_COUNT}.txt" \
     -e "${JOB_OUT_DIR}/srun_err_${RESTART_COUNT}.txt" \
     --container-image "${CONTAINER_IMAGE_PATH}" \
-    --container-mounts "${CONTAINER_MOUNTS} \
-                        ${JOB_OUT_DIR}:${JOB_OUT_DIR} \
-                        ${SYS_CONTAINER_MOUNTS}" \
+    --container-mounts "${ALL_CONTAINER_MOUNTS}" \
     --container-writable --no-container-mount-home --no-container-remap-root \
     --wait=60 --kill-on-bad-exit=1 --label \
     "$SLURM_SCRIPT_DIR/slaunch_ex.sh
