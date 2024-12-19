@@ -22,7 +22,7 @@ done
 # add the package install directory to the python path
 # this directory is shared between all nodes
 if [ ! -z "$PACKAGE_INSTALL_DIR" ]; then
-    export PYTHONPATH=$PACKAGE_INSTALL_DIR:$PYTHONPATH
+    export PYTHONPATH=$PACKAGE_INSTALL_DIR:${PYTHONPATH:-}
 fi
 
 cd "${TARGET_SOURCE_DIR}"
