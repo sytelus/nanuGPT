@@ -68,7 +68,8 @@ export SLURM_SCRIPT_DIR="${JOB_OUT_DIR}/slurm_scripts"
 # copy all slurm scripts to job out dir so we can use them in cluster
 rm -rf "$SLURM_SCRIPT_DIR"
 mkdir -p "$SLURM_SCRIPT_DIR"
-cp "$SCRIPT_DIR/*.sh" "$SLURM_SCRIPT_DIR/"
+cp "$SCRIPT_DIR/"*.sh "$SLURM_SCRIPT_DIR/"
+chmod +x "$SLURM_SCRIPT_DIR/"*.sh
 
 sbatch \
     ${PARTITION_ARG} ${RESERVATION_ARG} ${SHARE_NODE_ARG} ${REQUEUE_ARG} \
