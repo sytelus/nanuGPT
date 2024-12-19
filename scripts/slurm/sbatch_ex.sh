@@ -21,9 +21,10 @@ for var in "${REQUIRED_VARS[@]}"; do
 done
 ### ---------- End check required environment variables
 
-export JOB_OUT_DIR="${OUT_DIR}/${JOB_NAME}/$(date +%Y-%m-%d_%H-%M-%S_%3N)" # append job info
-
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+
+export JOB_OUT_DIR="${OUT_DIR}/${JOB_NAME}/$(date +%Y-%m-%d_%H-%M-%S_%3N)" # append job info
+mkdir -p "${JOB_OUT_DIR}"
 
 PARTITION_ARG=""
 RESERVATION_ARG=""
