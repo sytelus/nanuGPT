@@ -1,5 +1,14 @@
 #! /bin/bash
 
+####################################################################################################
+# This script submits uses srun to launch worker processes in the slurm cluster. The reason we need
+# this script is because sbatch only runs script on master node once. If we need to launch multiple
+# worker processes then we need to use srun. This script will typically run from the master node in
+# slurm environment which may have GPUs or other resources. This script will first install the
+# code as package in the container such that all dependencies are in persistent storage and then
+# launch the target script on all nodes.
+####################################################################################################
+
 set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
 
 # required and optional variable

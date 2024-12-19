@@ -1,5 +1,14 @@
 #! /bin/bash
 
+####################################################################################################
+# This script submits a job to slurm cluster
+# It copies the source directory to a shared location and submits a script that will
+# run srun to launch processes. The reason we need this script is because srun runs
+# synchronously while sbatch exits after submission. This script will typically run
+# from the login node in slurm environment which may not have GPUs or other resources.
+####################################################################################################
+
+
 set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
 
 # required and optional variable

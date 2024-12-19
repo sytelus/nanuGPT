@@ -21,8 +21,6 @@ done
 
 # master address and port is required for torch.distributed so communication with other nodes can happen
 # SLURM_LAUNCH_NODE_IPADDR should be set but we create fallback to HEAD_NODE_IPADDR
-HEAD_NODE_IPADDR=$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n 1)
-SLURM_LAUNCH_NODE_IPADDR=${SLURM_LAUNCH_NODE_IPADDR:-HEAD_NODE_IPADDR}
 SLURM_STEP_GPUS=${SLURM_STEP_GPUS:-0}
 export MASTER_ADDR="${MASTER_ADDR:-$SLURM_LAUNCH_NODE_IPADDR}"
 # Split GPU IDs into an array and find the minimum value
