@@ -3,7 +3,7 @@
 set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
 
 # required and optional variable
-REQUIRED_VARS=("START_SCRIPT" "GPUS_PER_NODE")
+REQUIRED_VARS=("START_SCRIPT" "GPUS_PER_NODE" "TARGET_SOURCE_DIR")
 USE_TORCHRUN=${USE_TORCHRUN:-0} # launcher to use worker processes
 START_SCRIPT_ARGS=${START_SCRIPT_ARGS:-}    # arguments to pass to the entry script
 MASTER_PORT=${MASTER_PORT:-} # port to use for torchrun
@@ -22,6 +22,8 @@ done
 if [ ! -z "$PACKAGE_INSTALL_DIR" ]; then
     export PYTHONPATH=$PACKAGE_INSTALL_DIR:$PYTHONPATH
 fi
+
+cd "${TARGET_SOURCE_DIR}"
 
 # normally don't use torchrun as it doesn't scale as well as direct launch
 if [ "${USE_TORCHRUN}" = "1" ]; then

@@ -23,6 +23,8 @@ done
 
 export JOB_OUT_DIR="${OUT_DIR}/${JOB_NAME}/$(date +%Y-%m-%d_%H-%M-%S_%3N)" # append job info
 
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+
 PARTITION_ARG=""
 RESERVATION_ARG=""
 REQUEUE_ARG=""
@@ -60,6 +62,11 @@ else
 fi
 popd
 
+export SLURM_SCRIPT_DIR="${JOB_OUT_DIR}/slurm_scripts"
+# copy all slurm scripts to job out dir so we can use them in cluster
+mkdir -p "$SLURM_SCRIPT_DIR"
+cp "$SCRIPT_DIR/*.sh" "$SLURM_SCRIPT_DIR/"
+
 sbatch \
     ${PARTITION_ARG} ${RESERVATION_ARG} ${SHARE_NODE_ARG} ${REQUEUE_ARG} \
     --nodes=$NODES \
@@ -68,4 +75,4 @@ sbatch \
     --output="${JOB_OUT_DIR}/sbatch_log.txt" \
     --error="${JOB_OUT_DIR}/sbatch_err.txt" \
     --mem=0 \
-    srun_ex.sh # this will be run once on primary node
+    "$SLURM_SCRIPT_DIR/srun_ex.sh" # this will be run once on primary node
