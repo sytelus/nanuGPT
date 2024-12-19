@@ -1,6 +1,8 @@
 
 # run this from project root
 
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+
 export START_SCRIPT="train.py"
 export START_SCRIPT_ARGS="configs/train_gpt2/openwebtext.yaml"
 
@@ -14,4 +16,4 @@ export START_SCRIPT_ARGS="configs/train_gpt2/openwebtext.yaml"
 # PARTITION=<my_partition> \
 # RESERVATION=<my_reservation> \
 RESTARTABLE=0 \
-./sbatch_ex.sh
+"$SCRIPT_DIR/sbatch_ex.sh"
