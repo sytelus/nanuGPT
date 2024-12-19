@@ -41,7 +41,7 @@ if [ ${INSTALL_PACKAGE} -eq 1 ]; then
     echo "Installing package in container context..."
     export PACKAGE_INSTALL_DIR="${JOB_OUT_DIR}/package_installs"
     # if this is first try then remove any previous package install directory
-    if [ "${SLURM_RESTART_COUNT}" -eq 0 ]; then
+    if [ "${SLURM_RESTART_COUNT:-0}" -eq 0 ]; then
         rm -rf "${PACKAGE_INSTALL_DIR}"
     fi
     # on retries we don't want to reinstall the packages
