@@ -1,6 +1,11 @@
 #! /bin/bash
 
-# this script starts the worker script in slurm
+####################################################################################################
+# This script is the final stage of submission to the slurm cluster. This script is spawned per
+# worker process and is needed as wrapper to the actual start script to setup environment variables
+# that will be used by torch.distributed.init_process_group. Another additional setup this script
+# does is to update PYTHONPATH to include shared package install directory.
+####################################################################################################
 
 set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
 

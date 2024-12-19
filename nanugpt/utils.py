@@ -279,8 +279,18 @@ def setup_torch(seed:int,
         seed_offset = global_rank
 
         if is_cuda:
-            torch.cuda.set_device(local_rank)
-            device_name = f'cuda:{local_rank}'
+            # When running from torchrun, all GPUs are visible so we select through LOCAL_RANK.
+            # When running from slurm only one GPU is visible so we select that one.
+            gpu_count = torch.cuda.device_count()
+            if gpu_count > 1:
+                assert gpu_count-1 >= local_rank, f'LOCAL_RANK={local_rank} is greater than available GPUs={gpu_count}'
+                torch.cuda.set_device(local_rank)
+                device_name = f'cuda:{local_rank}'
+            elif gpu_count == 1:
+                torch.cuda.set_device(0)
+                device_name = 'cuda:0'
+            else:
+                raise ValueError('No GPU found. Set device_type=cpu.')
     else:
         is_distributed = False
         global_rank = 0
