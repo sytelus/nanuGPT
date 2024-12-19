@@ -56,6 +56,7 @@ if [ ${INSTALL_PACKAGE} -eq 1 ]; then
             --container-writable --no-container-mount-home --no-container-remap-root \
             --wait=60 --kill-on-bad-exit=1 --label \
             bash -c "
+                set -euxo pipefail
                 mkdir -p \$PACKAGE_INSTALL_DIR
                 cd \$TARGET_SOURCE_DIR
                 pip install --target=\$PACKAGE_INSTALL_DIR .
