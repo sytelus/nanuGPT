@@ -79,4 +79,4 @@ srun --ntasks=${NTASKS} --ntasks-per-node=${GPUS_PER_NODE} ${MPI_ARG} \
     --container-mounts "${ALL_CONTAINER_MOUNTS}" \
     --container-writable --no-container-mount-home --no-container-remap-root \
     --wait=60 --kill-on-bad-exit=1 --label \
-    "$SLURM_SCRIPT_DIR/slaunch_ex.sh
+    "$SLURM_SCRIPT_DIR/slaunch_ex.sh"
