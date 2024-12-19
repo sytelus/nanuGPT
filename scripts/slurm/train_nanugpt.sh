@@ -15,5 +15,5 @@ export START_SCRIPT_ARGS="configs/train_gpt2/openwebtext.yaml"
 
 # PARTITION=<my_partition> \
 # RESERVATION=<my_reservation> \
-RESTARTABLE=0 \
+bash RESTARTABLE=0 \
 "$SCRIPT_DIR/sbatch_ex.sh"
