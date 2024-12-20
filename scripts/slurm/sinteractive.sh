@@ -24,14 +24,14 @@ for var in "${REQUIRED_VARS[@]}"; do
 done
 ### ---------- End check required environment variables
 
+export JOB_OUT_DIR="${OUT_DIR}/${JOB_NAME}/$(date +%Y-%m-%d_%H-%M-%S_%3N)" # append job info
+
 if [ ! -z "$ENV_SETUP_SCRIPT" ]; then
     # copy to job out dir so its available in the container
     cp "$ENV_SETUP_SCRIPT" "${JOB_OUT_DIR}/env_setup.sh"
     # update the variable to point to the copied file
     export JOB_ENV_SETUP_SCRIPT="${JOB_OUT_DIR}/env_setup.sh"
 fi
-
-export JOB_OUT_DIR="${OUT_DIR}/${JOB_NAME}/$(date +%Y-%m-%d_%H-%M-%S_%3N)" # append job info
 
 PARTITION_ARG=""
 RESERVATION_ARG=""
