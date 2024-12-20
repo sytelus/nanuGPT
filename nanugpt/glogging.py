@@ -284,7 +284,7 @@ class Logger:
                 if original_handler is not None:
                     original_handler(exc_type, exc_value, exc_traceback)
 
-            sys.excepthook = partial(handle_execpt, original_handler=sys.excepthook, logger=self)
+            sys.excepthook = partial(handle_execpt, sys.excepthook, self)
             _except_handler_installed = True
 
     def log_config(self, config):
@@ -368,6 +368,27 @@ class Logger:
                     artifact.add_file(file_or_dir)
             self._wandb_logger.log_artifact(artifact)
 
+    def log_torch_info(self):
+        self.summary({
+                        'cuda/nccl_available': torch.distributed.is_nccl_available(), # type: ignore
+                        'cuda/device_name': torch.cuda.get_device_name() if torch.cuda.is_available() else '<not_cuda>',
+                        'cuda/device_index': torch.device(torch.cuda.get_device_name()).index if torch.cuda.is_available() else None,
+                        'cuda/device_count': torch.cuda.device_count(),
+                        'cuda/cudnn.enabled': torch.backends.cudnn.enabled, # type: ignore
+                        'cuda/cudnn.benchmark': torch.backends.cudnn.benchmark, # type: ignore
+                        'cuda/cudnn.deterministic': torch.backends.cudnn.deterministic, # type: ignore
+                        'cuda/cudnn.version': torch.backends.cudnn.version(), # type: ignore
+                        'cuda/CUDA_VISIBLE_DEVICES': os.environ.get('CUDA_VISIBLE_DEVICES', None),
+                        'cuda/device_capability': torch.cuda.get_device_capability() if torch.cuda.is_available() else None,
+                        'cuda/current_device': torch.cuda.current_device() if torch.cuda.is_available() else None,
+                        'dist/get_world_size': torch.distributed.get_world_size() if torch.distributed.is_initialized() else None, # type: ignore
+                        'dist/get_rank': torch.distributed.get_rank() if torch.distributed.is_initialized() else None, # type: ignore
+                        'dist/torch.distributed.is_initialized': torch.distributed.is_initialized(), # type: ignore
+                        'dist/torch.distributed.is_available': torch.distributed.is_available(), # type: ignore
+                        'dist/gloo_available': torch.distributed.is_gloo_available(), # type: ignore
+                        'dist/mpi_available': torch.distributed.is_mpi_available(), # type: ignore
+                        })
+
     def log_sys_info(self):
         self.summary({
                         'sys/python_version': f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}',
@@ -392,20 +413,6 @@ class Logger:
                         'env/CUDA_HOME': os.environ.get('CUDA_HOME', None),
                         'env/PYTORCH_CUDA_ALLOC_CONF': os.environ.get('PYTORCH_CUDA_ALLOC_CONF', None),
                         'env/CUDA_VISIBLE_DEVICES': os.environ.get('CUDA_VISIBLE_DEVICES', None),
-                        'cuda/nccl_available': torch.distributed.is_nccl_available(), # type: ignore
-                        'cuda/device_name': torch.cuda.get_device_name() if torch.cuda.is_available() else '<not_cuda>',
-                        'cuda/device_count': torch.cuda.device_count(),
-                        'cuda/cudnn.enabled': torch.backends.cudnn.enabled, # type: ignore
-                        'cuda/cudnn.benchmark': torch.backends.cudnn.benchmark, # type: ignore
-                        'cuda/cudnn.deterministic': torch.backends.cudnn.deterministic, # type: ignore
-                        'cuda/cudnn.version': torch.backends.cudnn.version(), # type: ignore
-                        'cuda/CUDA_VISIBLE_DEVICES': os.environ.get('CUDA_VISIBLE_DEVICES', None),
-                        'dist/get_world_size': torch.distributed.get_world_size() if torch.distributed.is_initialized() else None, # type: ignore
-                        'dist/get_rank': torch.distributed.get_rank() if torch.distributed.is_initialized() else None, # type: ignore
-                        'dist/torch.distributed.is_initialized': torch.distributed.is_initialized(), # type: ignore
-                        'dist/torch.distributed.is_available': torch.distributed.is_available(), # type: ignore
-                        'dist/gloo_available': torch.distributed.is_gloo_available(), # type: ignore
-                        'dist/mpi_available': torch.distributed.is_mpi_available(), # type: ignore
 
                         # TODO: importlib.metadata doesn't work in Python 3.8 so disabling for now
                         # 'flash_attn_ver': str(utils.get_package_ver('flash_attn')),
