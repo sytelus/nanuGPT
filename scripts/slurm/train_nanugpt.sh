@@ -1,5 +1,8 @@
 #! /bin/bash
 
+set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
+
+
 # run this from project root
 
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"

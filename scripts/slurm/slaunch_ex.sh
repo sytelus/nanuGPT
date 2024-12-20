@@ -47,29 +47,59 @@ else
 fi
 
 cd "${TARGET_SOURCE_DIR}"
+pwd
 
 # package installation if requested
 if [ "${INSTALL_PACKAGE}" = "1" ]; then
     # create temp dir to store marker file
-    temp_dir="${TMPDIR:-/tmp}/slaunch_package_marker"
-    marker_file="${temp_dir}/install_done"
-    mkdir -p "$temp_dir"
+    LOCKDIR="${TMPDIR:-/tmp}/slaunch_package_fifo"
+    mkdir -p "$LOCKDIR"
+    PIPEFILE="${LOCKDIR}/sync_pipe"
+    DONEFILE="$LOCKDIR/install_done"
+
+    # Ensure the named pipe exists. If multiple processes attempt mkfifo simultaneously,
+    # this might print an error once, but the pipe will still exist after the first success.
+    if [[ ! -p "$PIPEFILE" ]]; then
+        (umask 000; mkfifo "$PIPEFILE" 2>/dev/null || true)
+    fi
+
 
     # if head process in the node then install package
     if [[ "$IS_NODE_PROC0" -eq 1 ]]; then
-        rm -f "$marker_file"
-        pip install --no-cache-dir --editable "${TARGET_SOURCE_DIR}"
+        # Writer process
+        # Cleanup any old done file to ensure a fresh state for this run.
+        rm -f "$DONEFILE"
 
-        # Create the marker file to signal other workers
-        touch "$marker_file"
+        # install the package in editable mode
+        pip install -e .
+
+        # Signal that initialization is done
+        touch "$DONEFILE"
+        # Write a signal to the pipe and close it.
+        # This will unblock all readers waiting on the pipe.
+        echo "initialized" > "$PIPEFILE"
+        # Once we exit, the pipe closes and any reader that didn't get the line will get EOF.
+
+        echo "Writer: Initialization complete."
+        # If there are no readers, this still works fine. The writer doesn't block.
     else
-        # block other workers until head process is done installing package
-        echo "Waiting for marker file to be created..."
-        inotifywait -q -e create --format "%f" "$temp_dir" | while read file; do
-            if [[ "$file" == "$(basename "$marker_file")" ]]; then
-                break
+        # Reader process
+        if [ ! -f "$DONEFILE" ]; then
+            # Need to wait until initialization is done. We'll block on reading the pipe.
+            if read line < "$PIPEFILE"; then
+                true # Do nothing. We just need to unblock the pipe.
+            else
+                # If we got here, it means the pipe was closed (EOF) before we got a line.
+                # this will happen to all but one reader process.
+                true # Do nothing. We just need to unblock the pipe.
             fi
-        done
+
+            # After being unblocked, ensure done file is present.
+            if [ ! -f "$DONEFILE" ]; then
+                echo "Unexpected behavior: Worker process with SLURM_PROCID=$SLURM_PROCID got unblocked while package install was still not done!" >&2   # >&2 redirects to stderr
+                exit 1  # Non-zero exit code indicates error            fi
+            fi
+        fi
     fi
 else
     # add the package to PYTHONPATH so it acts like installed package
