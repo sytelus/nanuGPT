@@ -25,7 +25,7 @@ done
 ### ---------- End check required environment variables
 
 export JOB_OUT_DIR="${OUT_DIR}/${JOB_NAME}/$(date +%Y-%m-%d_%H-%M-%S_%3N)" # append job info
-mkdire -p "${JOB_OUT_DIR}"
+mkdir -p "${JOB_OUT_DIR}"
 
 # setup cluster specific environment variables, these will be inherited by the container
 if [ ! -z "$JOB_ENV_SETUP_SCRIPT" ]; then
