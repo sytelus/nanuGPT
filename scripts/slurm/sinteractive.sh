@@ -62,8 +62,6 @@ fi
 srun ${PARTITION_ARG} ${RESERVATION_ARG} ${SHARE_NODE_ARG} ${NODELIST_ARG} \
     --nodes=${NODES} \
     --gpus-per-node=${GPUS_PER_NODE} \
-    -o "${JOB_OUT_DIR}/srun_log_interactive.txt" \
-    -e "${JOB_OUT_DIR}/srun_err_interactive.txt" \
     --container-image "${CONTAINER_IMAGE_PATH}" \
     --container-mounts "${ALL_CONTAINER_MOUNTS}" \
     --container-writable --no-container-remap-root \
