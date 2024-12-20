@@ -3,7 +3,7 @@
 set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
 
 # required and optional variable
-REQUIRED_VARS=("GPUS_PER_NODE" "CONTAINER_IMAGE_PATH" "JOB_OUT_DIR" "TARGET_SOURCE_DIR" "SLURM_SCRIPT_DIR")
+REQUIRED_VARS=("GPUS_PER_NODE" "CONTAINER_IMAGE_PATH")
 CONTAINER_MOUNTS=${CONTAINER_MOUNTS:-}  # app specific mounts to be attached to container as source:destination
 SYS_CONTAINER_MOUNTS=${SYS_CONTAINER_MOUNTS:-}  # system specific mounts to be attached to container as source:destination
 JOB_ENV_SETUP_SCRIPT=${JOB_ENV_SETUP_SCRIPT:-} # script to setup environment for specific cluster
