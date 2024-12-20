@@ -115,7 +115,7 @@ if [ "${USE_TORCHRUN}" = "1" ]; then
     eval "torchrun $TORCH_RUN_ARGS $START_SCRIPT $START_SCRIPT_ARGS"
 else
     # setup vars needed for torch.dist.init_process_group
-    #export CUDA_VISIBLE_DEVICES=${SLURM_LOCALID}
+    export CUDA_VISIBLE_DEVICES=${gpu_array[$SLURM_LOCALID]}
     export NODE_RANK=$SLURM_NODEID
     export RANK=$SLURM_PROCID # global rank
     export LOCAL_RANK=$SLURM_LOCALID # rank within the node, not used by init_process_group but we set it for consistency

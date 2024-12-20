@@ -227,6 +227,7 @@ class TorchInfo:
     is_distributed: bool
     device_type:str
     dtype:str # floating point type
+    device_id:int   # GPU ID that process sees
     device_name:str # this can include GPU ID
     global_rank: int
     local_rank: int
@@ -287,9 +288,11 @@ def setup_torch(seed:int,
                 assert gpu_count-1 >= local_rank, f'LOCAL_RANK={local_rank} is greater than available GPUs={gpu_count}'
                 torch.cuda.set_device(local_rank)
                 device_name = f'cuda:{local_rank}'
+                device_id = local_rank
             elif gpu_count == 1:
                 torch.cuda.set_device(0)
                 device_name = 'cuda:0'
+                device_id = 0
             else:
                 raise ValueError('No GPU found. Set device_type=cpu.')
     else:
@@ -310,7 +313,7 @@ def setup_torch(seed:int,
                      device_type=device_type, dtype=dtype, device_name=device_name,
                      global_rank=global_rank, local_rank=local_rank, world_size=world_size,
                      is_master=is_master, seed_offset=seed_offset,
-                     pt_dtype=pt_dtype)
+                     pt_dtype=pt_dtype, device_id=device_id)
 
 def save_checkpoint(out_dir:str, name:str, model, optimizer, scheduler,
                     step:int, best_val_loss:float)->str:
