@@ -49,9 +49,13 @@ def create_py_logger(filepath:Optional[str]=None,
                     run_name:Optional[str]=None,
                     run_description:Optional[str]=None,
                     py_logger_name:Optional[str]=None,    # default is root
-                    level=py_logging.INFO,
-                    enable_stdout=True)->py_logging.Logger:
-    py_logging.basicConfig(level=level) # this sets level for standard py_logging.info calls
+                    min_level=py_logging.INFO,
+                    stdout_level=py_logging.INFO,
+                    file_level=py_logging.INFO,
+                    enable_stdout=True,
+                    global_rank=0)->py_logging.Logger:
+
+    py_logging.basicConfig(level=min_level) # this sets level for standard py_logging.info calls
     logger = py_logging.getLogger(name=py_logger_name)
 
     # close current handlers
@@ -59,14 +63,14 @@ def create_py_logger(filepath:Optional[str]=None,
         handler.close()
         logger.removeHandler(handler)
 
-    logger.setLevel(level)
+    logger.setLevel(min_level)
 
     if enable_stdout:
         ch = RichHandler(
-            level = level,
+            level = stdout_level,
             show_time = True,
             show_level = False,
-            log_time_format = '%H:%M',
+            log_time_format = '%H:%M' if global_rank == 0 else f'[{global_rank}]%H:%M',
             show_path = False,
             keywords = highlight_metric_keywords,
         )
@@ -85,7 +89,7 @@ def create_py_logger(filepath:Optional[str]=None,
         # zero_file(filepath)
         # use mode='a' to append
         fh = py_logging.FileHandler(filename=filepath, mode='w', encoding='utf-8')
-        fh.setLevel(level)
+        fh.setLevel(file_level)
         fh.setFormatter(py_logging.Formatter('[%(asctime)s][%(levelname)s] %(message)s'))
         logger.addHandler(fh)
 
@@ -177,13 +181,28 @@ flush = _uninit_logger
 _logger:Optional['Logger'] = None
 _except_handler_installed:bool = False
 
+def get_rank_filename(filename: str, global_rank: int, change_for_rank0=False) -> str:
+    """Add global rank to filename to avoid overwriting files in distributed training."""
+
+    if global_rank == 0 and not change_for_rank0:
+        return filename
+
+    parts = filename.rsplit('.', maxsplit=1)
+
+    if len(parts) == 1:
+        return f"{filename}.{global_rank}"
+    else:
+        return f"{parts[0]}.{global_rank}.{parts[1]}"
+
 def get_logger()->'Logger':
     global _logger
     if _logger is None:
         raise RuntimeError('Logger not initialized. Create Logger() first.')
     return _logger
 class Logger:
-    def __init__(self, master_process:bool,
+    def __init__(self,
+                 global_rank:int,
+                 master_process:bool,
                  project_name:Optional[str]=None,
                  run_name:Optional[str]=None,
                  run_description:Optional[str]=None,
@@ -194,14 +213,13 @@ class Logger:
                  summaries_filename:Optional[str]=None,
                  allow_overwrite_log=False,
                  summaries_stdout=True,
-                 glabal_instance:Optional[bool]=None,
                  save_on_exit:bool=True,
                  ) -> None:
 
         global _logger, _except_handler_installed, \
             summary, log_config, info, warn, error, log_sys_info, shutdown, flush
 
-        if glabal_instance!=False and _logger is None:
+        if _logger is None:
             _logger = self
             # module level methods to call global logging object
             summary = partial(Logger.summary, _logger)
@@ -212,7 +230,10 @@ class Logger:
             log_sys_info = partial(Logger.log_sys_info, _logger)
             shutdown = partial(Logger.shutdown, _logger)
             flush = partial(Logger.flush, _logger)
+        else:
+            raise RuntimeError('Logger already initialized. Cannot create more than one logger.')
 
+        self.global_rank = global_rank
         self.has_shutdown = False
         self.start_time = timeit.default_timer()
         self._py_logger = None
@@ -225,20 +246,24 @@ class Logger:
         self.quite_keys:Optional[Set[str]] = None
         self.summaries = {}
 
+        if log_dir:
+            log_dir = utils.full_path(str(log_dir), create=True)
+            if log_filename:
+                log_filename = get_rank_filename(log_filename, global_rank)
+                self.log_filepath = utils.full_path(os.path.join(log_dir, log_filename))
+            if summaries_filename:
+                summaries_filename = get_rank_filename(summaries_filename, global_rank)
+                self.summaries_filepath = utils.full_path(os.path.join(log_dir, str(summaries_filename)))
+
+        self._py_logger = create_py_logger(filepath=self.log_filepath,
+                                        allow_overwrite_log=allow_overwrite_log,
+                                        project_name=project_name,
+                                        run_name=run_name,
+                                        run_description=run_description,
+                                        stdout_level=py_logging.INFO if global_rank==0 else py_logging.WARNING,
+                                        global_rank=global_rank)
+
         if master_process:
-            if log_dir:
-                log_dir = utils.full_path(str(log_dir), create=True)
-                if log_filename:
-                    self.log_filepath = utils.full_path(os.path.join(log_dir, str(log_filename)))
-                if summaries_filename:
-                    self.summaries_filepath = utils.full_path(os.path.join(log_dir, str(summaries_filename)))
-
-            self._py_logger = create_py_logger(filepath=self.log_filepath,
-                                            allow_overwrite_log=allow_overwrite_log,
-                                            project_name=project_name,
-                                            run_name=run_name,
-                                            run_description=run_description)
-
             if enable_wandb:
                 if utils.is_debugging():
                     self._py_logger.warning('Wandb logging is disabled in debug mode.') # type: ignore
@@ -248,8 +273,8 @@ class Logger:
                                                     run_description)
             # else leave things to None
 
-            if save_on_exit and _logger == self:
-                install_atexit()
+        if save_on_exit and _logger == self:
+            install_atexit()
 
         if not _except_handler_installed:
             def handle_execpt(original_handler, logger:'Logger', exc_type, exc_value, exc_traceback):
@@ -262,7 +287,7 @@ class Logger:
             _except_handler_installed = True
 
     def log_config(self, config):
-        if self.summaries_stdout and self._py_logger is not None:
+        if  self.summaries_stdout and self._py_logger is not None:
             self._py_logger.info(_dict2msg({'project_config': config}))
         if self.enable_wandb and self._wandb_logger is not None:
             self._wandb_logger.config.update(config)
@@ -283,7 +308,7 @@ class Logger:
 
         if not py_logger_only and self.enable_wandb and self._wandb_logger is not None:
             if isinstance(d, str):
-                wandb.alert(title=d[:64], text=d, level=wandb.AlertLevel.INFO)
+                self._wandb_logger.alert(title=d[:64], text=d, level=wandb.AlertLevel.INFO)
             else:
                 wandb.log(d)
 
@@ -300,7 +325,7 @@ class Logger:
             ex_msg = d
             if exception_instance is not None:
                 ex_msg = f'{d}\n{exception_instance}'
-            wandb.alert(title=d[:64], text=ex_msg, level=wandb.AlertLevel.WARN)
+            self._wandb_logger.alert(title=d[:64], text=ex_msg, level=wandb.AlertLevel.WARN)
         # else do nothing
 
     def error(self, d:Union[str, Mapping[str,Any]], py_logger_only:bool=False,
@@ -316,7 +341,7 @@ class Logger:
             ex_msg = d
             if exception_instance is not None:
                 ex_msg = f'{d}\n{exception_instance}'
-            wandb.alert(title=d[:64], text=ex_msg, level=wandb.AlertLevel.ERROR)
+            self._wandb_logger.alert(title=d[:64], text=ex_msg, level=wandb.AlertLevel.ERROR)
 
     def summary(self, d:Mapping[str,Any], py_logger_only:bool=False):
         self.summaries.update(d)
