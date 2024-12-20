@@ -132,7 +132,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     logger.summary({'model/params_all': n_all,
                     'model/params_non_emb': n_all-n_embedding,
                     'model/params_emb': n_embedding,
-                    'model/params_trai': n_trainable,
+                    'model/params_train': n_trainable,
                     'model/params_non_emb_train': n_non_embedding_trainable,
                     'model/context_length': context_length,
                     'model/device_step_flops': device_step_flops,
