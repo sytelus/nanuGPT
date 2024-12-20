@@ -59,8 +59,7 @@ if [ ! -z "${SYS_CONTAINER_MOUNTS}" ]; then
     ALL_CONTAINER_MOUNTS="${ALL_CONTAINER_MOUNTS},${SYS_CONTAINER_MOUNTS}"
 fi
 
-srun --ntasks=${NTASKS} --ntasks-per-node=${GPUS_PER_NODE} ${MPI_ARG} \
-    ${PARTITION_ARG} ${RESERVATION_ARG} ${SHARE_NODE_ARG} ${NODELIST_ARG} \
+srun ${PARTITION_ARG} ${RESERVATION_ARG} ${SHARE_NODE_ARG} ${NODELIST_ARG} \
     --nodes=${NODES} \
     --gpus-per-node=${GPUS_PER_NODE} \
     -o "${JOB_OUT_DIR}/srun_log_interactive.txt" \
