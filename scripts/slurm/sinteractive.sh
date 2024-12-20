@@ -65,6 +65,6 @@ srun ${PARTITION_ARG} ${RESERVATION_ARG} ${SHARE_NODE_ARG} ${NODELIST_ARG} \
     --container-image "${CONTAINER_IMAGE_PATH}" \
     --container-mounts "${ALL_CONTAINER_MOUNTS}" \
     --container-writable --no-container-remap-root \
-    --wait=60 --kill-on-bad-exit=1 --label \
+    --wait=60 --kill-on-bad-exit=1 \
     --task-epilog="bash -c '/usr/bin/pkill -U \$SLURM_JOB_USER sshd'" \
     --pty /bin/bash -i
