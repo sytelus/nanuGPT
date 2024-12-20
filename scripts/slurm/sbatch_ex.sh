@@ -12,7 +12,8 @@
 set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
 
 # required and optional variable
-REQUIRED_VARS=("CONTAINER_IMAGE_PATH" "START_SCRIPT")
+REQUIRED_VARS=("START_SCRIPT")
+export CONTAINER_IMAGE_PATH="${CONTAINER_IMAGE_PATH:-docker://$oauthtoken@nvcr.io#nvidia/pytorch:24.07-py3}"
 export START_SCRIPT_ARGS="${START_SCRIPT_ARGS:-}"    # arguments to pass to the entry script
 export JOB_NAME="${JOB_NAME:-test_job}"
 NODES=${NODES:-1}
