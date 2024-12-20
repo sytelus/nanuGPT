@@ -336,7 +336,7 @@ if __name__ == "__main__":
     config['logging']['project_name'] = 'gpt2-throughput'
     config['logging']['run_name'] = 'throughput'
 
-    logger = common.setup_logger(utils.is_master_process(), config)
+    logger = common.setup_logger(config=config)
 
     for model_name, model_config in model_sizes.model_sizes.items():
         config['model']['module_kwargs'].update(model_config)

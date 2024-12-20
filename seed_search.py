@@ -18,7 +18,7 @@ if __name__ == "__main__":
     config['training']['enable_train_log'] = False
 
     logging_config = config['logging']
-    logger = logging.Logger(master_process=True, **logging_config)
+    logger = logging.Logger(**logging_config)
 
 
     for i in range (120):

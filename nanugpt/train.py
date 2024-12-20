@@ -77,7 +77,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
     # setup system, device, logger, torch
     own_logger = logger is None
-    logger = common.setup_logger(utils.is_master_process(), config, logger)
+    logger = common.setup_logger(config=config, logger=logger)
 
     device, amp_ctx, torch_info = common.setup_device(config, logger)
     assert torch_info.is_master == utils.is_master_process(), "torch_info.is_master != utils.is_master_process()"

@@ -80,7 +80,7 @@ if __name__ == "__main__":
     config['logging']['project_name'] = 'tokens_analysis'
     config['logging']['run_name'] = 'tokens_analysis'
 
-    logger = common.setup_logger(utils.is_master_process(), config)
+    logger = common.setup_logger(config=config)
 
     tokenized_train_path = config['data']['module_kwargs']['tokenized_train_path']
     dtype = config['data']['module_kwargs']['dtype']

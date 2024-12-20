@@ -201,8 +201,6 @@ def get_logger()->'Logger':
     return _logger
 class Logger:
     def __init__(self,
-                 global_rank:int,
-                 master_process:bool,
                  project_name:Optional[str]=None,
                  run_name:Optional[str]=None,
                  run_description:Optional[str]=None,
@@ -218,6 +216,9 @@ class Logger:
 
         global _logger, _except_handler_installed, \
             summary, log_config, info, warn, error, log_sys_info, shutdown, flush
+
+        global_rank = utils.get_global_rank()
+        master_process = utils.is_master_process()
 
         if _logger is None:
             _logger = self

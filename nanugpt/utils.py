@@ -711,6 +711,9 @@ def flash_attn_supported():
     """Returns True if the first GPU is NVIDIA Ampere"""
     return nvidia_sm()[0] >= 8
 
+def get_global_rank()->int:
+    return int(os.environ.get('RANK', '0'))
+
 def is_master_process()->bool:
     return os.environ.get('RANK', '0') == '0'
 
