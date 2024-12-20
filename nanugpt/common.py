@@ -36,13 +36,14 @@ def setup_device(config:Mapping, logger:logging.Logger)->Tuple[torch.device, Abs
 
     utils.setup_sys(seed + torch_info.seed_offset)
 
-    d = {'torch_info/'+k:v for k,v in dataclasses.asdict(torch_info).items()}
-    d['torch_info/pt_dtype'] = str(d['torch_info/pt_dtype'])  # make it JSON serializable so it can be logged
-    logger.summary(d)
-    logger.log_torch_info()
-
     device = torch.device(torch_info.device_name)
     amp_ctx = nullcontext() if torch_info.device_type == 'cpu' else torch.amp.autocast(device_type=torch_info.device_type, dtype=torch_info.pt_dtype)
+
+    d = {'torch_info/'+k:v for k,v in dataclasses.asdict(torch_info).items()}
+    d['torch_info/pt_dtype'] = str(d['torch_info/pt_dtype'])  # make it JSON serializable so it can be logged
+    d['torch_info/device_index'] = str(device.index)  # make it JSON serializable so it can be logged
+    logger.summary(d)
+    logger.log_torch_info()
 
     return device, amp_ctx, torch_info
 

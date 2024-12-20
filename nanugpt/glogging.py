@@ -372,7 +372,6 @@ class Logger:
         self.summary({
                         'cuda/nccl_available': torch.distributed.is_nccl_available(), # type: ignore
                         'cuda/device_name': torch.cuda.get_device_name() if torch.cuda.is_available() else '<not_cuda>',
-                        'cuda/device_index': torch.device(torch.cuda.get_device_name()).index if torch.cuda.is_available() else None,
                         'cuda/device_count': torch.cuda.device_count(),
                         'cuda/cudnn.enabled': torch.backends.cudnn.enabled, # type: ignore
                         'cuda/cudnn.benchmark': torch.backends.cudnn.benchmark, # type: ignore
