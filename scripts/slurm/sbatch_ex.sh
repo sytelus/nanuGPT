@@ -21,6 +21,7 @@ RESERVATION=${RESERVATION:-}
 MAX_GPUS_PER_NODE=${MAX_GPUS_PER_NODE:-8}
 SOURCE_DIR=${SOURCE_DIR:-.}
 export INSTALL_PACKAGE=${INSTALL_PACKAGE:-1} # pip install in source directory
+export UPDATE_PYTHONPATH=${UPDATE_PYTHONPATH:-0} # add source dir to PYTHONPATH (ignored if INSTALL_PACKAGE=1)
 RESTARTABLE=${RESTARTABLE:-1}
 export GPUS_PER_NODE="${GPUS_PER_NODE:-${MAX_GPUS_PER_NODE}}"
 export OUT_DIR=${OUT_DIR:-"${HOME}/out_dir"} # set default output directory

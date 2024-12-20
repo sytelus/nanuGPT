@@ -17,7 +17,6 @@ CONTAINER_MOUNTS=${CONTAINER_MOUNTS:-}  # app specific mounts to be attached to 
 SYS_CONTAINER_MOUNTS=${SYS_CONTAINER_MOUNTS:-}  # system specific mounts to be attached to container as source:destination
 JOB_ENV_SETUP_SCRIPT=${JOB_ENV_SETUP_SCRIPT:-} # script to setup environment for specific cluster
 export USE_TORCHRUN=${USE_TORCHRUN:-0}  # use torchrun or direct slurm launch (recommanded)
-export INSTALL_PACKAGE=${INSTALL_PACKAGE:-1} # pip install in source directory
 
 # Some slurm environment use pmi or pmi2 plugins for MPI in which case set this
 # to "--mpi=pmi2" or "--mpi=pmi". Default is to use whatever is configured.
@@ -52,31 +51,6 @@ if [ ! -z "${CONTAINER_MOUNTS}" ]; then
 fi
 if [ ! -z "${SYS_CONTAINER_MOUNTS}" ]; then
     ALL_CONTAINER_MOUNTS="${ALL_CONTAINER_MOUNTS},${SYS_CONTAINER_MOUNTS}"
-fi
-
-if [ ${INSTALL_PACKAGE} -eq 1 ]; then
-    echo "Installing package in container context..."
-    export PACKAGE_INSTALL_DIR="${JOB_OUT_DIR}/package_installs"
-    # if this is first try then remove any previous package install directory
-    if [ "${SLURM_RESTART_COUNT:-0}" -eq 0 ]; then
-        rm -rf "${PACKAGE_INSTALL_DIR}"
-    fi
-    # on retries we don't want to reinstall the packages
-    if [ ! -d "$PACKAGE_INSTALL_DIR" ]; then
-        srun --nodes=1 --ntasks=1 \
-            -o "${JOB_OUT_DIR}/srun_package_install_log_${RESTART_COUNT}.txt" \
-            -e "${JOB_OUT_DIR}/srun_package_install_err_${RESTART_COUNT}.txt" \
-            --container-image "${CONTAINER_IMAGE_PATH}" \
-            --container-mounts "${ALL_CONTAINER_MOUNTS}" \
-            --container-writable --no-container-mount-home --no-container-remap-root \
-            --wait=60 --kill-on-bad-exit=1 --label \
-            bash -c "
-                set -euxo pipefail
-                mkdir -p \$PACKAGE_INSTALL_DIR
-                cd \$TARGET_SOURCE_DIR
-                pip install --target=\$PACKAGE_INSTALL_DIR .
-            "
-    fi
 fi
 
 NTASKS=$((SLURM_JOB_NUM_NODES * GPUS_PER_NODE))
