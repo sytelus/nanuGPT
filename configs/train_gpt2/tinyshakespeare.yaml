@@ -3,6 +3,9 @@ __include__: ['base_config.yaml']
 general:
   project_name: 'gpt2_tinyshakespeare'
 
+logging:
+  enable_wandb: false
+
 model:
   module: 'nanugpt.models.nanogpt.get_model'
   module_kwargs:
