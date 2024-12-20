@@ -27,6 +27,7 @@ import logging
 from packaging import version
 import pdb
 import traceback
+import io
 
 import yaml
 
@@ -752,9 +753,14 @@ def infinite_iter(iterable:Iterable[Any])->Any:
         except StopIteration:
             it = iter(iterable)
 
-def auto_debug_handler(exctype, value, tb):
-    traceback.print_exception(exctype, value, tb)
-    pdb.post_mortem(tb)
+def get_exception_str(exc_type, exc_value, exc_traceback)->str:
+    with io.StringIO() as s:
+        traceback.print_exception(exc_type, exc_value, exc_traceback, file=s)
+        return s.getvalue()
 
-def auto_debug():
-    sys.excepthook = auto_debug_handler
+def default_except_handler(exc_type, exc_value, exc_traceback):
+    traceback.print_exception(exc_type, exc_value, exc_traceback)
+    #pdb.post_mortem(tb)
+
+def install_exception_handler(handler:Callable[[Type, Any, Any], None]=default_except_handler):
+    sys.excepthook = handler

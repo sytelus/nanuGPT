@@ -1,6 +1,6 @@
 
 import sys
-from typing import Any, Dict, List, Mapping, Optional, Union, Set, Iterable
+from typing import Any, Dict, List, Mapping, Optional, Union, Set, Iterable, Callable
 from functools import partial
 import logging as py_logging
 import psutil
@@ -175,6 +175,7 @@ shutdown = _uninit_logger
 flush = _uninit_logger
 
 _logger:Optional['Logger'] = None
+_except_handler_installed:bool = False
 
 def get_logger()->'Logger':
     global _logger
@@ -197,7 +198,8 @@ class Logger:
                  save_on_exit:bool=True,
                  ) -> None:
 
-        global _logger, summary, log_config, info, warn, error, log_sys_info, shutdown, flush
+        global _logger, _except_handler_installed, \
+            summary, log_config, info, warn, error, log_sys_info, shutdown, flush
 
         if glabal_instance!=False and _logger is None:
             _logger = self
@@ -239,7 +241,7 @@ class Logger:
 
             if enable_wandb:
                 if utils.is_debugging():
-                    self._py_logger.warn('Wandb logging is disabled in debug mode.') # type: ignore
+                    self._py_logger.warning('Wandb logging is disabled in debug mode.') # type: ignore
                 else:
                     self._wandb_logger = create_wandb_logger(project_name, run_name,
                                                     std_metrics[metrics_type],
@@ -248,6 +250,16 @@ class Logger:
 
             if save_on_exit and _logger == self:
                 install_atexit()
+
+        if not _except_handler_installed:
+            def handle_execpt(original_handler, logger:'Logger', exc_type, exc_value, exc_traceback):
+                msg = utils.get_exception_str(exc_type, exc_value, exc_traceback)
+                logger.error(msg)
+                if original_handler is not None:
+                    original_handler(exc_type, exc_value, exc_traceback)
+
+            sys.excepthook = partial(handle_execpt, original_handler=sys.excepthook, logger=self)
+            _except_handler_installed = True
 
     def log_config(self, config):
         if self.summaries_stdout and self._py_logger is not None:
