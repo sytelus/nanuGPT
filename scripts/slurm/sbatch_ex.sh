@@ -93,6 +93,4 @@ sbatch \
     --mem=0 \
     "$SLURM_SCRIPT_DIR/srun_ex.sh" # this will be run once on primary node
 
-echo "Job submitted. Switching to ${JOB_OUT_DIR}. Type popd to return to previous directory."
-echo "Use less -F srun_err_000.txt to view job output."
-pushd "$JOB_OUT_DIR"
+echo "Job submitted. Use less -F ${JOB_OUT_DIR}/srun_err_000.txt for job status."
