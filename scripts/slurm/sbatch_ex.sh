@@ -26,7 +26,7 @@ export GPUS_PER_NODE="${GPUS_PER_NODE:-${MAX_GPUS_PER_NODE}}"
 
 PARTITION=${PARTITION:-}
 RESERVATION=${RESERVATION:-}
-export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"docker://\$oauthtoken@nvcr.io#nvidia/pytorch:24.07-py3"}
+export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"docker://@nvcr.io#nvidia/pytorch:24.07-py3"}
 export ENV_SETUP_SCRIPT=${ENV_SETUP_SCRIPT:-} # script to setup environment for specific cluster
 
 export INSTALL_PACKAGE=${INSTALL_PACKAGE:-1} # pip install in source directory
