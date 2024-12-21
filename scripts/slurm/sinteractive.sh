@@ -5,16 +5,15 @@ set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
 # required and optional variable
 REQUIRED_VARS=("GPUS_PER_NODE" "CONTAINER_IMAGE_PATH")
 CONTAINER_MOUNTS=${CONTAINER_MOUNTS:-}  # app specific mounts to be attached to container as source:destination
-SYS_CONTAINER_MOUNTS=${SYS_CONTAINER_MOUNTS:-}  # system specific mounts to be attached to container as source:destination
 JOB_ENV_SETUP_SCRIPT=${JOB_ENV_SETUP_SCRIPT:-} # script to setup environment for specific cluster
 NODES=${NODES:-1}
 PARTITION=${PARTITION:-}
 RESERVATION=${RESERVATION:-}
 MAX_GPUS_PER_NODE=${MAX_GPUS_PER_NODE:-8}
-GPUS_PER_NODE="${GPUS_PER_NODE:-${MAX_GPUS_PER_NODE}}"
+GPUS_PER_NODE=${GPUS_PER_NODE:-${MAX_GPUS_PER_NODE}}
 NODE_LIST=${NODE_LIST:-}
 OUT_DIR=${OUT_DIR:-"${HOME}/out_dir"} # set default output directory
-JOB_NAME=${JOB_NAME:-'slurm_interactive_job'}
+JOB_NAME=${JOB_NAME:-"slurm_interactive_job"}
 export INTERACTIVE_JOB=1    # used by env_setup.sh to setup environment for interactive job
 
 
@@ -52,11 +51,11 @@ else
 fi
 
 ALL_CONTAINER_MOUNTS="${JOB_OUT_DIR}:${JOB_OUT_DIR}"
+if [ ! -z "${DATA_ROOT}" ]; then
+    ALL_CONTAINER_MOUNTS="${ALL_CONTAINER_MOUNTS},${DATA_ROOT}:${DATA_ROOT}"
+fi
 if [ ! -z "${CONTAINER_MOUNTS}" ]; then
     ALL_CONTAINER_MOUNTS="${ALL_CONTAINER_MOUNTS},${CONTAINER_MOUNTS}"
-fi
-if [ ! -z "${SYS_CONTAINER_MOUNTS}" ]; then
-    ALL_CONTAINER_MOUNTS="${ALL_CONTAINER_MOUNTS},${SYS_CONTAINER_MOUNTS}"
 fi
 
 srun ${PARTITION_ARG} ${RESERVATION_ARG} ${SHARE_NODE_ARG} ${NODELIST_ARG} \

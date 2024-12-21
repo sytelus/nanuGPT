@@ -8,6 +8,7 @@ set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
 
 
 # !! setup below values
+# DATA_ROOT is mounted inside the container at the same location, if not empty
 # PARTITION=<my_partition> \
 # RESERVATION=<my_reservation> \
 # DATA_ROOT="/mnt/path/to/data" \

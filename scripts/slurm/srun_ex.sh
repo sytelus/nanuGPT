@@ -14,7 +14,6 @@ set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
 # required and optional variable
 REQUIRED_VARS=("GPUS_PER_NODE" "CONTAINER_IMAGE_PATH" "JOB_OUT_DIR" "TARGET_SOURCE_DIR" "SLURM_SCRIPT_DIR")
 CONTAINER_MOUNTS=${CONTAINER_MOUNTS:-}  # app specific mounts to be attached to container as source:destination
-SYS_CONTAINER_MOUNTS=${SYS_CONTAINER_MOUNTS:-}  # system specific mounts to be attached to container as source:destination
 JOB_ENV_SETUP_SCRIPT=${JOB_ENV_SETUP_SCRIPT:-} # script to setup environment for specific cluster
 export USE_TORCHRUN=${USE_TORCHRUN:-0}  # use torchrun or direct slurm launch (recommanded)
 
@@ -45,12 +44,12 @@ if [ ${USE_TORCHRUN} -eq 0 ]; then
     MPI_ARG="--mpi=none"
 fi
 
-ALL_CONTAINER_MOUNTS="${JOB_OUT_DIR}:${JOB_OUT_DIR}"
-if [ ! -z "${CONTAINER_MOUNTS}" ]; then
-    ALL_CONTAINER_MOUNTS="${ALL_CONTAINER_MOUNTS},${CONTAINER_MOUNTS}"
+ALL_CONTAINER_MOUNTS="${JOB_OUT_DIR}:${JOB_OUT_DIR}" # mount output directory
+if [ ! -z "${DATA_ROOT}" ]; then
+    ALL_CONTAINER_MOUNTS="${ALL_CONTAINER_MOUNTS},${DATA_ROOT}:${DATA_ROOT}"
 fi
-if [ ! -z "${SYS_CONTAINER_MOUNTS}" ]; then
-    ALL_CONTAINER_MOUNTS="${ALL_CONTAINER_MOUNTS},${SYS_CONTAINER_MOUNTS}"
+if [ ! -z "${CONTAINER_MOUNTS}" ]; then # anything else to mount?
+    ALL_CONTAINER_MOUNTS="${ALL_CONTAINER_MOUNTS},${CONTAINER_MOUNTS}"
 fi
 
 NTASKS=$((SLURM_JOB_NUM_NODES * GPUS_PER_NODE))
