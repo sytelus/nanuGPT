@@ -127,13 +127,16 @@ class MemmapDataloader:
     def __len__(self):
         return self.batch_count
 
-def get_data(global_rank:int, world_size:int, # everything except global_rank and world_size comes from config
-             context_length:int, dtype,
+def get_data(context_length:int, dtype,
              device_batch_size:int, eval_batch_size:int,
              data_loader_seed:int,
              tokenized_train_path:str, tokenized_val_path:str,
              tokenized_test_path=None,
              shuffle=False,):
+
+    world_size = utils.get_world_size()
+    global_rank = utils.get_global_rank()
+    assert world_size > 0 and global_rank >= 0 and global_rank < world_size, "world_size and global_rank must be set"
 
     if tokenized_train_path:
         tokenized_train_path = utils.full_path(tokenized_train_path)

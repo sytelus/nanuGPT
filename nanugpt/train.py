@@ -99,9 +99,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                     })
 
     # get dataset
-    train_loader, val_loader, test_loader = get_data(global_rank=torch_info.global_rank,
-                                                     world_size=torch_info.world_size,
-                                                     **data_config['module_kwargs'])
+    train_loader, val_loader, test_loader = get_data(**data_config['module_kwargs'])
     train_batch_count = len(train_loader)
     logger.summary({
                     'data/train_dataset_tokens': train_loader.dataset.token_count(),
@@ -238,17 +236,18 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         fwd_bwd_interval = timeit.default_timer() - step_start_time
 
         if torch_info.is_distributed:
-            dist.barrier()
+            # dist.barrier() # not needed as reduce will sync all processes
             # reduce tensors to global_rank 0 to get numbers from all ranks
-            fp32_dist = torch.tensor([loss_sum, fwd_bwd_interval, pre_clip_norm], dtype=torch.float32, device=device)
-            int_dist = torch.tensor([correct_sum, step_preds_count, step_sample_count, step_token_count], dtype=torch.int64, device=device)
+            fp32_dist = torch.tensor([loss_sum, fwd_bwd_interval, pre_clip_norm,
+                                      correct_sum, step_preds_count, step_sample_count, step_token_count], dtype=torch.float32, device=device)
             dist.reduce(fp32_dist, dst=0, op=dist.ReduceOp.SUM)
-            dist.reduce(int_dist, dst=0,op=dist.ReduceOp.SUM)
             if torch_info.is_master:
-                loss_sum,fwd_bwd_interval_sum, pre_clip_norm_sum = tuple(fp32_dist.tolist())
+                loss_sum,fwd_bwd_interval_sum, pre_clip_norm_sum, \
+                correct_sum, step_preds_count, step_sample_count, step_token_count = tuple(fp32_dist.tolist())
                 # use sum of all worker values so we have more accurate idea of outliers
                 fwd_bwd_interval, pre_clip_norm = fwd_bwd_interval_sum, pre_clip_norm_sum
-                correct_sum, step_preds_count, step_sample_count,step_token_count = tuple(int_dist.tolist())
+                # convert back to int
+                correct_sum, step_preds_count, step_sample_count, step_token_count = int(correct_sum), int(step_preds_count), int(step_sample_count), int(step_token_count)
 
         total_samples += step_sample_count
         total_tokens += step_token_count

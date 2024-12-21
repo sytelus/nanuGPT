@@ -128,9 +128,7 @@ def measure_global_batch(config:Mapping,
     # setup data
     get_data = utils.import_fn(data_config['module'])
     get_loss = utils.import_fn(loss_config['module'])
-    train_loader, val_loader, test_loader = get_data(global_rank=torch_info.global_rank,
-                                                     world_size=torch_info.world_size,
-                                                    **data_config['module_kwargs'])
+    train_loader, val_loader, test_loader = get_data(**data_config['module_kwargs'])
 
     # create tokenizer
     tokenizer, tokenizer_config = common.create_tokenizer(config, logger)

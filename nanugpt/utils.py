@@ -719,6 +719,9 @@ def flash_attn_supported():
 def get_global_rank()->int:
     return int(os.environ.get('RANK', '0'))
 
+def get_world_size()->int:
+    return int(os.environ.get('WORLD_SIZE', '1'))
+
 def is_master_process()->bool:
     return os.environ.get('RANK', '0') == '0'
 
