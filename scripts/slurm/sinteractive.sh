@@ -4,7 +4,7 @@ set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
 
 # required and optional variable
 REQUIRED_VARS=("GPUS_PER_NODE" "CONTAINER_IMAGE_PATH")
-CONTAINER_MOUNTS=${CONTAINER_MOUNTS:-}  # app specific mounts to be attached to container as source:destination
+CONTAINER_MOUNTS=${CONTAINER_MOUNTS:-"docker://\$oauthtoken@nvcr.io#nvidia/pytorch:24.07-py3"}  # app specific mounts to be attached to container as source:destination
 JOB_ENV_SETUP_SCRIPT=${JOB_ENV_SETUP_SCRIPT:-} # script to setup environment for specific cluster
 NODES=${NODES:-1}
 PARTITION=${PARTITION:-}
