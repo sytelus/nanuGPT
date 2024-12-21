@@ -104,7 +104,7 @@ if [ "${INSTALL_PACKAGE}" = "1" ]; then
 else
     # add the package to PYTHONPATH so it acts like installed package
     if [ "${UPDATE_PYTHONPATH}" = "1" ]; then
-        export PYTHONPATH="${TARGET_SOURCE_DIR}":${PYTHONPATH:-}
+        export PYTHONPATH="${TARGET_SOURCE_DIR}:${PYTHONPATH:-}"
     fi
 fi
 

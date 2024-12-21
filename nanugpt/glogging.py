@@ -247,6 +247,13 @@ class Logger:
         self.quite_keys:Optional[Set[str]] = None
         self.summaries = {}
 
+        # before we create logger, let's print full command line we received
+        print(f"[{utils.get_global_rank()}] command line: {' '.join(sys.argv)}", flush=True)
+        # print DATA_ROOT, OUT_DIR environment variables
+        print(f"[{utils.get_global_rank()}] DATA_ROOT={os.environ.get('DATA_ROOT', None)}", flush=True)
+        print(f"[{utils.get_global_rank()}] OUT_DIR={os.environ.get('OUT_DIR', None)}", flush=True)
+        print(f'[{utils.get_global_rank()}] log_dir={log_dir}, log_filename={log_filename}, summaries_filename={summaries_filename}', flush=True)
+
         if log_dir:
             log_dir = utils.full_path(str(log_dir), create=True)
             if log_filename:
