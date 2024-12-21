@@ -2,8 +2,7 @@
 
 set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
 
-# required and optional variable
-REQUIRED_VARS=()
+# input variables
 CONTAINER_MOUNTS=${CONTAINER_MOUNTS:-}  # app specific mounts to be attached to container as source:destination
 JOB_ENV_SETUP_SCRIPT=${JOB_ENV_SETUP_SCRIPT:-} # script to setup environment for specific cluster
 CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"docker://\$oauthtoken@nvcr.io#nvidia/pytorch:24.07-py3"}
@@ -16,13 +15,6 @@ NODE_LIST=${NODE_LIST:-}
 OUT_DIR=${OUT_DIR:-"${HOME}/out_dir"} # set default output directory
 JOB_NAME=${JOB_NAME:-"slurm_interactive_job"}
 export INTERACTIVE_JOB=1    # used by env_setup.sh to setup environment for interactive job
-
-
-### ---------- Check required environment variables
-for var in "${REQUIRED_VARS[@]}"; do
-    [ -z "${!var}" ] && { echo "Error: Required environment variable '$var' is not set." >&2; exit 1; }
-done
-### ---------- End check required environment variables
 
 export JOB_OUT_DIR="${OUT_DIR}/${JOB_NAME}/$(date +%Y-%m-%d_%H-%M-%S_%3N)" # append job info
 mkdir -p "${JOB_OUT_DIR}"
