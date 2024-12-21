@@ -257,6 +257,7 @@ def setup_torch(seed:int,
 
     is_cuda = device_type == 'cuda'
     device_name = device_type # we will add GPU ID later
+    device_id = -1  # we will set this later
     pt_dtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
 
     if is_cuda: # setup cuda
@@ -295,13 +296,14 @@ def setup_torch(seed:int,
                 device_id = 0
             else:
                 raise ValueError('No GPU found. Set device_type=cpu.')
-    else:
+    else: # not distributed
         is_distributed = False
         global_rank = 0
         local_rank = 0
         world_size = 1
         is_master = True
         seed_offset = 0
+        device_id = 0 # first GPU visible
 
     if is_cuda:
         torch.cuda.manual_seed(seed+seed_offset)

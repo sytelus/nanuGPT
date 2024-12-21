@@ -1,5 +1,5 @@
 import argparse
-from typing import Callable, List, Type, Optional, Any, Union, Mapping, MutableMapping
+from typing import Callable, List, Type, Optional, Any, Union, Mapping, MutableMapping, Dict
 from collections import UserDict
 from typing import Sequence
 from collections.abc import Mapping, MutableMapping
@@ -206,7 +206,7 @@ class Config(UserDict):
                  app_desc:Optional[str]=None,
                  use_args=True,
                  first_arg_filename=True,
-                 param_args: Sequence = [], run_commands=True) -> None:
+                 param_args: Mapping[str, str]={}, run_commands=True) -> None:
         """Create config from specified yaml files and override args.
 
         Config is simply a dictionary of key, value which can form hirarchical
@@ -226,10 +226,10 @@ class Config(UserDict):
             config_filepath {[str]} -- [Yaml file to load config from, could be names of files separated by semicolon which will be loaded in sequence oveeriding previous config] (default: {None})
             app_desc {[str]} -- [app description that will show up in --help] (default: {None})
             use_args {bool} -- [if true then command line parameters will override parameters from config files] (default: {False})
-            param_args {Sequence} -- [parameters specified as ['--key1',val1,'--key2',val2,...] which will override parameters from config file.] (default: {[]})
+            param_args {Mapping} -- [parameters specified as {'p1.p2':'k',...} which will override parameters from config file.] (default: {[]})
             run_commands -- [if True then commands such as _copy, _env in yaml are executed]
             config_content -- if provided, this overrides content from the files, but not the command line args
-            first_arg_filename -- if True then first arg is treated as config file name, else it is treated as normal arg
+            first_arg_filename -- if True then first positional arg is treated as config file name, else it is treated as normal arg
         """
         super(Config, self).__init__()
 
@@ -242,9 +242,20 @@ class Config(UserDict):
             #     help='config filepath in yaml format, can be list separated by ;')
             self.args, self.extra_args = parser.parse_known_args()
 
+            self.option_args = {}
+            self.pos_args = []
+            i = 0
+            while i < len(self.extra_args):
+                if self.extra_args[i].startswith('--'):
+                    self.option_args[self.extra_args[i][len("--"):]] = self.extra_args[i+1]
+                    i += 2
+                else:
+                    self.pos_args.append(self.extra_args[i])
+                    i += 1
+
             # expect first arg to be config filepath, if not supplied then use default
-            if first_arg_filename and len(self.extra_args) > 0 and not self.extra_args[0].startswith('--'):
-                config_filepath = self.extra_args.pop(0)
+            if first_arg_filename and len(self.pos_args ) > 0:
+                config_filepath = self.pos_args[0]
             else:
                 config_filepath = default_config_filepath
 
@@ -263,7 +274,7 @@ class Config(UserDict):
 
         # Let's do final overrides from args
         self._update_from_args(param_args, resolved_conf)      # merge from params
-        self._update_from_args(self.extra_args, resolved_conf) # merge from command line
+        self._update_from_args(self.option_args, resolved_conf) # merge from command line
 
         if run_commands:
             resolve_all(self)
@@ -294,15 +305,10 @@ class Config(UserDict):
                 include_filepath = os.path.join(os.path.dirname(filepath), include)
                 self._load_from_file(include_filepath)
 
-    def _update_from_args(self, args:Sequence, resolved_section:'Config')->None:
-        i = 0
-        while i < len(args)-1:
-            arg = args[i]
-            if arg.startswith(("--")):
-                path = arg[len("--"):].split('.')
-                i += Config._update_section(self, path, args[i+1], resolved_section)
-            else: # some other arg
-                i += 1
+    def _update_from_args(self, args:Mapping[str,str], resolved_section:'Config')->None:
+        for k, v in args.items():
+            path = k.split('.')
+            Config._update_section(self, path, v, resolved_section)
 
     def to_dict(self)->dict:
         return deep_update({}, self, lambda: dict()) # type: ignore

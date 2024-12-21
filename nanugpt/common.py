@@ -50,6 +50,12 @@ def setup_device(config:Mapping, logger:logging.Logger)->Tuple[torch.device, Abs
 def setup_logger(config:Optional[Mapping]=None, logger:Optional[logging.Logger]=None)->logging.Logger:
     if logger is None:
         print(f"Creating logger on LOCAL_RANK: {os.environ.get('LOCAL_RANK', '-1')}, GLOBAL_RANK {utils.get_global_rank()}, IS_MASTER={utils.is_master_process()}")
+
+        # before we create logger, let's print full command line we received
+        print(f"[{utils.get_global_rank()}] command line: {' '.join(sys.argv)}", flush=True)
+
+        check_env_vars()
+
         assert config is not None, "Either config or logger must be provided but both are None."
         logging_config = config['logging']
         if not logging_config['log_dir']:
