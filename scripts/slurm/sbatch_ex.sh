@@ -12,21 +12,26 @@
 set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
 
 # required and optional variable
-REQUIRED_VARS=("START_SCRIPT")
-export CONTAINER_IMAGE_PATH="${CONTAINER_IMAGE_PATH:-docker://$oauthtoken@nvcr.io#nvidia/pytorch:24.07-py3}"
-export START_SCRIPT_ARGS="${START_SCRIPT_ARGS:-}"    # arguments to pass to the entry script
-export JOB_NAME="${JOB_NAME:-test_job}"
+REQUIRED_VARS=("DATA_ROOT")
+SOURCE_DIR=${SOURCE_DIR:-.}# where is source directory
+export JOB_NAME=${JOB_NAME:-test_job}
+export START_SCRIPT=${START_SCRIPT:-"train.py"} # entry script to run
+export START_SCRIPT_ARGS=${START_SCRIPT_ARGS:-"--general.project_name \"${JOB_NAME}\" --general.out_dir \"\${JOB_OUT_DIR}\" $@"}
+export DATA_ROOT=${DATA_ROOT:-} # data directory to mount in container
+export OUT_DIR=${OUT_DIR:-"${HOME}/out_dir"} # set default output directory
+
 NODES=${NODES:-1}
+MAX_GPUS_PER_NODE=${MAX_GPUS_PER_NODE:-8}
+export GPUS_PER_NODE="${GPUS_PER_NODE:-${MAX_GPUS_PER_NODE}}"
+
 PARTITION=${PARTITION:-}
 RESERVATION=${RESERVATION:-}
-MAX_GPUS_PER_NODE=${MAX_GPUS_PER_NODE:-8}
-SOURCE_DIR=${SOURCE_DIR:-.}
+export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"docker://\$oauthtoken@nvcr.io#nvidia/pytorch:24.07-py3"}
+export ENV_SETUP_SCRIPT=${ENV_SETUP_SCRIPT:-} # script to setup environment for specific cluster
+
 export INSTALL_PACKAGE=${INSTALL_PACKAGE:-1} # pip install in source directory
 export UPDATE_PYTHONPATH=${UPDATE_PYTHONPATH:-0} # add source dir to PYTHONPATH (ignored if INSTALL_PACKAGE=1)
-RESTARTABLE=${RESTARTABLE:-1}
-export GPUS_PER_NODE="${GPUS_PER_NODE:-${MAX_GPUS_PER_NODE}}"
-export OUT_DIR=${OUT_DIR:-"${HOME}/out_dir"} # set default output directory
-export ENV_SETUP_SCRIPT=${ENV_SETUP_SCRIPT:-} # script to setup environment for specific cluster
+RESTARTABLE=${RESTARTABLE:-1}   # is job restartable if preempted?
 
 ### ---------- Check required environment variables
 for var in "${REQUIRED_VARS[@]}"; do
@@ -57,9 +62,23 @@ if [ "${RESTARTABLE}" -eq 1 ]; then
     REQUEUE_ARG="--requeue"
 fi
 
-if [ ! -z "$ENV_SETUP_SCRIPT" ]; then
+# output core variables so user can see what is being used
+echo "SOURCE_DIR: $(realpath ${SOURCE_DIR:-<not set>})"
+echo "START_SCRIPT: ${START_SCRIPT:-<not set>}"
+echo "START_SCRIPT_ARGS: ${START_SCRIPT_ARGS:-<not set>}"
+echo "JOB_OUT_DIR: ${JOB_OUT_DIR:-<not set>}"
+echo "DATA_ROOT: ${DATA_ROOT:-<not set>}"
+echo "CONTAINER_IMAGE_PATH: ${CONTAINER_IMAGE_PATH:-<not set>}"
+echo "ENV_SETUP_SCRIPT: ${ENV_SETUP_SCRIPT:-<not set>}"
+echo "RESTARTABLE: ${RESTARTABLE:-<not set>}"
+echo "NODES: ${NODES:-<not set>}"
+echo "GPUS_PER_NODE: ${GPUS_PER_NODE:-<not set>}"
+echo "PARTITION: ${PARTITION:-<not set>}"
+echo "RESERVATION: ${RESERVATION:-<not set>}"
+
+if [ ! -z "${ENV_SETUP_SCRIPT}" ]; then
     # copy to job out dir so its available in the container
-    cp "$ENV_SETUP_SCRIPT" "${JOB_OUT_DIR}/env_setup.sh"
+    cp "${ENV_SETUP_SCRIPT}" "${JOB_OUT_DIR}/env_setup.sh"
     # update the variable to point to the copied file
     export JOB_ENV_SETUP_SCRIPT="${JOB_OUT_DIR}/env_setup.sh"
 fi
@@ -67,31 +86,32 @@ fi
 # All tasks in job works off of the same source directory
 # We wll also install package requirements from this directory
 export TARGET_SOURCE_DIR="${JOB_OUT_DIR}/source_dir"
-rm -rf "$TARGET_SOURCE_DIR"
-mkdir -p "$TARGET_SOURCE_DIR"
-pushd "$SOURCE_DIR"
+rm -rf "${TARGET_SOURCE_DIR}"
+mkdir -p "${TARGET_SOURCE_DIR}"
+pushd "${SOURCE_DIR}"
 if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
-    git archive --format=tar HEAD | tar -x -C "$TARGET_SOURCE_DIR"
+    git archive --format=tar HEAD | tar -x -C "${TARGET_SOURCE_DIR}"
 else
-    rsync -a --exclude='.git' ./ "$TARGET_SOURCE_DIR"
+    rsync -a --exclude='.git' ./ "${TARGET_SOURCE_DIR}"
 fi
 popd
 
+# copy slurm scripts to job out dir so we can use it in cluster
 export SLURM_SCRIPT_DIR="${JOB_OUT_DIR}/slurm_scripts"
 # copy all slurm scripts to job out dir so we can use them in cluster
-rm -rf "$SLURM_SCRIPT_DIR"
-mkdir -p "$SLURM_SCRIPT_DIR"
-cp "$SCRIPT_DIR/"*.sh "$SLURM_SCRIPT_DIR/"
-chmod +x "$SLURM_SCRIPT_DIR/"*.sh
+rm -rf "${SLURM_SCRIPT_DIR}"
+mkdir -p "${SLURM_SCRIPT_DIR}"
+cp "${SCRIPT_DIR}/"*.sh "${SLURM_SCRIPT_DIR}/"
+chmod +x "${SLURM_SCRIPT_DIR}/"*.sh
 
 sbatch \
     ${PARTITION_ARG} ${RESERVATION_ARG} ${SHARE_NODE_ARG} ${REQUEUE_ARG} \
-    --nodes=$NODES \
-    --gpus-per-node=$GPUS_PER_NODE \
+    --nodes=${NODES} \
+    --gpus-per-node=${GPUS_PER_NODE} \
     --job-name=${JOB_NAME} \
     --output="${JOB_OUT_DIR}/sbatch_log.txt" \
     --error="${JOB_OUT_DIR}/sbatch_err.txt" \
     --mem=0 \
-    "$SLURM_SCRIPT_DIR/srun_ex.sh" # this will be run once on primary node
+    "${SLURM_SCRIPT_DIR}/srun_ex.sh" # this will be run once on primary node
 
 echo "Job submitted. Use tail -f '${JOB_OUT_DIR}/srun_err_000.txt' for job status."

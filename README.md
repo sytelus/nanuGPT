@@ -88,6 +88,12 @@ To run on multiple GPUs, instead of `python` use `torchrun` like this:
 torchrun --nproc_per_node=8 --standalone train.py configs/train_gpt2/tinyshakespeare.yaml
 ```
 
+If you are working in slurm environment, you can also run multinode job like this:
+
+```bash
+NODES=4 DATA_ROOT=<my data dir> bash ./scripts/slurm/sbatch_ex.sh configs/train_gpt2/openwebtext.yaml
+```
+
 ## Using Other Datasets
 
 [How to train on Tinystories](docs/tinystories.md)

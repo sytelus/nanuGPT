@@ -33,8 +33,8 @@ done
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 
 # setup cluster specific environment variables, these will be inherited by the container
-if [ ! -z "$JOB_ENV_SETUP_SCRIPT" ]; then
-    source "$JOB_ENV_SETUP_SCRIPT"
+if [ ! -z "${JOB_ENV_SETUP_SCRIPT}" ]; then
+    source "${JOB_ENV_SETUP_SCRIPT}"
 fi
 
 # if we are restarting because of preempt then get the count
@@ -62,4 +62,4 @@ srun --ntasks=${NTASKS} --ntasks-per-node=${GPUS_PER_NODE} ${MPI_ARG} \
     --container-mounts "${ALL_CONTAINER_MOUNTS}" \
     --container-writable --no-container-mount-home --no-container-remap-root \
     --wait=60 --kill-on-bad-exit=1 --label \
-    "$SLURM_SCRIPT_DIR/slaunch_ex.sh"
+    "${SLURM_SCRIPT_DIR}/slaunch_ex.sh"

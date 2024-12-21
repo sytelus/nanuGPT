@@ -1,0 +1,15 @@
+__include__: ['base_config.yaml']
+
+# config for training GPT2 on OpenWebText with 10B tokens
+
+general:
+  project_name: 'gpt2_owt'
+
+data:
+  module_kwargs:
+    tokenized_train_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/train.bin'
+    tokenized_val_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/val.bin'
+
+training:
+  device_batch_size: 12 # default 12, GH200: 72
+  max_steps: 20345

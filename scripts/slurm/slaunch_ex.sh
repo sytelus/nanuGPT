@@ -15,7 +15,7 @@ USE_TORCHRUN=${USE_TORCHRUN:-0} # launcher to use worker processes
 START_SCRIPT_ARGS=${START_SCRIPT_ARGS:-}    # arguments to pass to the entry script
 MASTER_PORT=${MASTER_PORT:-} # port to use for torchrun
 BIND_CORES=${BIND_CORES:-}  # cores allowed to bind launch script to
-SLURM_LAUNCH_NODE_IPADDR=${SLURM_LAUNCH_NODE_IPADDR:-localhost} # should be set by slurm
+SLURM_LAUNCH_NODE_IPADDR=${SLURM_LAUNCH_NODE_IPADDR:-"localhost"} # should be set by slurm
 INSTALL_PACKAGE=${INSTALL_PACKAGE:-0} # pip install in source directory
 UPDATE_PYTHONPATH=${UPDATE_PYTHONPATH:-0} # add source dir to PYTHONPATH
 
@@ -28,7 +28,7 @@ done
 # master address and port is required for torch.distributed so communication with other nodes can happen
 # SLURM_LAUNCH_NODE_IPADDR should be set but we create fallback to HEAD_NODE_IPADDR
 SLURM_STEP_GPUS=${SLURM_STEP_GPUS:-0}
-export MASTER_ADDR="${MASTER_ADDR:-$SLURM_LAUNCH_NODE_IPADDR}"
+export MASTER_ADDR="${MASTER_ADDR:-${SLURM_LAUNCH_NODE_IPADDR}}"
 # Split GPU IDs into an array and find the minimum value
 IFS=',' read -ra gpu_array <<< "${SLURM_STEP_GPUS}"
 min_gpu_id=${gpu_array[0]}
@@ -40,7 +40,7 @@ done
 export MASTER_PORT=$((6000 + min_gpu_id))
 
 # Setup the "head" process within the node
-if [[ "${gpu_array[$SLURM_LOCALID]}" -eq "${min_gpu_id}" ]]; then
+if [[ "${gpu_array[${SLURM_LOCALID}]}" -eq "${min_gpu_id}" ]]; then
     export IS_NODE_PROC0=1
 else
     export IS_NODE_PROC0=0
@@ -53,14 +53,14 @@ pwd
 if [ "${INSTALL_PACKAGE}" = "1" ]; then
     # create temp dir to store marker file
     LOCKDIR="${TMPDIR:-/tmp}/slaunch_package_fifo"
-    mkdir -p "$LOCKDIR"
+    mkdir -p "${LOCKDIR}"
     PIPEFILE="${LOCKDIR}/sync_pipe"
-    DONEFILE="$LOCKDIR/install_done"
+    DONEFILE="${LOCKDIR}/install_done"
 
     # Ensure the named pipe exists. If multiple processes attempt mkfifo simultaneously,
     # this might print an error once, but the pipe will still exist after the first success.
-    if [[ ! -p "$PIPEFILE" ]]; then
-        (umask 000; mkfifo "$PIPEFILE" 2>/dev/null || true)
+    if [[ ! -p "${PIPEFILE}" ]]; then
+        (umask 000; mkfifo "${PIPEFILE}" 2>/dev/null || true)
     fi
 
 
@@ -68,25 +68,25 @@ if [ "${INSTALL_PACKAGE}" = "1" ]; then
     if [[ "$IS_NODE_PROC0" -eq 1 ]]; then
         # Writer process
         # Cleanup any old done file to ensure a fresh state for this run.
-        rm -f "$DONEFILE"
+        rm -f "${DONEFILE}"
 
         # install the package in editable mode
         pip install -e .
 
         # Signal that initialization is done
-        touch "$DONEFILE"
+        touch "${DONEFILE}"
         # Write a signal to the pipe and close it.
         # This will unblock all readers waiting on the pipe.
-        echo "initialized" > "$PIPEFILE"
+        echo "initialized" > "${PIPEFILE}"
         # Once we exit, the pipe closes and any reader that didn't get the line will get EOF.
 
         echo "Writer: Initialization complete."
         # If there are no readers, this still works fine. The writer doesn't block.
     else
         # Reader process
-        if [ ! -f "$DONEFILE" ]; then
+        if [ ! -f "${DONEFILE}" ]; then
             # Need to wait until initialization is done. We'll block on reading the pipe.
-            if read line < "$PIPEFILE"; then
+            if read line < "${PIPEFILE}"; then
                 true # Do nothing. We just need to unblock the pipe.
             else
                 # If we got here, it means the pipe was closed (EOF) before we got a line.
@@ -95,7 +95,7 @@ if [ "${INSTALL_PACKAGE}" = "1" ]; then
             fi
 
             # After being unblocked, ensure done file is present.
-            if [ ! -f "$DONEFILE" ]; then
+            if [ ! -f "${DONEFILE}" ]; then
                 echo "Unexpected behavior: Worker process with SLURM_PROCID=$SLURM_PROCID got unblocked while package install was still not done!" >&2   # >&2 redirects to stderr
                 exit 1  # Non-zero exit code indicates error            fi
             fi
@@ -111,8 +111,8 @@ fi
 # normally don't use torchrun as it doesn't scale as well as direct launch
 if [ "${USE_TORCHRUN}" = "1" ]; then
     # build the torchrun command
-    TORCH_RUN_ARGS="--nproc_per_node $GPUS_PER_NODE --nnodes $SLURM_JOB_NUM_NODES --node_rank $SLURM_NODEID --master_addr $SLURM_LAUNCH_NODE_IPADDR --master_port $MASTER_PORT"
-    eval "torchrun $TORCH_RUN_ARGS $START_SCRIPT $START_SCRIPT_ARGS"
+    TORCH_RUN_ARGS="--nproc_per_node ${GPUS_PER_NODE} --nnodes ${SLURM_JOB_NUM_NODES} --node_rank ${SLURM_NODEID} --master_addr ${SLURM_LAUNCH_NODE_IPADDR} --master_port ${MASTER_PORT}"
+    eval "torchrun ${TORCH_RUN_ARGS} ${START_SCRIPT} ${START_SCRIPT_ARGS}"
 else
     # setup vars needed for torch.dist.init_process_group
     export CUDA_VISIBLE_DEVICES=${gpu_array[$SLURM_LOCALID]}
