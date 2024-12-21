@@ -13,7 +13,7 @@ set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
 
 # required and optional variable
 REQUIRED_VARS=("DATA_ROOT")
-SOURCE_DIR=${SOURCE_DIR:-.}# where is source directory
+SOURCE_DIR=${SOURCE_DIR:-.} # where is source directory
 export JOB_NAME=${JOB_NAME:-test_job}
 export START_SCRIPT=${START_SCRIPT:-"train.py"} # entry script to run
 export START_SCRIPT_ARGS=${START_SCRIPT_ARGS:-"--general.project_name \"${JOB_NAME}\" --general.out_dir \"\${JOB_OUT_DIR}\" $@"}
