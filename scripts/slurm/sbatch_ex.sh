@@ -114,5 +114,5 @@ sbatch \
     --mem=0 \
     "${SLURM_SCRIPT_DIR}/srun_ex.sh" # this will be run once on primary node
 
-echo "Job submitted. Use:"
-echo "tail -f '${JOB_OUT_DIR}/srun_err_000.txt' for job status."
+echo "Job submitted. Use for job status:"
+echo "tail -f '${JOB_OUT_DIR}/srun_err_000.txt'"
