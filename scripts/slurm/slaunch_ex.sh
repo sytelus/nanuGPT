@@ -47,7 +47,6 @@ else
 fi
 
 cd "${TARGET_SOURCE_DIR}"
-pwd
 
 # package installation if requested
 if [ "${INSTALL_PACKAGE}" = "1" ]; then

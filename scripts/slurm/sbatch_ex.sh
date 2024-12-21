@@ -16,7 +16,7 @@ REQUIRED_VARS=("DATA_ROOT")
 SOURCE_DIR=${SOURCE_DIR:-.} # where is source directory
 export JOB_NAME=${JOB_NAME:-test_job}
 export START_SCRIPT=${START_SCRIPT:-"train.py"} # entry script to run
-export START_SCRIPT_ARGS=${START_SCRIPT_ARGS:-"--general.project_name ${JOB_NAME} --general.out_dir \${JOB_OUT_DIR} $@"}
+export START_SCRIPT_ARGS=${START_SCRIPT_ARGS:-"--general.project_name ${JOB_NAME} --general.out_dir \$JOB_OUT_DIR $@"}
 export DATA_ROOT=${DATA_ROOT:-} # data directory to mount in container
 export OUT_DIR=${OUT_DIR:-"${HOME}/out_dir"} # set default output directory
 
