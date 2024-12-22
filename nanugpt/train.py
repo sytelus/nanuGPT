@@ -301,6 +301,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         # is it time to evaluate? We evaluate after 1st step to get initial loss.
         eval_performed = False
         if torch_info.is_master and ((step+1) % eval_every == 0 or step+1 >= max_steps):
+            max_memory_allocated = torch.cuda.max_memory_allocated() if torch_info.is_cuda else 0
+
             torch.cuda.empty_cache() # clear cache before evaluation
 
             eval_performed = True
@@ -322,6 +324,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                 "val/best_loss_step": best_val_loss_step,
                 "run/w_norm": utils.weight_norm(model),
                 "val/interval": eval_interval,
+                "train/max_memory_allocated": max_memory_allocated,
             })
             if step+1 >= max_steps and test_loader:
                 test_loss, test_acc = estimate_loss(model, get_loss, test_loader, None,

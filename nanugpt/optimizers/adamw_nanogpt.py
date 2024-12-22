@@ -1,11 +1,12 @@
 import inspect
 
 import torch
+from torch.distributed.optim import ZeroRedundancyOptimizer
 
 from nanugpt import glogging as logging
 
 def get_optim(model, learning_rate, weight_decay,
-              beta1, beta2, eps, enable_fused):
+              beta1, beta2, eps, enable_fused, zero_stage):
     # start with all of the candidate parameters
     param_dict = {pn: p for pn, p in model.named_parameters()}
     # filter out those that do not require grad
@@ -32,6 +33,16 @@ def get_optim(model, learning_rate, weight_decay,
 
     # TODO: move this out of function call
     logging.summary({'model/use_fused_adamw': use_fused})
+
+    if zero_stage:
+        optim = ZeroRedundancyOptimizer(**optim_groups[0], # params_rref
+                                        optimizer_class=torch.optim.AdamW,
+                                        # optim args
+                                        lr=learning_rate,
+                                        betas=(beta1, beta2),
+                                        eps=eps, **extra_args)
+        optim.add_param_group(**optim_groups[1])
+        return optim
 
     return torch.optim.AdamW(
         optim_groups,

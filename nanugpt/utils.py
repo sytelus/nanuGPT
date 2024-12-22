@@ -351,6 +351,9 @@ def get_stats(nums):
             'n': len(nums),
             'sum': np.sum(nums),}
 
+def cuda_peak_memory(prefix, device)->int: # in bytes
+    return torch.cuda.max_memory_allocated(device)
+
 def for_parallel(l:list, f:Callable[[Any], Any], num_cpus=multiprocessing.cpu_count() - 1)->list:
     """Calls f() on each element of list l in parallel using num_cpus CPUs"""
     if num_cpus < 1:
@@ -724,6 +727,8 @@ def get_world_size()->int:
 
 def is_master_process()->bool:
     return os.environ.get('RANK', '0') == '0'
+
+
 
 def free_disk_space()->int:
     """Returns free disk space in bytes"""

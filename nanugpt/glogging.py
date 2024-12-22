@@ -119,6 +119,7 @@ std_metrics['default'] = [
                             {"name": "train/pre_clip_norm", "step_metric":"train/step", "summary":"last"},
                             {"name": "train/step_interval", "step_metric":"train/step", "summary":"last"},
                             {"name": "train/pred_loss", "step_metric":"train/step", "summary":"last"},
+                            {"name": "train/max_memory_allocated", "step_metric":"train/step", "summary":"last"},
 
                             {"name": "train/epoch", "step_metric":"train/step", "summary":"last"},
                             {"name": "train/tokens_per_sec", "step_metric":"train/step", "summary":"last"},
