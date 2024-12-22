@@ -14,7 +14,7 @@ data:
 
 training:
   device_batch_size: 64
-  max_steps: 18865
+  max_steps: 20345
   global_batch_size: 512
 
 scheduler:
@@ -28,5 +28,5 @@ eval:
   eval_iters: 200 # number of samples to evaluate for dataset
   save_checkpoint: true
   checkoint_after: 0 # starts saving checkpoint after these steps
-  checkpoint_every_hr: 200 # multiple of eval_every, save checkpoint after these steps from last checkpoint when val loss is better
+  checkpoint_every_hr: 200 # take checkpoint every this hours
   checkpoint_keep_best: false # keep only the best checkpoint, otherwise keep all with  _{step}.pt

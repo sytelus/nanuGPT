@@ -344,7 +344,10 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                     (step > checkoint_after and \
                         (timeit.default_timer() - last_checkpoint_time) / 3600.0 > checkpoint_every_hr)
                 ):
-
+            # TODO: below is only for debugging, remove later
+            logger.info({"step": step, "max_steps": max_steps,
+                         "checkpoint_since_hr": (timeit.default_timer() - last_checkpoint_time)/3600.0,
+                        "checkpoint_every_hr": checkpoint_every_hr})
             last_checkpoint_time = timeit.default_timer()
             checkpoint_filename = "checkpoint_" + \
                 f"{step}" if not checkpoint_keep_best else "best"
