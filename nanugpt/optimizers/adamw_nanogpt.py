@@ -41,7 +41,7 @@ def get_optim(model, learning_rate, weight_decay,
                                         lr=learning_rate,
                                         betas=(beta1, beta2),
                                         eps=eps, **extra_args)
-        optim.add_param_group(**optim_groups[1])
+        optim.add_param_group(optim_groups[1])
         return optim
 
     return torch.optim.AdamW(
