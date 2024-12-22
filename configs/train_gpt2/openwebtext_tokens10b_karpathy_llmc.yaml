@@ -1,7 +1,7 @@
 __include__: ['base_config.yaml']
 
 # Config from Karpathy's llm.c:
-# https://github.com/karpathy/llm.c/blob/7ecd8906afe6ed7a2b2cdb731c042f26d525b820/scripts/pyrun_gpt2_124M.sh#L17
+# https://github.com/karpathy/llm.c/discussions/481
 
 general:
   project_name: 'gpt2_owt'
@@ -12,8 +12,8 @@ data:
     tokenized_val_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/val.bin'
 
 training:
-  device_batch_size: 32 # default 12, GH200: 72
-  max_steps: 18865
+  device_batch_size: 64
+  max_steps: 19074
   global_batch_size: 512
 
 scheduler:
@@ -23,7 +23,7 @@ scheduler:
     end_factor: 1.0E-3
 
 eval:
-  eval_every: 1000
+  eval_every: 250
   eval_iters: 200 # number of samples to evaluate for dataset
   save_checkpoint: true
   checkoint_after: 0 # starts saving checkpoint after these steps
