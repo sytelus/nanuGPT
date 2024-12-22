@@ -2,6 +2,8 @@
 Original code from: https://github.com/KellerJordan/modded-nanogpt/blob/09a49d4af4804af92d14216b43136f5510a8fba8/train_gpt2.py
 """
 
+# TODO: add grad norm from KellerJordan's code
+
 from typing import Optional
 
 import math
