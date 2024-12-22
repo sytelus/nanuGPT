@@ -68,3 +68,14 @@ Train loss: 3.071729532877604
 Val loss: 3.0704586088222308
 Run time: 1.22 (8x NVIDIA H100 80GB HBM3)
 ```
+
+
+For v0.3.9 (ZeroOptimizer),
+
+```text
+Trained on total tokens: 9,998,008,320
+Train steps: 20,340
+Train loss: 3.065877787272135
+Val loss: 3.0901788899498266
+Run time: 1.22 (8x NVIDIA H100 80GB HBM3)
+```

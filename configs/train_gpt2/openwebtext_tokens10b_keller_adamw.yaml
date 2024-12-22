@@ -1,41 +1,47 @@
+# Config translated from Keller Jordon's adamw record run
+# https://github.com/KellerJordan/modded-nanogpt/blob/09a49d4af4804af92d14216b43136f5510a8fba8/run.sh
+
 __include__: ['base_config.yaml']
 
 general:
   project_name: 'gpt2_owt'
+  run_name: 'keller_jordan_adamw'
 
 data:
   module_kwargs:
     tokenized_train_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/train.bin'
     tokenized_val_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/val.bin'
 
+model:
+  module: 'nanugpt.models.nanogpt_keller.get_model'
+  module_kwargs:
+    n_layer: 12
+    n_embd: 768
+    n_head: 12
+    context_length: 1024
+
 training:
-  device_batch_size: 64 # default 12, GH200: 72
-  max_steps: 8618    # for OpenWebText/9,035,582,198 tokens
-  enable_train_log: true
-  log_every: 2
-  grad_clip: 1.0 # disabled if 0.0
-  global_batch_size: 524288 # default 480
+  device_batch_size: 64
+  max_steps: 20345
+  global_batch_size: 512
 
 optimizer:
   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
   module_kwargs:
     learning_rate: 18.0E-4 # default 6.0E-4, GH200 12.0E-4
-    weight_decay: 0.1
-    beta1: 0.9
-    beta2: 0.95
-    eps: 1.0E-8 # pytorch default
+    zero_stage: 0
 
 scheduler:
   module: 'nanugpt.schedulers.constant.get_scheduler'
   module_kwargs:
-    warmup_iters: 250
-    cooldown_iters: 2000
+    warmup_iters: 256
+    cooldown_iters: 2048
     const_lr: 18.0E-4
 
 eval:
-  eval_every: 10
-  eval_iters: 200 # number of samples to evaluate for dataset
+  eval_every: 128
+  eval_iters: 20 # number of samples to evaluate for dataset
   save_checkpoint: true
   checkoint_after: 0 # starts saving checkpoint after these steps
-  checkpoint_every_hr: 0.5 # multiple of eval_every, save checkpoint after these steps from last checkpoint when val loss is better
+  checkpoint_every_hr: 2 # multiple of eval_every, save checkpoint after these steps from last checkpoint when val loss is better
   checkpoint_keep_best: false # keep only the best checkpoint, otherwise keep all with  _{step}.pt
