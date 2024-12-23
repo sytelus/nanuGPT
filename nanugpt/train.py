@@ -235,6 +235,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
         fwd_bwd_interval = timeit.default_timer() - step_start_time
 
+        # gather matrics from all ranks
         if torch_info.is_distributed:
             # dist.barrier() # not needed as reduce will sync all processes
             # reduce tensors to global_rank 0 to get numbers from all ranks
@@ -261,6 +262,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             best_train_loss_step = step
             loss_improvement_steps += 1
 
+        # update iteration metrics
         if torch_info.is_master:
             elapsed_hr = (timeit.default_timer() - loop_start_time)/3600.0
             loss_pred_model = lin_predictor.fit(list(range(step-len(prev_train_losses)+1, step+1)), prev_train_losses)
@@ -339,11 +341,22 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             torch.cuda.empty_cache() # clear cache after evaluation
 
         # if this is last step or enough time has passed, save checkpoint
-        if save_checkpoint and \
+        can_checkpoint = save_checkpoint and \
                 ((step+1 >= max_steps) or \
                     (step > checkoint_after and \
                         (timeit.default_timer() - last_checkpoint_time) / 3600.0 > checkpoint_every_hr)
-                ):
+                )
+
+        # consolidate optim state
+        if can_checkpoint:
+            # distributed optimizer like ZeroOptimizer needs to be consolidated before saving
+            # if optimizer has method called `consolidate_state_dict` then call it
+            # this needs to be run on all ranks
+            if hasattr(optimizer, 'consolidate_state_dict'):
+                optimizer.consolidate_state_dict()
+
+        # save checkpoint only on master
+        if torch_info.is_master and can_checkpoint:
             # TODO: below is only for debugging, remove later
             logger.info({"step": step, "max_steps": max_steps,
                          "checkpoint_since_hr": (timeit.default_timer() - last_checkpoint_time)/3600.0,
@@ -359,6 +372,9 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
             checkpoint_log.append(metrics)
             logger.log_artifact(name=checkpoint_filename, type='file', file_or_dir=checkpoint_filepath)
+
+        if can_checkpoint:
+            dist.barrier() # wait for all processes to come togather
 
         # Decide if we should log
         can_log = len(metrics) > 0 and torch_info.is_master and (

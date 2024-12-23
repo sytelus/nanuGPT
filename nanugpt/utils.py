@@ -319,10 +319,6 @@ def setup_torch(seed:int,
 
 def save_checkpoint(out_dir:str, name:str, model, optimizer, scheduler,
                     step:int, best_val_loss:float)->str:
-    # distributed optimizer like ZeroOptimizer needs to be consolidated before saving
-    # if optimizer has method called `consolidate_state_dict` then call it
-    if hasattr(optimizer, 'consolidate_state_dict'):
-        optimizer.consolidate_state_dict()
     checkpoint = {'model': model.state_dict(),
                   'optimizer': optimizer.state_dict(),
                   'scheduler': scheduler.state_dict(),
