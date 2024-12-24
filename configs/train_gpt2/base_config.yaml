@@ -36,6 +36,10 @@ model:
     n_head: 12
     context_length: 1024
 
+scaler:
+  module: 'nanugpt.scalers.amp_grad_scaler.get_scaler'
+  module_kwargs: {}
+
 tokenizer:
   module: 'nanugpt.tokenizers.tiktoken_wrap.get_tokenizer_factory'
   module_kwargs:

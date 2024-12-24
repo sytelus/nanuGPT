@@ -69,11 +69,13 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     optimizer_config = config['optimizer']
     scheduler_config = config['scheduler']
     loss_config = config['loss']
+    scaler_config = config['scaler']
 
     get_data = utils.import_fn(data_config['module'])
     get_optim = utils.import_fn(optimizer_config['module'])
     get_scheduler = utils.import_fn(scheduler_config['module'])
     get_loss = utils.import_fn(loss_config['module'])
+    get_scaler = utils.import_fn(scaler_config['module'])
 
     # setup system, device, logger, torch
     own_logger = logger is None
@@ -153,7 +155,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
     # initialize a GradScaler. If enabled=False scaler is a no-op
     # we need loss scaling only for fp16 due to reduced precision, not bf16 or fp32
-    scaler = torch.amp.GradScaler("cuda", enabled=(torch_info.pt_dtype == torch.float16)) # type: ignore
+    scaler = get_scaler(torch_info)
 
     if torch_info.is_master:
         out_dir = utils.full_path(out_dir, create=True)
@@ -220,14 +222,11 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             scaler.scale(loss).backward() # type: ignore
         # --- end of gradient accumulation loop ---
 
-        # clip the gradient
-        pre_clip_norm = -1.0
-        if grad_clip != 0.0:
-            scaler.unscale_(optimizer)
-            pre_clip_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip).item()
-
-        # step the optimizer and scaler if training in fp16
+        # clip the gradients
+        pre_clip_norm = scaler.clip(model, optimizer, grad_clip)
+        # step the optimizer (if grad were unscaled then scaler remembers and doesn't unscale again)
         scaler.step(optimizer)
+        # update the scale for next iteration
         scaler.update()
         scheduler.step()
         # flush the gradients as soon as we can, no need for this memory anymore
@@ -373,8 +372,6 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             checkpoint_log.append(metrics)
             logger.log_artifact(name=checkpoint_filename, type='file', file_or_dir=checkpoint_filepath)
 
-        if can_checkpoint:
-            dist.barrier() # wait for all processes to come togather
 
         # Decide if we should log
         can_log = len(metrics) > 0 and torch_info.is_master and (
@@ -383,6 +380,13 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                         ) or eval_performed)
         if can_log:
             logger.info(metrics)
+
+        # Ensure all CUDA operations are complete
+        # not needed as reduce will cause sync
+        # torch.cuda.synchronize()
+
+        # master might take longer, so we need to sync before barrier
+        dist.barrier() # wait for all processes to come togather
 
         step += 1
         if step >= max_steps:
