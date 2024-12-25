@@ -9,7 +9,7 @@ class KellerScaler(ScalerBase):
     def __init__(self, torch_info: TorchInfo):
         pass
 
-    def backward(self, model, loss):
+    def backward(self, loss):
         # backward pass, with gradient scaling if training in fp16
         loss.backward()
 
