@@ -6,7 +6,7 @@ set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
 CONTAINER_MOUNTS=${CONTAINER_MOUNTS:-}  # app specific mounts to be attached to container as source:destination
 JOB_ENV_SETUP_SCRIPT=${JOB_ENV_SETUP_SCRIPT:-} # script to setup environment for specific cluster
 set +u # protect against unbound var $oauthtoken which is not actually var here but convention
-CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"docker://@nvcr.io#nvidia/pytorch:24.12-py3"}
+CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"docker://@nvcr.io#nvidia/pytorch:24.07-py3"}
 set -u
 NODES=${NODES:-1}
 PARTITION=${PARTITION:-}
