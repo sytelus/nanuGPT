@@ -203,8 +203,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             step_token_count += x.numel()
 
             with amp_ctx:
-                logits = model(x)
-                loss, correct, n_preds = get_loss(logits, y)
+                # logits = model(x)
+                loss, correct, n_preds = get_loss(model(x), y)
 
                 loss_sum += loss.item() * n_samples
                 correct_sum += correct.item()
