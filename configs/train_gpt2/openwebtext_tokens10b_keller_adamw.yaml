@@ -33,6 +33,7 @@ optimizer:
   module: 'nanugpt.optimizers.adamw.get_optim'
   module_kwargs:
     learning_rate: 18.0E-4 # default 6.0E-4, GH200 12.0E-4
+    zero_stage: 0 # 0: off, 1: shard optimizer
 
 scheduler:
   module: 'nanugpt.schedulers.constant.get_scheduler'

@@ -17,6 +17,11 @@ training:
   max_steps: 20345
   global_batch_size: 512
 
+optimizer:
+  module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
+  module_kwargs:
+    zero_stage: 1 # 0: off, 1: shard optimizer
+
 scheduler:
   module: 'nanugpt.schedulers.linear.get_scheduler'
   module_kwargs:
