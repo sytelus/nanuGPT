@@ -25,14 +25,14 @@ def estimate_loss(model:torch.nn.Module, get_loss:Callable,
         x, y = x.pin_memory().to(device, non_blocking=True) if is_cuda else x.to(device), \
                y.pin_memory().to(device, non_blocking=True) if is_cuda else y.to(device)
         with amp_ctx:
-            logits = model(x)
-            loss, correct, n_preds = get_loss(logits, y)
+            loss, correct, n_preds = get_loss(model(x), y)
             n_samples = len(y)
             loss_sum += loss.item() * n_samples # loss is average so we need to multiply by n_samples to get total loss over batch
             correct_sum += correct.item()
             preds_count += n_preds
             sample_count += n_samples
     model.train()
+    assert sample_count > 0 and preds_count > 0, "No samples in the dataset"
     return loss_sum / sample_count, correct_sum / preds_count
 
 class Batches:
