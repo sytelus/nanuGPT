@@ -11,6 +11,7 @@ from nanugpt import utils
 from nanugpt import common
 from nanugpt import glogging as logging
 from nanugpt import lin_predictor
+from nanugpt.scalers.scaler_base import ScalerBase
 
 @torch.no_grad()
 def estimate_loss(model:torch.nn.Module, get_loss:Callable,
@@ -155,7 +156,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
     # initialize a GradScaler. If enabled=False scaler is a no-op
     # we need loss scaling only for fp16 due to reduced precision, not bf16 or fp32
-    scaler = get_scaler(torch_info)
+    scaler:ScalerBase = get_scaler(torch_info)
 
     if torch_info.is_master:
         out_dir = utils.full_path(out_dir, create=True)
@@ -219,7 +220,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             x, y = batches.next()
 
             # backward pass, with gradient scaling if training in fp16
-            scaler.scale(loss).backward() # type: ignore
+            scaler.backward(loss) # type: ignore
         # --- end of gradient accumulation loop ---
 
         # clip the gradients
