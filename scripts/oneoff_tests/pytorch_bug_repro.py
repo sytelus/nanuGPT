@@ -2,7 +2,9 @@
 Original code from: https://github.com/KellerJordan/modded-nanogpt/blob/09a49d4af4804af92d14216b43136f5510a8fba8/train_gpt2.py
 """
 
-# TODO: add grad norm from KellerJordan's code
+import os
+os.environ['TORCHDYNAMO_VERBOSE'] = '1'
+
 
 from typing import Optional
 
@@ -14,6 +16,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 
+
 @dataclass
 class GPTConfig:
     block_size: int = 1024
@@ -23,10 +26,10 @@ class GPTConfig:
     n_embd: int = 768
 
 class Rotary(torch.nn.Module):
+
     def __init__(self, dim, base=10000):
         super().__init__()
-        inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
-        self.register_buffer("inv_freq", inv_freq)
+        self.register_buffer('inv_freq', (1 / base) ** (torch.arange(0, dim, 2) / dim))
         self.seq_len_cached = None
         self.cos_cached = None
         self.sin_cached = None
@@ -34,9 +37,9 @@ class Rotary(torch.nn.Module):
     def forward(self, x):
         seq_len = x.shape[1]
         if seq_len != self.seq_len_cached:
+            t = torch.arange(seq_len, device=x.device)
+            freqs = torch.outer(t, self.inv_freq)
             self.seq_len_cached = seq_len
-            t = torch.arange(seq_len, device=x.device).type_as(self.inv_freq)
-            freqs = torch.outer(t, self.inv_freq).to(x.device)
             self.cos_cached = freqs.cos()
             self.sin_cached = freqs.sin()
         return self.cos_cached[None, :, None, :], self.sin_cached[None, :, None, :] # type: ignore
@@ -50,10 +53,8 @@ def apply_rotary_emb(x, cos, sin):
     y2 = x1 * (-sin) + x2 * cos
     return torch.cat([y1, y2], 3)
 
-def rmsnorm(x0, eps=1e-6):
-    x = x0.float()
-    x = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps)
-    return x.type_as(x0)
+def rmsnorm(x):
+    return F.rms_norm(x, (x.size(-1),))
 
 
 class CausalSelfAttention(nn.Module):
