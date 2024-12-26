@@ -7,9 +7,7 @@ Original code from: https://github.com/KellerJordan/modded-nanogpt/blob/09a49d4a
 from typing import Optional
 
 import math
-import inspect
 from dataclasses import dataclass
-import logging
 
 import torch
 import torch.nn as nn
