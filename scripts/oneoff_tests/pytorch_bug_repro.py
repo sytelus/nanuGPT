@@ -167,12 +167,18 @@ func = get_model(12, 768, 12, 50257, 1024).to('cuda')
 # generate random input of size (4, 1024)
 x = torch.randint(0, 50257, (4, 1024)).to('cuda')
 
-res1 = func(x)
+amp_ctx = torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16)
+
+with amp_ctx:
+    res1 = func(x)
 #print(res1)
 
 with torch.no_grad():
     func.train(False)
-    jit_func = torch.compile(func)
-    res2 = jit_func(x)
+
+    with amp_ctx:
+        jit_func = torch.compile(func)
+        res2 = jit_func(x)
+
     print(res2)
     # AttributeError: 'float' object has no attribute 'meta'
