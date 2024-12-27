@@ -106,7 +106,8 @@ class Block(nn.Module):
         super().__init__()
         self.attn = CausalSelfAttention(config)
         self.mlp = MLP(config)
-        self.attn_scale = (1 / math.sqrt(2 * config.n_layer))
+        # Use register_buffer to avoid torch Dynamo error 'float' does not have the attribute 'meta'
+        self.register_buffer('attn_scale', torch.tensor(1 / math.sqrt(2 * config.n_layer)))
 
     def forward(self, x):
         x = x + self.attn_scale * self.attn(rmsnorm(x))
