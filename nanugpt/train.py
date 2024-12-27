@@ -303,9 +303,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         # is it time to evaluate? We evaluate after 1st step to get initial loss.
         eval_performed = False
         if torch_info.is_master and ((step+1) % eval_every == 0 or step+1 >= max_steps):
+            eval_start_time = timeit.default_timer()
             max_memory_allocated = torch.cuda.max_memory_allocated() if torch_info.is_cuda else 0
-
-            #torch.cuda.empty_cache() # clear cache before evaluation
 
             eval_performed = True
             eval_count += 1
@@ -327,6 +326,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                 "run/w_norm": utils.weight_norm(model),
                 "val/interval": eval_interval,
                 "train/max_memory_allocated": max_memory_allocated,
+                "val/time_s": (timeit.default_timer() - eval_start_time),
             })
             if step+1 >= max_steps and test_loader:
                 test_loss, test_acc = estimate_loss(model, get_loss, test_loader, None,
@@ -338,8 +338,6 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                 })
             last_eval_time = timeit.default_timer()
 
-            #torch.cuda.empty_cache() # clear cache after evaluation
-
         # if this is last step or enough time has passed, save checkpoint
         can_checkpoint = save_checkpoint and \
                 ((step+1 >= max_steps) or \
@@ -347,6 +345,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                         (timeit.default_timer() - last_checkpoint_time) / 3600.0 > checkpoint_every_hr)
                 )
 
+        checkpoint_start_time = timeit.default_timer()
         # consolidate optim state
         if can_checkpoint:
             # distributed optimizer like ZeroOptimizer needs to be consolidated before saving
@@ -359,7 +358,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         if torch_info.is_master and can_checkpoint:
             # TODO: below is only for debugging, remove later
             logger.info({"step": step, "max_steps": max_steps,
-                         "checkpoint_since_hr": (timeit.default_timer() - last_checkpoint_time)/3600.0,
+                         "run/checkpoint_since_hr": (timeit.default_timer() - last_checkpoint_time)/3600.0,
                         "checkpoint_every_hr": checkpoint_every_hr})
             last_checkpoint_time = timeit.default_timer()
             checkpoint_filename = "checkpoint_" + \
@@ -368,7 +367,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                                     model.module if torch_info.is_distributed else model,
                                     optimizer, scheduler, step, best_val_loss)
 
-            metrics.update({"checkpoint_filepath": checkpoint_filepath})
+            metrics.update({"checkpoint_filepath": checkpoint_filepath,
+                            "run/checkpoint_time_s": timeit.default_timer() - checkpoint_start_time})
 
             checkpoint_log.append(metrics)
             logger.log_artifact(name=checkpoint_filename, type='file', file_or_dir=checkpoint_filepath)

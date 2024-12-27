@@ -129,13 +129,15 @@ std_metrics['default'] = [
                             {"name": "train/step_ppl", "step_metric":"train/step", "summary":"last", "goal":"min"},
 
                             {"name": "val/best_loss", "step_metric":"train/step", "summary":"last", "goal":"min"},
-                            {"name": "val/val/generalization_gap", "step_metric":"train/step", "summary":"last", "goal":"min"},
+                            {"name": "val/generalization_gap", "step_metric":"train/step", "summary":"last", "goal":"min"},
 
                             {"name": "val/best_loss_step", "step_metric":"train/step", "summary":"last", "goal":"max"},
                             {"name": "val/loss", "step_metric":"train/step", "summary":"last", "goal":"min"},
                             {"name": "val/loss", "step_metric":"train/step", "summary":"last", "goal":"min"},
                             {"name": "val/ppl", "step_metric":"train/step", "summary":"last", "goal":"min"},
                             {"name": "val/interval", "step_metric":"train/step", "summary":"last"},
+                            {"name": "val/time_s", "step_metric":"train/step", "summary":"last", "goal":"min"},
+                            {"name": "run/checkpoint_time_s", "step_metric":"train/step", "summary":"last", "goal":"min"},
 
                             {"name": "test/loss", "step_metric":"train/step", "summary":"last", "goal":"min"},
                             {"name": "test/ppl", "step_metric":"train/step", "summary":"last", "goal":"min"},
