@@ -35,14 +35,16 @@ class Rotary(torch.nn.Module):
         self.sin_cached = None
 
     def forward(self, x):
-        seq_len = x.shape[1]
-        if seq_len != self.seq_len_cached:
-            t = torch.arange(seq_len, device=x.device)
-            freqs = torch.outer(t, self.inv_freq)
-            self.seq_len_cached = seq_len
-            self.cos_cached = freqs.cos()
-            self.sin_cached = freqs.sin()
-        return self.cos_cached[None, :, None, :], self.sin_cached[None, :, None, :] # type: ignore
+        # seq_len = x.shape[1]
+        # if seq_len != self.seq_len_cached:
+        #     t = torch.arange(seq_len, device=x.device)
+        #     freqs = torch.outer(t, self.inv_freq)
+        #     self.seq_len_cached = seq_len
+        #     self.cos_cached = freqs.cos()
+        #     self.sin_cached = freqs.sin()
+        # return self.cos_cached[None, :, None, :], self.sin_cached[None, :, None, :] # type: ignore
+        # return random float tensor of shape [1, 1024, 1, 32]
+        return torch.rand(1, 1024, 1, 32).to(x.device), torch.rand(1, 1024, 1, 32).to(x.device)
 
 def apply_rotary_emb(x, cos, sin):
     assert x.ndim == 4 # multihead attention
@@ -107,12 +109,15 @@ class Block(nn.Module):
         super().__init__()
         self.attn = CausalSelfAttention(config)
         self.mlp = MLP(config)
-        self.attn_scale = (1 / math.sqrt(2 * config.n_layer))
+        # convert float to torch tensor
+        # Without torch.tensor we get float doesn't have attribute meta error
+        self.attn_scale = torch.tensor(1 / math.sqrt(2 * config.n_layer))
 
     def forward(self, x):
         x = x + self.attn_scale * self.attn(rmsnorm(x))
-        x = x + self.mlp(rmsnorm(x))
-        return x
+        # x = x + self.mlp(rmsnorm(x))
+        # return x
+        return x+torch.rand(4, 1024, 768).to(x.device)
 
 class GPT(nn.Module):
     def __init__(self, config:GPTConfig):
@@ -172,7 +177,6 @@ amp_ctx = torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16)
 
 with amp_ctx:
     res1 = func(x)
-#print(res1)
 
 with torch.no_grad():
     func.train(False)
@@ -181,5 +185,4 @@ with torch.no_grad():
         jit_func = torch.compile(func)
         res2 = jit_func(x)
 
-    print(res2)
     # AttributeError: 'float' object has no attribute 'meta'
