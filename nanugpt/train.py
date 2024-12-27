@@ -16,8 +16,8 @@ from nanugpt.scalers.scaler_base import ScalerBase
 def estimate_loss(model:torch.nn.Module, get_loss:Callable,
                   data_loader, eval_iters:Optional[int],
                   amp_ctx, is_cuda:bool, device)->Tuple[float, float]:
-    model.eval()
     with torch.no_grad():
+        model.eval()
         loss_sum, correct_sum, preds_count, sample_count = 0., 0, 0, 0
         for i, (x, y) in enumerate(data_loader):
             if eval_iters is not None and i >= eval_iters: # eval_iters is None means eval the whole dataset
