@@ -305,7 +305,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         if torch_info.is_master and ((step+1) % eval_every == 0 or step+1 >= max_steps):
             max_memory_allocated = torch.cuda.max_memory_allocated() if torch_info.is_cuda else 0
 
-            torch.cuda.empty_cache() # clear cache before evaluation
+            #torch.cuda.empty_cache() # clear cache before evaluation
 
             eval_performed = True
             eval_count += 1
