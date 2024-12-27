@@ -111,7 +111,7 @@ class Block(nn.Module):
         self.mlp = MLP(config)
         # convert float to torch tensor
         # Without torch.tensor we get float doesn't have attribute meta error
-        self.attn_scale = torch.tensor(1 / math.sqrt(2 * config.n_layer))
+        self.register_buffer('attn_scale', torch.tensor(1 / math.sqrt(2 * config.n_layer)))
 
     def forward(self, x):
         x = x + self.attn_scale * self.attn(rmsnorm(x))
