@@ -302,7 +302,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
         # is it time to evaluate? We evaluate after 1st step to get initial loss.
         eval_performed = False
-        if torch_info.is_master and ((step+1) % eval_every == 0 or step+1 >= max_steps):
+        if ((step+1) % eval_every == 0 or step+1 >= max_steps):
             eval_start_time = timeit.default_timer()
             max_memory_allocated = torch.cuda.max_memory_allocated() if torch_info.is_cuda else 0
 
