@@ -338,7 +338,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                 })
             last_eval_time = timeit.default_timer()
 
-            torch.cuda.empty_cache() # clear cache after evaluation
+            #torch.cuda.empty_cache() # clear cache after evaluation
 
         # if this is last step or enough time has passed, save checkpoint
         can_checkpoint = save_checkpoint and \
