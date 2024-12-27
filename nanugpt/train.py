@@ -316,26 +316,29 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                 best_val_loss = val_loss
                 best_val_loss_step = step
 
-            metrics.update({
-                "val/loss": val_loss,
-                "val/generalization_gap": val_loss - train_loss,
-                "val/acc": val_acc,
-                "val/ppl": math.exp(val_loss),
-                "val/best_loss": best_val_loss,
-                "val/best_loss_step": best_val_loss_step,
-                "run/w_norm": utils.weight_norm(model),
-                "val/interval": eval_interval,
-                "train/max_memory_allocated": max_memory_allocated,
-                "val/time_s": (timeit.default_timer() - eval_start_time),
-            })
+            if torch_info.is_master:
+                metrics.update({
+                    "val/loss": val_loss,
+                    "val/generalization_gap": val_loss - train_loss,
+                    "val/acc": val_acc,
+                    "val/ppl": math.exp(val_loss),
+                    "val/best_loss": best_val_loss,
+                    "val/best_loss_step": best_val_loss_step,
+                    "run/w_norm": utils.weight_norm(model),
+                    "val/interval": eval_interval,
+                    "train/max_memory_allocated": max_memory_allocated,
+                    "val/time_s": (timeit.default_timer() - eval_start_time),
+                })
+
             if step+1 >= max_steps and test_loader:
                 test_loss, test_acc = estimate_loss(model, get_loss, test_loader, None,
                                             amp_ctx, torch_info.is_cuda, device)
-                metrics.update({
-                    "test/loss": test_loss,
-                    "test/ppl": math.exp(test_loss),
-                    "test/acc": test_acc,
-                })
+                if torch_info.is_master:
+                    metrics.update({
+                        "test/loss": test_loss,
+                        "test/ppl": math.exp(test_loss),
+                        "test/acc": test_acc,
+                    })
             last_eval_time = timeit.default_timer()
 
         # if this is last step or enough time has passed, save checkpoint
