@@ -164,10 +164,9 @@ def get_data(context_length:int, dtype,
                             start_seq_index=train_offset,
                             seed=data_loader_seed+global_rank, shuffle=shuffle), \
             MemmapDataloader(val_dataset, eval_batch_size,
-                            start_seq_index=0,
-                            # shuffle on val and test is needed as we do sampling for evaluation
-                            seed=data_loader_seed+global_rank, shuffle=True), \
+                            start_seq_index=val_offset,
+                            seed=data_loader_seed+global_rank, shuffle=shuffle), \
             MemmapDataloader(test_dataset, eval_batch_size,
-                            start_seq_index=0,
-                            seed=data_loader_seed+global_rank, shuffle=True) if test_dataset else None
+                            start_seq_index=test_offset,
+                            seed=data_loader_seed+global_rank, shuffle=shuffle) if test_dataset else None
 

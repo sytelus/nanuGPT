@@ -136,11 +136,15 @@ std_metrics['default'] = [
                             {"name": "val/loss", "step_metric":"train/step", "summary":"last", "goal":"min"},
                             {"name": "val/ppl", "step_metric":"train/step", "summary":"last", "goal":"min"},
                             {"name": "val/interval", "step_metric":"train/step", "summary":"last"},
+                            {"name": "val/samples", "step_metric":"train/step", "summary":"last"},
+                            {"name": "val/iter_count", "step_metric":"train/step", "summary":"last"},
                             {"name": "val/time_s", "step_metric":"train/step", "summary":"last", "goal":"min"},
                             {"name": "run/checkpoint_time_s", "step_metric":"train/step", "summary":"last", "goal":"min"},
 
                             {"name": "test/loss", "step_metric":"train/step", "summary":"last", "goal":"min"},
                             {"name": "test/ppl", "step_metric":"train/step", "summary":"last", "goal":"min"},
+                            {"name": "test/samples", "step_metric":"train/step", "summary":"last"},
+                            {"name": "test/iter_count", "step_metric":"train/step", "summary":"last"},
 
                             {"name": "run/lr", "step_metric":"train/step", "summary":"last"},
                             {"name": "run/w_norm", "step_metric":"train/step", "summary":"last", "goal":"min"},

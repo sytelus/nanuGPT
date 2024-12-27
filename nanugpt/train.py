@@ -15,15 +15,16 @@ from nanugpt.scalers.scaler_base import ScalerBase
 
 def estimate_loss(model:torch.nn.Module, get_loss:Callable,
                   data_loader, eval_iters:Optional[int],
-                  amp_ctx, is_cuda:bool, device)->Tuple[float, float]:
+                  amp_ctx, torch_info:utils.TorchInfo, device)->Tuple[float, float, int, int]:
     model.eval()
+    eval_iters = eval_iters if eval_iters is not None else len(data_loader)
     with torch.no_grad():
         loss_sum, correct_sum, preds_count, sample_count = 0., 0, 0, 0
         for i, (x, y) in enumerate(data_loader):
-            if eval_iters is not None and i >= eval_iters: # eval_iters is None means eval the whole dataset
+            if i >= eval_iters / torch_info.world_size:
                 break
-            x, y = x.to(device, non_blocking=True) if is_cuda else x.to(device), \
-                y.to(device) if is_cuda else y.to(device)
+            x, y = x.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else x.to(device), \
+                y.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else y.to(device)
             #with amp_ctx:
             loss, correct, n_preds = get_loss(model(x), y)
             n_samples = len(y)
@@ -31,9 +32,20 @@ def estimate_loss(model:torch.nn.Module, get_loss:Callable,
             correct_sum += correct.item()
             preds_count += n_preds
             sample_count += n_samples
+    iter_count = i+1
+    # gather matrics from all ranks
+    if torch_info.is_distributed:
+        fp32_dist = torch.tensor([loss_sum, correct_sum, preds_count, sample_count, iter_count], dtype=torch.float32, device=device)
+        dist.reduce(fp32_dist, dst=0, op=dist.ReduceOp.SUM)
+        if torch_info.is_master:
+            loss_sum, correct_sum, preds_count, sample_count, iter_count = tuple(fp32_dist.tolist())
+            # convert back to int
+            correct_sum, preds_count, sample_count, iter_count = int(correct_sum), int(preds_count), int(sample_count), int(iter_count)
+
+
     model.train()
     assert sample_count > 0 and preds_count > 0, "No samples in the dataset"
-    return loss_sum / sample_count, correct_sum / preds_count
+    return loss_sum / sample_count, correct_sum / preds_count, sample_count, iter_count
 
 class Batches:
     def __init__(self, loader) -> None:
@@ -310,13 +322,13 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             eval_count += 1
             eval_interval = timeit.default_timer() - last_eval_time
 
-            val_loss, val_acc = estimate_loss(model, get_loss, val_loader, eval_iters,
-                                            amp_ctx, torch_info.is_cuda, device)
+            val_loss, val_acc, sample_count, iter_count = estimate_loss(model, get_loss, val_loader, eval_iters,
+                                            amp_ctx, torch_info, device)
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 best_val_loss_step = step
 
-            if torch_info.is_master:
+            if torch_info.is_master: # only master has aggregated metrics
                 metrics.update({
                     "val/loss": val_loss,
                     "val/generalization_gap": val_loss - train_loss,
@@ -328,16 +340,20 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                     "val/interval": eval_interval,
                     "train/max_memory_allocated": max_memory_allocated,
                     "val/time_s": (timeit.default_timer() - eval_start_time),
+                    "val/samples": sample_count,
+                    "val/iter_count": iter_count,
                 })
 
             if step+1 >= max_steps and test_loader:
-                test_loss, test_acc = estimate_loss(model, get_loss, test_loader, None,
-                                            amp_ctx, torch_info.is_cuda, device)
-                if torch_info.is_master:
+                test_loss, test_acc, sample_count, iter_count = estimate_loss(model, get_loss, test_loader, None,
+                                            amp_ctx, torch_info, device)
+                if torch_info.is_master: # only master has aggregated metrics
                     metrics.update({
                         "test/loss": test_loss,
                         "test/ppl": math.exp(test_loss),
                         "test/acc": test_acc,
+                        "test/samples": sample_count,
+                        "test/iter_count": iter_count,
                     })
             last_eval_time = timeit.default_timer()
 
