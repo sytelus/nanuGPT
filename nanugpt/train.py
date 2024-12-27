@@ -386,11 +386,6 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         # not needed as reduce will cause sync
         # torch.cuda.synchronize()
 
-        # master might take longer, so we need to sync before barrier
-        logger.info({"step": step, "status": "syncing before barrier", "rank": torch_info.global_rank})
-        dist.barrier() # wait for all processes to come togather
-        logger.info({"step": step, "status": "barrier done", "rank": torch_info.global_rank})
-
         step += 1
         if step >= max_steps:
             break
