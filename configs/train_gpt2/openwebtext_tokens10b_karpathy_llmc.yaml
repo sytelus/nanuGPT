@@ -11,6 +11,7 @@ data:
   module_kwargs:
     tokenized_train_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/train.bin'
     tokenized_val_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/val.bin'
+    eval_batch_size: '_copy: /training/device_batch_size'
 
 training:
   device_batch_size: 64
