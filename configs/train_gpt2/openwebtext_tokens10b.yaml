@@ -12,10 +12,15 @@ data:
 
 training:
   device_batch_size: 12 # default 12, GH200: 72
-  max_steps: 20345
+  max_steps: 21701
+
+optimizer:
+  module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
+  module_kwargs:
+    zero_stage: 0 # 0: off, 1: shard optimizer
 
 eval:
-  eval_every: 1000
+  eval_every: 250
   eval_iters: 200 # number of samples to evaluate for dataset
   save_checkpoint: true
   checkoint_after: 0 # starts saving checkpoint after these steps
