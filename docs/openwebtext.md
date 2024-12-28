@@ -34,7 +34,7 @@ Train steps: 600,000
 Context length: 1024
 Train loss: 2.7935577392578126
 Val loss: 2.83925675034523
-Run time: 61.71 hr (8x NVIDIA H100 80GB HBM3)
+Train Time (hr): 61.71 hr (8x NVIDIA H100 80GB HBM3)
 ```
 
 ## Reproducibility
@@ -49,33 +49,96 @@ For quick experiment, try 10B tokens instead of 295B tokens.
 python train.py configs/train_gpt2/openwebtext_tokens10b.yaml
 ```
 
-Before v0.3.8,
+Baseline based on Karpathy's config (before v0.3.8):
 
 ```text
 Trained on total tokens: 9,999,974,400
 Train steps: 20,344
 Train loss: 3.0855010986328124
 Val loss: 3.0888511716884417
-Run time: 1.56 hr (8x NVIDIA H100 80GB HBM3)
+Train Time (hr): 1.56 hr (8x NVIDIA H100 80GB HBM3)
 ```
 
-For v0.3.8 (removing barrier, single reduce),
+After removing barrier, single reduce (v0.3.8):
 
 ```text
 Trained on total tokens: 9,999,974,400
 Train steps: 20,345
 Train loss: 3.071729532877604
 Val loss: 3.0704586088222308
-Run time: 1.22 (8x NVIDIA H100 80GB HBM3)
+Train Time (hr): 1.22 (8x NVIDIA H100 80GB HBM3)
 ```
 
-
-For v0.3.9 (ZeroOptimizer),
+With ZeroOptimizer (v0.3.9):
 
 ```text
 Trained on total tokens: 9,998,008,320
 Train steps: 20,340
 Train loss: 3.065877787272135
 Val loss: 3.0901788899498266
-Run time: 1.22 (8x NVIDIA H100 80GB HBM3)
+Train Time (hr): 1.22 (8x NVIDIA H100 80GB HBM3)
+```
+
+Karpathy's llm.c config:
+
+```text
+Trained on total tokens: 10,666,639,360
+Train steps: 20,345
+Train loss: 3.0496087074279785
+Val loss: 3.02673102643368
+Train Time (hr): 1.25 (8x NVIDIA H100 80GB HBM3)
+```
+
+Keller Jordan AdamW config:
+
+```text
+Trained on total tokens: 10,666,639,360
+Train steps: 20,345
+Train loss: 3.011476516723633
+Val loss: 3.0123847484588624
+Train Time (hr): 1.27 (8x NVIDIA H100 80GB HBM3)
+```
+
+Karpathy's llm.c config with distributed val:
+
+```text
+Trained on total tokens: 10,666,639,360
+Train steps: 20,345
+Train loss: 3.0496087074279785
+Val loss: 3.02673102643368
+Train Time (hr): 1.24 (8x NVIDIA H100 80GB HBM3)
+Run Time (hr): 1.327496601332807
+```
+
+Keller AdamW config with distributed val:
+
+```text
+Trained on total tokens: 10,666,639,360
+Train steps: 20,345
+Train loss: 3.0096380710601807
+Val loss: 2.9958531061808267
+Train Time (hr): 1.264700971551041 (8x NVIDIA H100 80GB HBM3)
+Run Time (hr): 1.2935799625552156
+```
+
+Keller AdamW config but with val config from Karpathy:
+
+```text
+Trained on total tokens: 10,666,639,360
+Train steps: 20,345
+Train loss: 3.0154712200164795
+Val loss: 3.00369873046875
+Train Time (hr): 1.2612408693383144 (8x NVIDIA H100 80GB HBM3)
+Run Time (hr): 1.3436820502713736
+```
+
+Karpathy's llm.c config but with Keller AdamW val config:
+
+```text
+Trained on total tokens: 10,666,639,360
+Train steps: 20,345
+Train loss: 3.0582926273345947
+Val loss: 3.051426887512207
+Train Time (hr): 1.246192487568807 (8x NVIDIA H100 80GB HBM3)
+Run Time (hr): 1.280788689654631
 ```
