@@ -69,6 +69,8 @@ Val loss: 3.0704586088222308
 Train Time (hr): 1.22 (8x NVIDIA H100 80GB HBM3)
 ```
 
+Observation: Barrier weren't required and it + another reduce cost 0.34hr.
+
 With ZeroOptimizer (v0.3.9):
 
 ```text
@@ -78,6 +80,8 @@ Train loss: 3.065877787272135
 Val loss: 3.0901788899498266
 Train Time (hr): 1.22 (8x NVIDIA H100 80GB HBM3)
 ```
+
+Observation: Val loss went high but probably still within acceptable range. Time remained same.
 
 Karpathy's llm.c config:
 
@@ -89,6 +93,8 @@ Val loss: 3.02673102643368
 Train Time (hr): 1.25 (8x NVIDIA H100 80GB HBM3)
 ```
 
+Observation: Lower val loss for 6.7% more tokens for equivalently same time.
+
 Keller Jordan AdamW config:
 
 ```text
@@ -98,6 +104,8 @@ Train loss: 3.011476516723633
 Val loss: 3.0123847484588624
 Train Time (hr): 1.27 (8x NVIDIA H100 80GB HBM3)
 ```
+
+Similar loss as llm.c.
 
 Karpathy's llm.c config with distributed val:
 
@@ -141,4 +149,28 @@ Train loss: 3.0582926273345947
 Val loss: 3.051426887512207
 Train Time (hr): 1.246192487568807 (8x NVIDIA H100 80GB HBM3)
 Run Time (hr): 1.280788689654631
+```
+
+Observation: Karpathy's val takes 0.04hr more but seems more better.
+
+Karpathy original but closer to 10B with zero optim:
+
+```text
+Trained on total tokens: 10,666,475,520
+Train steps: 21,701
+Train loss: 3.087213897705078
+Val loss: 3.054884948730469
+Train Time (hr): 1.313675880413501 (8x NVIDIA H100 80GB HBM3)
+Run Time (hr): 1.3700039549658285
+```
+
+Karpathy original but closer to 10B without zero optim:
+
+```text
+Trained on total tokens: 10,666,475,520
+Train steps: 21,701
+Train loss: 3.175733693440755
+Val loss: 3.1655511474609375
+Train Time (hr): 1.3071260947987708 (8x NVIDIA H100 80GB HBM3)
+Run Time (hr): 1.3543935026833789
 ```

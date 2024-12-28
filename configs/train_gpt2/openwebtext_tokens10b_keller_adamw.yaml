@@ -44,9 +44,16 @@ scheduler:
     const_lr: 18.0E-4
 
 eval:
-  eval_every: 128
-  eval_iters: 20 # number of samples to evaluate for dataset
+  eval_every: 250
+  eval_iters: 200 # number of samples to evaluate for dataset
   save_checkpoint: true
   checkoint_after: 0 # starts saving checkpoint after these steps
-  checkpoint_every_hr: 2 # take checkpoint every this hours
+  checkpoint_every_hr: 200 # take checkpoint every this hours
   checkpoint_keep_best: false # keep only the best checkpoint, otherwise keep all with  _{step}.pt
+
+  # eval_every: 128
+  # eval_iters: 20 # number of samples to evaluate for dataset
+  # save_checkpoint: true
+  # checkoint_after: 0 # starts saving checkpoint after these steps
+  # checkpoint_every_hr: 2 # take checkpoint every this hours
+  # checkpoint_keep_best: false # keep only the best checkpoint, otherwise keep all with  _{step}.pt
