@@ -6,6 +6,8 @@ import torch
 from torch.utils.data import Dataset
 
 from nanugpt import utils
+from nanugpt import glogging as logging
+
 
 """
 This module implements the `get_data` interface for tokenized data allowing
@@ -19,7 +21,7 @@ class MemmapDataset(Dataset):
     The dataset is still accessed token by token by specifying index but we seq_len tokens at a time.
     If seq_len is not specified, it is assumed to be equal to context_length.
     """
-    def __init__(self, data:np.memmap, context_length:int, seq_len:Optional[int]=None):
+    def __init__(self, data:np.ndarray, context_length:int, seq_len:Optional[int]=None):
         super().__init__()
         self.data = data
         self.context_length = context_length
@@ -136,21 +138,47 @@ def get_data(context_length:int, dtype,
 
     world_size = utils.get_world_size()
     global_rank = utils.get_global_rank()
-    assert world_size > 0 and global_rank >= 0 and global_rank < world_size, "world_size and global_rank must be set"
+    local_world_size = utils.get_local_world_size()
+    assert world_size > 0 and global_rank >= 0 and global_rank < world_size and local_world_size >= 1, f"Invalid values: Word size={world_size}, global rank={global_rank}, local world size={local_world_size}"
 
+    train_file_size = val_file_size = test_file_size = 0
     if tokenized_train_path:
         tokenized_train_path = utils.full_path(tokenized_train_path)
+        train_file_size = utils.file_size(tokenized_train_path)
     if tokenized_val_path:
         tokenized_val_path = utils.full_path(tokenized_val_path)
+        val_file_size = utils.file_size(tokenized_val_path)
     if tokenized_test_path:
         tokenized_test_path = utils.full_path(tokenized_test_path)
+        test_file_size = utils.file_size(tokenized_test_path)
 
-    train_dataset = MemmapDataset(np.memmap(tokenized_train_path, dtype=dtype, mode='r'),
-                                  context_length)
-    val_dataset = MemmapDataset(np.memmap(tokenized_val_path, dtype=dtype, mode='r'),
-                                  context_length)
-    test_dataset = MemmapDataset(np.memmap(tokenized_test_path, dtype=dtype, mode='r'),
-                                  context_length) if tokenized_test_path else None
+    # get current RAM size
+    ram_size = utils.ram_size()
+    use_memmap = (train_file_size + val_file_size + test_file_size)*local_world_size > ram_size
+
+    logging.summary({'data/train_file_size': train_file_size,
+                    'data/val_file_size': val_file_size,
+                    'data/test_file_size': test_file_size,
+                    'data/ram_size': ram_size,
+                    'data/local_world_size': local_world_size,
+                    'data/use_memmap': use_memmap
+                    })
+
+    if use_memmap:
+        train_dataset = MemmapDataset(np.memmap(tokenized_train_path, dtype=dtype, mode='r'),
+                                    context_length)
+        val_dataset = MemmapDataset(np.memmap(tokenized_val_path, dtype=dtype, mode='r'),
+                                    context_length)
+        test_dataset = MemmapDataset(np.memmap(tokenized_test_path, dtype=dtype, mode='r'),
+                                    context_length) if tokenized_test_path else None
+    else:
+        train_dataset = MemmapDataset(np.array(np.memmap(tokenized_train_path, dtype=dtype, mode='r')),
+                                    context_length)
+        val_dataset = MemmapDataset(np.array(np.memmap(tokenized_val_path, dtype=dtype, mode='r')),
+                                    context_length)
+        test_dataset = MemmapDataset(np.array(np.memmap(tokenized_test_path, dtype=dtype, mode='r')),
+                                    context_length) if tokenized_test_path else None
+
 
     train_offset = int((len(train_dataset)-1) * float(global_rank) / world_size) \
                 if not shuffle else 0

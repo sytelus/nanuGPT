@@ -725,6 +725,9 @@ def get_global_rank()->int:
 def get_world_size()->int:
     return int(os.environ.get('WORLD_SIZE', '1'))
 
+def get_local_world_size()->int:
+    return int(os.environ.get('LOCAL_WORLD_SIZE', '1'))
+
 def is_master_process()->bool:
     return os.environ.get('RANK', '0') == '0'
 
@@ -780,3 +783,9 @@ def default_except_handler(exc_type, exc_value, exc_traceback):
 
 def install_exception_handler(handler:Callable[[Type, Any, Any], None]=default_except_handler):
     sys.excepthook = handler
+
+def file_size(filepath:str)->int:
+    return os.path.getsize(filepath)
+
+def ram_size()->int:
+    return psutil.virtual_memory().total

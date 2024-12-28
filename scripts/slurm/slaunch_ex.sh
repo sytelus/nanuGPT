@@ -119,6 +119,7 @@ else
     export RANK=$SLURM_PROCID # global rank
     export LOCAL_RANK=$SLURM_LOCALID # rank within the node, not used by init_process_group but we set it for consistency
     export WORLD_SIZE=$((SLURM_NNODES * SLURM_NTASKS_PER_NODE))
+    export LOCAL_WORLD_SIZE=$((SLURM_NTASKS_PER_NODE))
 
     if [ -n "${BIND_CORES}" ]; then # restrict workers to specific cores is requested
         exec taskset -c $BIND_CORES python -u "${START_SCRIPT}" ${START_SCRIPT_ARGS}

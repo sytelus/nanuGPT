@@ -275,6 +275,10 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             loss_improvement_steps += 1
 
         # update iteration metrics
+        # sync cuda streams before updating metrics
+        if torch_info.is_cuda:
+            torch.cuda.synchronize()
+
         if torch_info.is_master:
             elapsed_hr = (timeit.default_timer() - loop_start_time)/3600.0
             loss_pred_model = lin_predictor.fit(list(range(step-len(prev_train_losses)+1, step+1)), prev_train_losses)
