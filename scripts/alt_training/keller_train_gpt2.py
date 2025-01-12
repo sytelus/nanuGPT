@@ -1,6 +1,8 @@
 # from https://raw.githubusercontent.com/KellerJordan/modded-nanogpt/09a49d4af4804af92d14216b43136f5510a8fba8/train_gpt2.py
 # altered to use OpenWebText
-# Test commandline:  torchrun --nproc_per_node=1 --standalone keller_train_gpt2.py --batch_size 4 --num_iterations 6 --val_loss_every 2 --total_batch_size 4096
+# Test commandline:
+# torchrun --nproc_per_node=1 --standalone keller_train_gpt2.py --batch_size 4 --num_iterations 6 --val_loss_every 2 --total_batch_size 4096
+# python keller_train_gpt2.py --batch_size 4 --num_iterations 6 --val_loss_every 2 --total_batch_size 4096
 
 import os
 import sys
@@ -170,6 +172,22 @@ class GPT(nn.Module):
 
 # -----------------------------------------------------------------------------
 # Our own simple Distributed Data Loader
+
+# def memmap_to_array(memmap_obj, chunks=10):
+#     # Get the total number of elements
+#     total_elements = memmap_obj.size
+#     chunk_size = max(1, total_elements // chunks)
+
+#     # Preallocate an array with the same dtype as the memmap object
+#     data = np.empty(total_elements, dtype=memmap_obj.dtype)
+
+#     for start in range(0, total_elements, chunk_size):
+#         end = min(start + chunk_size, total_elements)
+#         data[start:end] = memmap_obj[start:end]
+
+#     return data
+
+
 class DistributedDataLoader:
     def __init__(self, filepath, B, T, process_rank, num_processes):
         self.process_rank = process_rank
@@ -177,7 +195,12 @@ class DistributedDataLoader:
         self.B = B
         self.T = T
 
-        self.tokens = np.array(np.memmap(filepath, dtype=np.uint16, mode="r"))
+        print0(f"DataLoader: loading data from {filepath}")
+        if ddp_world_size > 1:
+            self.tokens = np.array(np.memmap(filepath, dtype=np.uint16, mode="r"))
+        else:
+            self.tokens = np.memmap(filepath, dtype=np.uint16, mode="r")
+        print0(f"DataLoader: loaded {len(self.tokens):,} tokens")
         self.ntok_total = len(self.tokens)
 
         assert self.ntok_total > process_rank*B*T + B*T, f"dataset is too small for this process rank: {self.ntok_total} <= {process_rank*B*T + B*T + 1}, ntok_total={self.ntok_total}, process_rank={process_rank}, B={B}, T={T}"
@@ -242,11 +265,16 @@ if __name__ == "__main__":
     parser.add_argument("--val_loss_every", type=int, default=128, help="every how mant steps to evaluate val loss?")
     parser.add_argument("--val_max_steps", type=int, default=20, help="how many batches of val to average?")
     parser.add_argument("--save_every", type=int, default=5000, help="every how many steps to save the checkpoint")
+
+    parser.add_argument("--run_id", type=str, default=time.strftime("%Y%m%d-%H%M%S"), help="unique identifier for this run")
     args = parser.parse_args()
+
+    run_id = args.run_id
 
     args.input_bin = os.path.expandvars(args.input_bin)
     args.input_val_bin = os.path.expandvars(args.input_val_bin)
-    args.output_dir = os.path.join(os.path.expandvars(args.output_dir), time.strftime("%Y%m%d-%H%M%S"))
+    args.output_dir = os.path.join(os.path.expandvars(args.output_dir), run_id)
+    log_dir = os.path.join(args.output_dir, "logs")
 
     # args error checking and convenience variables
     B, T = args.batch_size, args.sequence_length
@@ -256,15 +284,19 @@ if __name__ == "__main__":
     # set up DDP (distributed data parallel). torchrun sets this env variable
     # use of DDP atm demands CUDA, we set the device appropriately according to rank
     assert torch.cuda.is_available(), "for now i think we need CUDA for DDP"
-    init_process_group(backend='nccl')
-    ddp_rank = int(os.environ['RANK'])
-    ddp_local_rank = int(os.environ['LOCAL_RANK'])
-    ddp_world_size = int(os.environ['WORLD_SIZE'])
+
+    ddp_world_size = int(os.environ.get('WORLD_SIZE', '1'))
+    ddp_rank = int(os.environ.get('RANK', '0'))
+    ddp_local_rank = int(os.environ.get('LOCAL_RANK', '0'))
     device = f'cuda:{ddp_local_rank}'
     torch.cuda.set_device(device)
     master_process = ddp_rank == 0 # this process will do logging, checkpointing etc.
     seed_offset = 0 # each process gets the exact same seed
-    print(f"using device: {device}")
+    print(f"device: {device}, ddp_rank: {ddp_rank}, ddp_local_rank: {ddp_local_rank}, ddp_world_size: {ddp_world_size}")
+
+    use_ddp = ddp_world_size > 1
+    if use_ddp:
+        init_process_group(backend='nccl')
 
     tokens_per_fwdbwd = B * T * ddp_world_size
     assert args.total_batch_size == tokens_per_fwdbwd
@@ -285,6 +317,7 @@ if __name__ == "__main__":
         config.coordinate_descent_tuning = True # suggested by @Chillee
     print0("compiling the model...")
     model = torch.compile(model)
+    print0("compiling done.")
 
     # load tokens
     train_loader = DistributedDataLoader(args.input_bin, B, T, ddp_rank, ddp_world_size)
@@ -294,8 +327,11 @@ if __name__ == "__main__":
     x, y = train_loader.next_batch()
 
     # here we wrap model into DDP container
-    model = DDP(model, device_ids=[ddp_local_rank])
-    raw_model = model.module # always contains the "raw" unwrapped model
+    if use_ddp:
+        model = DDP(model, device_ids=[ddp_local_rank])
+        raw_model = model.module # always contains the "raw" unwrapped model
+    else:
+        raw_model = model
 
     # init the optimizer
     optimizer = raw_model.configure_optimizers(weight_decay=args.weight_decay,
@@ -315,8 +351,6 @@ if __name__ == "__main__":
         else:
             decay_ratio = (args.num_iterations - it) / args.warmdown_iters
             return args.learning_rate * decay_ratio
-
-    run_id = str(uuid.uuid4())
 
     # create the logging directory if it does not exist
     logfile = None
@@ -401,8 +435,8 @@ if __name__ == "__main__":
 
         if master_process and (step + 1) % args.save_every == 0:
             log = dict(model=raw_model.state_dict(), code=code, args=args.__dict__)
-            os.makedirs('logs/%s' % run_id, exist_ok=True)
-            torch.save(log, 'logs/%s/model_step%06d.pt' % (run_id, step))
+            os.makedirs(log_dir, exist_ok=True)
+            torch.save(log, os.path.join(log_dir, 'model_step%06d.pt' % step))
 
     # print the average of the last 20 timings, to get something smooth-ish
     timings = timings[-20:]
@@ -413,9 +447,10 @@ if __name__ == "__main__":
 
     if master_process:
         log = dict(model=raw_model.state_dict(), code=code, args=args.__dict__)
-        os.makedirs('logs/%s' % run_id, exist_ok=True)
-        torch.save(log, 'logs/%s/final.pt' % run_id)
+        os.makedirs(log_dir, exist_ok=True)
+        torch.save(log, os.path.join(log_dir, 'final.pt'))
 
     # -------------------------------------------------------------------------
     # clean up nice
+if use_ddp:
     destroy_process_group()
