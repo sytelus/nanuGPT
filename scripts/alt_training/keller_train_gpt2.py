@@ -19,8 +19,11 @@ import torch._inductor.config as config
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
 
+from nanugpt.common import setup_logger
+
 with open(sys.argv[0]) as f:
     code = f.read()
+
 
 # -----------------------------------------------------------------------------
 # PyTorch nn.Module definitions for the GPT-2 model
@@ -42,7 +45,7 @@ class Rotary(torch.nn.Module):
             freqs = torch.outer(t, self.inv_freq).to(x.device)
             self.cos_cached = freqs.cos()
             self.sin_cached = freqs.sin()
-        return self.cos_cached[None, :, None, :], self.sin_cached[None, :, None, :]
+        return self.cos_cached[None, :, None, :], self.sin_cached[None, :, None, :] # type: ignore
 
 def apply_rotary_emb(x, cos, sin):
     assert x.ndim == 4 # multihead attention
@@ -242,6 +245,7 @@ def print0(*args, **kwargs):
 if __name__ == "__main__":
     import time
     import argparse
+
     print0(f"Running pytorch {torch.version.__version__}")
 
     parser = argparse.ArgumentParser()
@@ -274,7 +278,23 @@ if __name__ == "__main__":
     args.input_bin = os.path.expandvars(args.input_bin)
     args.input_val_bin = os.path.expandvars(args.input_val_bin)
     args.output_dir = os.path.join(os.path.expandvars(args.output_dir), run_id)
-    log_dir = os.path.join(args.output_dir, "logs")
+
+    logger = setup_logger(config={
+            "logging":{
+                    "project_name": os.getenv("JOB_NAME", "keller_train_gpt2"),
+                    "run_name": run_id,
+                    "enable_wandb": True,
+                    "log_dir": args.output_dir,
+                    "log_filename": "log.txt",
+                    "summaries_filename": "summary.txt",
+                    "allow_overwrite_log": True,
+                    "metrics_type": "classification",
+                    "summaries_stdout": True,
+                },
+    })
+
+    # convert args to dict and log
+    logger.info(vars(args))
 
     # args error checking and convenience variables
     B, T = args.batch_size, args.sequence_length
@@ -302,7 +322,7 @@ if __name__ == "__main__":
     assert args.total_batch_size == tokens_per_fwdbwd
 
     # set up a context manager following the desired dtype and device
-    ctx = torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16)
+    ctx = torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16) # type: ignore
 
     # init the model from scratch
     model_config = {
@@ -352,17 +372,11 @@ if __name__ == "__main__":
             decay_ratio = (args.num_iterations - it) / args.warmdown_iters
             return args.learning_rate * decay_ratio
 
-    # create the logging directory if it does not exist
-    logfile = None
-    if master_process and args.output_dir:
-        os.makedirs(args.output_dir, exist_ok=True)
-        logfile = os.path.join(args.output_dir, "%s.log" % run_id)
-        # create the log file "main.log" inside it, and wipe it clean
-        with open(logfile, "w") as f:
-            pass
-
     timings = []
     train_tokens = 0
+    train_start_time = time.time()
+    train_time_hr = 0.0
+    metrics = {}
     for step in range(args.num_iterations + 1):
         t0 = time.time()
         last_step = (step == args.num_iterations)
@@ -382,17 +396,21 @@ if __name__ == "__main__":
                     _, loss = model(x_val, y_val, return_logits=False)
                     val_loss += loss.item()
                 val_loss /= args.val_max_steps
-            # log to console and to file
-            print0(f"val loss {val_loss}")
-            if master_process and logfile is not None:
-                with open(logfile, "a") as f:
-                    f.write("s:%d tel:%f\n" % (step, val_loss))
+
             val_time = time.time() - val_start
+            metrics.update({
+                "train/step": step,
+                "val/step": step,
+                "val/loss": val_loss,
+                "val/time_s": val_time,
+            })
+
         # bit confusing: we want to make sure to eval on 0th iteration
         # but also after the very last iteration. so we loop for step <= num_iterations
         # instead of just < num_iterations (one extra due to <=), only to do
         # the validation/sampling one last time, and then we break right here as we're done.
         if last_step:
+            logger.info(metrics)
             break
 
         # --------------- TRAINING SECTION BEGIN -----------------
@@ -405,7 +423,7 @@ if __name__ == "__main__":
         # backward pass
         loss.backward()
         for p in model.parameters():
-            p.grad = p.grad / (p.grad.norm() + 1e-6)
+            p.grad = p.grad / (p.grad.norm() + 1e-6) # type: ignore
         # determine and set the learning rate for this iteration
         lr = get_lr(step)
         for param_group in optimizer.param_groups:
@@ -423,32 +441,38 @@ if __name__ == "__main__":
         train_tokens += ddp_world_size * B * T
         tokens_per_second = ddp_world_size * B * T / (t1-t0)
         lossf = loss.item() # keep track of the mean loss
-        print0(f"step {step+1:4d}/{args.num_iterations} | train loss {lossf:.6f} | lr {lr:.2e} | ({(t1-t0)*1000:.2f} ms | {tokens_per_second:.0f} tok/s) | tokens {train_tokens:,}")
-        # log to logile
-        if master_process and logfile is not None:
-            with open(logfile, "a") as f:
-                f.write("s:%d trl:%f\n" % (step, lossf))
+
+        train_time_hr += (t1-t0-val_time) / 3600.0
+        metrics.update({
+            "train/loss": lossf,
+            "train/token_per_sec": tokens_per_second,
+            "train/step_interval": t1-t0-val_time,
+            "train/elapsed_hr": (t1-train_start_time) / 3600.0,
+            "train/train_time_hr": train_time_hr,
+            "train/tokens": train_tokens,
+            "train/lr": lr,
+        })
+
+        logger.info(metrics)
 
         # keep track of smooth timings, last 20 iterations
         if step > 0 and step > args.num_iterations - 20:
             timings.append(t1-t0-val_time)
 
-        if master_process and (step + 1) % args.save_every == 0:
-            log = dict(model=raw_model.state_dict(), code=code, args=args.__dict__)
-            os.makedirs(log_dir, exist_ok=True)
-            torch.save(log, os.path.join(log_dir, 'model_step%06d.pt' % step))
-
     # print the average of the last 20 timings, to get something smooth-ish
     timings = timings[-20:]
-    print0(f"final {len(timings)} iters avg: {np.mean(timings)*1000:.3f}ms")
-    print0(f"peak memory consumption: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB")
+
+    logger.info({
+        "final_iters_avg (usec)": np.mean(timings),
+        "final_iters_stddev (usec)": np.std(timings),
+        "pick_memory_consumption (MiB)": torch.cuda.max_memory_allocated() // 1024 // 1024,
+    })
 
     # -------------------------------------------------------------------------
 
     if master_process:
         log = dict(model=raw_model.state_dict(), code=code, args=args.__dict__)
-        os.makedirs(log_dir, exist_ok=True)
-        torch.save(log, os.path.join(log_dir, 'final.pt'))
+        torch.save(log, os.path.join(args.output_dir, 'final.pt'))
 
     # -------------------------------------------------------------------------
     # clean up nice
