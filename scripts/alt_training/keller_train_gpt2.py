@@ -308,8 +308,20 @@ if __name__ == "__main__":
     ddp_world_size = int(os.environ.get('WORLD_SIZE', '1'))
     ddp_rank = int(os.environ.get('RANK', '0'))
     ddp_local_rank = int(os.environ.get('LOCAL_RANK', '0'))
-    device = f'cuda:{ddp_local_rank}'
-    torch.cuda.set_device(device)
+
+    gpu_count = torch.cuda.device_count()
+    if gpu_count > 1:
+        assert gpu_count-1 >= ddp_local_rank, f'LOCAL_RANK={ddp_local_rank} is greater than available GPUs={gpu_count}'
+        torch.cuda.set_device(ddp_local_rank)
+        device = f'cuda:{ddp_local_rank}'
+        device_id = ddp_local_rank
+    elif gpu_count == 1:
+        torch.cuda.set_device(0)
+        device = 'cuda:0'
+        device_id = 0
+    else:
+        raise ValueError('No GPU found. Set device_type=cpu.')
+
     master_process = ddp_rank == 0 # this process will do logging, checkpointing etc.
     seed_offset = 0 # each process gets the exact same seed
     print(f"device: {device}, ddp_rank: {ddp_rank}, ddp_local_rank: {ddp_local_rank}, ddp_world_size: {ddp_world_size}")
@@ -348,7 +360,7 @@ if __name__ == "__main__":
 
     # here we wrap model into DDP container
     if use_ddp:
-        model = DDP(model, device_ids=[ddp_local_rank])
+        model = DDP(model, device_ids=[device_id])
         raw_model = model.module # always contains the "raw" unwrapped model
     else:
         raw_model = model
