@@ -11,12 +11,9 @@
 
 set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
 
-# required and optional variable
-REQUIRED_VARS=("DATA_ROOT")
 SOURCE_DIR=${SOURCE_DIR:-.} # where is source directory
 export JOB_NAME=${JOB_NAME:-test_job}
-export START_SCRIPT=${START_SCRIPT:-"train.py"} # entry script to run
-export START_SCRIPT_ARGS=${START_SCRIPT_ARGS:-"--general.project_name ${JOB_NAME} --general.out_dir \$JOB_OUT_DIR $@"}
+export START_COMMAND=${START_COMMAND:-"$@"}
 export DATA_ROOT=${DATA_ROOT:-} # data directory to mount in container
 export OUT_DIR=${OUT_DIR:-"${HOME}/out_dir"} # set default output directory
 
@@ -32,12 +29,6 @@ export ENV_SETUP_SCRIPT=${ENV_SETUP_SCRIPT:-} # script to setup environment for 
 export INSTALL_PACKAGE=${INSTALL_PACKAGE:-1} # pip install in source directory
 export UPDATE_PYTHONPATH=${UPDATE_PYTHONPATH:-0} # add source dir to PYTHONPATH (ignored if INSTALL_PACKAGE=1)
 RESTARTABLE=${RESTARTABLE:-1}   # is job restartable if preempted?
-
-### ---------- Check required environment variables
-for var in "${REQUIRED_VARS[@]}"; do
-    [ -z "${!var}" ] && { echo "Error: Required environment variable '$var' is not set." >&2; exit 1; }
-done
-### ---------- End check required environment variables
 
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 
@@ -64,8 +55,7 @@ fi
 
 # output core variables so user can see what is being used
 echo "SOURCE_DIR: $(realpath ${SOURCE_DIR:-<not set>})"
-echo "START_SCRIPT: ${START_SCRIPT:-<not set>}"
-echo "START_SCRIPT_ARGS: ${START_SCRIPT_ARGS:-<not set>}"
+echo "START_COMMAND: ${START_COMMAND:-<not set>}"
 echo "JOB_OUT_DIR: ${JOB_OUT_DIR:-<not set>}"
 echo "DATA_ROOT: ${DATA_ROOT:-<not set>}"
 echo "CONTAINER_IMAGE_PATH: ${CONTAINER_IMAGE_PATH:-<not set>}"

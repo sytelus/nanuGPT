@@ -91,8 +91,13 @@ torchrun --nproc_per_node=8 --standalone train.py configs/train_gpt2/tinyshakesp
 If you are working in slurm environment, you can also run multinode job like this:
 
 ```bash
-NODES=4 DATA_ROOT=<my data dir> bash ./scripts/slurm/sbatch_ex.sh configs/train_gpt2/openwebtext.yaml
+NODES=4 DATA_ROOT=<my_data_dir> OUT_DIR=<my_output_dir> JOB_NAME=<my_job> \
+bash ./scripts/slurm/sbatch_ex.sh train.py configs/train_gpt2/openwebtext.yaml
 ```
+
+Above command uses Nvidia NGC image by default, mounts directory specified in `DATA_ROOT` and `OUT_DIR` on the container, creates job sub directory with datatime and then launches specified command line using python for each worker process (default 8 processes for 8 GPUs per node) in each node.
+
+Please see `sbatch_ex.sh` for various options offered by this script.
 
 ## Using Other Datasets
 

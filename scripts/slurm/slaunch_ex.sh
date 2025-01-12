@@ -10,9 +10,9 @@
 set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
 
 # required and optional variable
-REQUIRED_VARS=("START_SCRIPT" "GPUS_PER_NODE" "TARGET_SOURCE_DIR")
+REQUIRED_VARS=("GPUS_PER_NODE" "TARGET_SOURCE_DIR")
 USE_TORCHRUN=${USE_TORCHRUN:-0} # launcher to use worker processes
-START_SCRIPT_ARGS=${START_SCRIPT_ARGS:-}    # arguments to pass to the entry script
+START_COMMAND=${START_COMMAND:-}    # command to run in slurm
 MASTER_PORT=${MASTER_PORT:-} # port to use for torchrun
 BIND_CORES=${BIND_CORES:-}  # cores allowed to bind launch script to
 SLURM_LAUNCH_NODE_IPADDR=${SLURM_LAUNCH_NODE_IPADDR:-"localhost"} # should be set by slurm
@@ -111,7 +111,7 @@ fi
 if [ "${USE_TORCHRUN}" = "1" ]; then
     # build the torchrun command
     TORCH_RUN_ARGS="--nproc_per_node ${GPUS_PER_NODE} --nnodes ${SLURM_JOB_NUM_NODES} --node_rank ${SLURM_NODEID} --master_addr ${SLURM_LAUNCH_NODE_IPADDR} --master_port ${MASTER_PORT}"
-    eval "torchrun ${TORCH_RUN_ARGS} ${START_SCRIPT} ${START_SCRIPT_ARGS}"
+    eval "OUT_DIR=\"${JOB_OUT_DIR}\" torchrun ${TORCH_RUN_ARGS} ${START_COMMAND}"
 else
     # setup vars needed for torch.dist.init_process_group
     export CUDA_VISIBLE_DEVICES=${gpu_array[$SLURM_LOCALID]}
@@ -122,8 +122,8 @@ else
     export LOCAL_WORLD_SIZE=$((SLURM_NTASKS_PER_NODE))
 
     if [ -n "${BIND_CORES}" ]; then # restrict workers to specific cores is requested
-        exec taskset -c $BIND_CORES python -u "${START_SCRIPT}" ${START_SCRIPT_ARGS}
+        OUT_DIR="${JOB_OUT_DIR}" exec taskset -c $BIND_CORES python -u ${START_COMMAND}
     else
-        exec python -u "${START_SCRIPT}" ${START_SCRIPT_ARGS}
+        OUT_DIR="${JOB_OUT_DIR}" exec python -u ${START_COMMAND}
     fi
 fi
