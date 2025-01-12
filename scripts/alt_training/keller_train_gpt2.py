@@ -327,14 +327,17 @@ if __name__ == "__main__":
             pass
 
     timings = []
+    train_tokens = 0
     for step in range(args.num_iterations + 1):
         t0 = time.time()
         last_step = (step == args.num_iterations)
 
         # once in a while evaluate the validation dataset
+        val_time = 0.0
         if (args.val_loss_every > 0 \
             and (step % args.val_loss_every == 0 or last_step)) \
             and (val_loader is not None):
+            val_start = time.time()
             model.eval()
             val_loader.reset()
             with torch.no_grad():
@@ -349,7 +352,7 @@ if __name__ == "__main__":
             if master_process and logfile is not None:
                 with open(logfile, "a") as f:
                     f.write("s:%d tel:%f\n" % (step, val_loss))
-
+            val_time = time.time() - val_start
         # bit confusing: we want to make sure to eval on 0th iteration
         # but also after the very last iteration. so we loop for step <= num_iterations
         # instead of just < num_iterations (one extra due to <=), only to do
@@ -382,9 +385,10 @@ if __name__ == "__main__":
         # time and print
         t1 = time.time()
         # the 0th iteration is often an outlier (much slower) => skip logging it
+        train_tokens += ddp_world_size * B * T
         tokens_per_second = ddp_world_size * B * T / (t1-t0)
         lossf = loss.item() # keep track of the mean loss
-        print0(f"step {step+1:4d}/{args.num_iterations} | train loss {lossf:.6f} | lr {lr:.2e} | ({(t1-t0)*1000:.2f} ms | {tokens_per_second:.0f} tok/s)")
+        print0(f"step {step+1:4d}/{args.num_iterations} | train loss {lossf:.6f} | lr {lr:.2e} | ({(t1-t0)*1000:.2f} ms | {tokens_per_second:.0f} tok/s) | tokens {train_tokens:,}")
         # log to logile
         if master_process and logfile is not None:
             with open(logfile, "a") as f:
@@ -392,7 +396,7 @@ if __name__ == "__main__":
 
         # keep track of smooth timings, last 20 iterations
         if step > 0 and step > args.num_iterations - 20:
-            timings.append(t1-t0)
+            timings.append(t1-t0-val_time)
 
         if master_process and (step + 1) % args.save_every == 0:
             log = dict(model=raw_model.state_dict(), code=code, args=args.__dict__)
