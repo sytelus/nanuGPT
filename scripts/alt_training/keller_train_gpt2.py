@@ -1,5 +1,6 @@
 # from https://raw.githubusercontent.com/KellerJordan/modded-nanogpt/09a49d4af4804af92d14216b43136f5510a8fba8/train_gpt2.py
 # altered to use OpenWebText
+# Test commandline:  torchrun --nproc_per_node=1 --standalone keller_train_gpt2.py --batch_size 4 --num_iterations 6 --val_loss_every 2 --total_batch_size 4096
 
 import os
 import sys
