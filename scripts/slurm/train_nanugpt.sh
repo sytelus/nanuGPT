@@ -1,6 +1,6 @@
 #! /bin/bash
 
-set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
+set -eu -o pipefail # fail if any command failes, log all commands, -o xtrace
 
 # run this from project root
 # setup below values

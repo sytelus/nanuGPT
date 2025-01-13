@@ -7,7 +7,7 @@
 # does is to update PYTHONPATH to include shared package install directory.
 ####################################################################################################
 
-set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
+set -eu -o pipefail # fail if any command failes, log all commands, -o xtrace
 
 # required and optional variable
 REQUIRED_VARS=("GPUS_PER_NODE" "TARGET_SOURCE_DIR")

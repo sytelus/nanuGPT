@@ -1,6 +1,6 @@
 #! /bin/bash
 
-set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
+set -eu -o pipefail # fail if any command failes, log all commands, -o xtrace
 
 # input variables
 CONTAINER_MOUNTS=${CONTAINER_MOUNTS:-}  # app specific mounts to be attached to container as source:destination

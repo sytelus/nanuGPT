@@ -9,7 +9,7 @@
 ####################################################################################################
 
 
-set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
+set -eu -o pipefail # fail if any command failes, log all commands, -o xtrace
 
 SOURCE_DIR=${SOURCE_DIR:-.} # where is source directory
 export JOB_NAME=${JOB_NAME:-test_job}

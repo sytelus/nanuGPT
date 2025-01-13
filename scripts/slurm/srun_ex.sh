@@ -9,7 +9,7 @@
 # launch the target script on all nodes.
 ####################################################################################################
 
-set -eu -o xtrace -o pipefail # fail if any command failes, log all commands
+set -eu -o pipefail # fail if any command failes, log all commands, -o xtrace
 
 # required and optional variable
 REQUIRED_VARS=("GPUS_PER_NODE" "CONTAINER_IMAGE_PATH" "JOB_OUT_DIR" "TARGET_SOURCE_DIR" "SLURM_SCRIPT_DIR")
