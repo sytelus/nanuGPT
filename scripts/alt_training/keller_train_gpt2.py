@@ -266,8 +266,8 @@ if __name__ == "__main__":
     parser.add_argument("--warmdown_iters", type=int, default=2048, help="learning rate warmdown iterations")
     parser.add_argument("--weight_decay", type=float, default=0.1, help="weight decay")
     # evaluation
-    parser.add_argument("--val_loss_every", type=int, default=128, help="every how mant steps to evaluate val loss?")
-    parser.add_argument("--val_max_steps", type=int, default=20, help="how many batches of val to average?")
+    parser.add_argument("--val_loss_every", type=int, default=250, help="every how mant steps to evaluate val loss?")
+    parser.add_argument("--val_max_steps", type=int, default=200, help="how many batches of val to average?")
     parser.add_argument("--save_every", type=int, default=5000, help="every how many steps to save the checkpoint")
 
     parser.add_argument("--run_id", type=str, default=time.strftime("%Y%m%d-%H%M%S"), help="unique identifier for this run")
