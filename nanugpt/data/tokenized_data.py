@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Tuple
 import math
 import numpy as np
 
@@ -10,18 +10,15 @@ from nanugpt import glogging as logging
 
 
 """
-This module implements the `get_data` interface for tokenized data allowing
-for fast and memory efficient data loading. The data is loaded in a memmap file
-and accessed by a custom Dataset and DataLoader which have same interface as
-PyTorch's Dataset and DataLoader.
+This module implements the `get_data` interface for tokenized data.
 """
 class MemmapDataset(Dataset):
     """
-    Wraps memmap array as a torch Dataset so that we can access sequence starting at any index.
-    The dataset is still accessed token by token by specifying index but we seq_len tokens at a time.
-    If seq_len is not specified, it is assumed to be equal to context_length.
+    Wraps memmap or numpy array as a torch Dataset so that we can access sequence starting at any index.
+    We always return output_len tokens, if necessary, by wrapping around the data.
+    If output_len is not specified, it is assumed to be equal to context_length.
     """
-    def __init__(self, data:np.ndarray, context_length:int, seq_len:Optional[int]=None):
+    def __init__(self, data:np.ndarray, context_length:int, output_len:Optional[int]=None):
         super().__init__()
         self.data = data
         self.context_length = context_length
@@ -29,14 +26,15 @@ class MemmapDataset(Dataset):
         assert len(data) >= context_length, "dataset tokens must be at least context_length, got %d" % len(data)
         # imagine moving a window of size context_length over data
         self.seq_count = len(data)-context_length+1
-        # how many tokens shall we return at a time is controlled by seq_len
-        self.set_seq_len(seq_len)
+        # how many tokens shall we return at a time is controlled by output_len
+        self.set_output_len(output_len)
 
         assert self.seq_count >= 2, "dataset must have at least 2 sequences to generate x,y pairs, got %d" % self.seq_count
 
-    def set_seq_len(self, seq_len:Optional[int]):
-        self.seq_len = seq_len if seq_len else self.context_length
-        assert self.seq_len <= len(self.data), "seq_len must be less than or equal to length of data"
+    def set_output_len(self, output_len:Optional[int]):
+        """Additional function to change output_len to context_len+1 for training"""
+        self.output_len = output_len if output_len else self.context_length
+        assert self.output_len <= len(self.data), "output_len must be less than or equal to length of data"
 
     def token_count(self):
         return len(self.data)
@@ -48,10 +46,10 @@ class MemmapDataset(Dataset):
         # requrn sequence at idx
         # if length of slice extends beyond end of data,
         # wrap around and concatenate from start and return the sequence
-        if idx+self.seq_len > len(self.data):
-            # calculate how many tokens to wrap around and keep wraping around until we get seq_len tokens
+        if idx+self.output_len > len(self.data):
+            # calculate how many tokens to wrap around and keep wraping around until we get output_len tokens
             tokens = self.data[idx:]
-            remaining = idx+self.seq_len-len(self.data)
+            remaining = idx+self.output_len-len(self.data)
             while remaining > len(self.data):
                 tokens = np.concatenate((tokens, self.data))
                 remaining -= len(self.data)
@@ -59,8 +57,8 @@ class MemmapDataset(Dataset):
                 tokens = np.concatenate((tokens, self.data[:remaining]))
             return tokens
 
-        # return sequence of seq_len tokens
-        return self.data[idx:idx+self.seq_len]
+        # return sequence of output_len tokens
+        return self.data[idx:idx+self.output_len]
 
 class MemmapDataloader:
     """
@@ -94,7 +92,7 @@ class MemmapDataloader:
         self.idx = start_seq_index # index of sequence to start with
 
         # add 1 for shifted y sequence
-        self.dataset.set_seq_len(batch_size * self.dataset.context_length + 1)
+        self.dataset.set_output_len(batch_size * self.dataset.context_length + 1)
 
     def __iter__(self):
         return self
@@ -128,6 +126,43 @@ class MemmapDataloader:
 
     def __len__(self):
         return self.batch_count
+
+def get_split_info(data_len, world_size, global_rank, shuffle)->Tuple[int, int]:
+    split_size = math.ceil(data_len / world_size)
+    split_start = int((data_len-1) * float(global_rank) / world_size) \
+                if not shuffle else 0
+    return split_size, split_start
+
+def get_allocations(total, workers):
+    start, end, remaining = 0, 0, total
+    allocations = []
+    while workers > 0:
+        if not remaining:
+            return None
+        this_alloc = math.floor(remaining / workers)
+        end += this_alloc
+        remaining -= this_alloc
+        allocations.append((start, end))
+        start = end
+        workers -= 1
+    return allocations
+
+def load_tokenized_data(filepath:str, dtype, context_length:int,
+                        world_size:int, global_rank:int,
+                        shuffle:bool, use_memmap:bool):
+    if use_memmap:
+        data = np.memmap(filepath, dtype=dtype, mode='r')
+    else:
+        data = np.array(np.memmap(filepath, dtype=dtype, mode='r'))
+
+    n_tokens = len(data) - 1    # subtract 1 for shifted y sequence
+    # avaialble sequences
+    n_context = math.floor(n_tokens / context_length)
+
+    n_context_per_rank = n_context / world_size
+    rank_start = int(n_context * float(global_rank) / world_size) * context_length
+    rank_end = rank_start + math.ceil(n_context_per_rank) * context_length
+    return data[rank_start:rank_end]
 
 def get_data(context_length:int, dtype,
              device_batch_size:int, eval_batch_size:int,
@@ -180,15 +215,12 @@ def get_data(context_length:int, dtype,
                                     context_length) if tokenized_test_path else None
 
 
-    train_offset = int((len(train_dataset)-1) * float(global_rank) / world_size) \
-                if not shuffle else 0
-    val_offset = int((len(val_dataset)-1) * float(global_rank) / world_size) \
-                if not shuffle else 0
-    test_offset = int((len(test_dataset)-1) * float(global_rank) / world_size) \
-                if test_dataset and not shuffle else 0
+    train_split_size, train_split_start = get_split_info(len(train_dataset), world_size, global_rank, shuffle)
+    val_split_size, val_split_start = get_split_info(len(val_dataset), world_size, global_rank, shuffle)
+    test_split_size, test_split_start = get_split_info(len(test_dataset), world_size, global_rank, shuffle) if test_dataset else (0, 0)
 
-
-    return MemmapDataloader(train_dataset, device_batch_size,
+    return MemmapDataloader(train_dataset,
+                            device_batch_size,
                             start_seq_index=train_offset,
                             seed=data_loader_seed+global_rank, shuffle=shuffle), \
             MemmapDataloader(val_dataset, eval_batch_size,
