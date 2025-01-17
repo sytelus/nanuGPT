@@ -617,7 +617,7 @@ for step in range(train_steps + 1):
         logger.info(metrics)
         if master_process and args.save_every > 0:
             log = dict(step=step, code=code, model=model.state_dict(), optimizers=[opt.state_dict() for opt in optimizers])
-            torch.save(log, os.path.join(args.output_dir, f"{run_id}/state_step{step:06d}.pt"))
+            torch.save(log, os.path.join(args.output_dir, f"state_step{step:06d}.pt"))
         # the last step only has the validation loop, so break to avoid training
         break
 
