@@ -63,5 +63,5 @@ srun ${PARTITION_ARG} ${RESERVATION_ARG} ${SHARE_NODE_ARG} ${NODELIST_ARG} \
     --container-mounts "${ALL_CONTAINER_MOUNTS}" \
     --container-writable --no-container-remap-root \
     --wait=60 --kill-on-bad-exit=1 \
-    --task-epilog="${SCRIPT_DIR}/task_epilog.sh" \
+    --task-epilog="${SCRIPT_DIR}/sinteractive_epilog.sh" \
     --pty /bin/bash -i
