@@ -176,21 +176,6 @@ class GPT(nn.Module):
 # -----------------------------------------------------------------------------
 # Our own simple Distributed Data Loader
 
-# def memmap_to_array(memmap_obj, chunks=10):
-#     # Get the total number of elements
-#     total_elements = memmap_obj.size
-#     chunk_size = max(1, total_elements // chunks)
-
-#     # Preallocate an array with the same dtype as the memmap object
-#     data = np.empty(total_elements, dtype=memmap_obj.dtype)
-
-#     for start in range(0, total_elements, chunk_size):
-#         end = min(start + chunk_size, total_elements)
-#         data[start:end] = memmap_obj[start:end]
-
-#     return data
-
-
 class DistributedDataLoader:
     def __init__(self, filepath, B, T, process_rank, num_processes):
         self.process_rank = process_rank

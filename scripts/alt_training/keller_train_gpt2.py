@@ -1,4 +1,8 @@
 # from https://github.com/KellerJordan/modded-nanogpt/blob/9b08ec7d4876960ed3b10d300c086b2ae2c1b56c/train_gpt.py
+# altered to use OpenWebText
+# Test commandline:
+# torchrun --nproc_per_node=1 --standalone keller_train_gpt2.py --batch_size 4 --num_iterations 6 --val_loss_every 2 --total_batch_size 4096
+# python keller_train_gpt2.py --batch_size 4 --num_iterations 6 --val_loss_every 2 --total_batch_size 4096
 
 import os
 import sys
@@ -9,6 +13,8 @@ import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+import argparse
+import numpy as np
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import torch
@@ -18,7 +24,9 @@ import torch.nn.functional as F
 import torch.distributed as dist
 # use of FlexAttention contributed by @KoszarskyB
 from torch.nn.attention.flex_attention import BlockMask, flex_attention
-torch._inductor.config.coordinate_descent_tuning = True
+torch._inductor.config.coordinate_descent_tuning = True # type: ignore
+
+from nanugpt.common import setup_logger
 
 # -----------------------------------------------------------------------------
 # Custom operators
@@ -87,7 +95,7 @@ def _(g: Tensor, x_f8: Tensor, w_f8: Tensor, *_):
 def backward(ctx, grad_out: Tensor, *_):
     x_f8, w_f8 = ctx.saved_tensors
     x_s, w_s, grad_s = ctx.scales
-    grad_x, grad_w = torch.ops.nanogpt.mm_backward(
+    grad_x, grad_w = torch.ops.nanogpt.mm_backward( # type: ignore
         grad_out, x_f8, w_f8, x_s, w_s, grad_s
     )
     return grad_x, grad_w, None, None, None
@@ -96,14 +104,14 @@ def setup_context(ctx: torch.autograd.function.FunctionCtx, inputs, output):
     *_, x_s, w_s, grad_s = inputs
     _, x_f8, w_f8 = output
     ctx.save_for_backward(x_f8, w_f8)
-    ctx.scales = x_s, w_s, grad_s
+    ctx.scales = x_s, w_s, grad_s # type: ignore
     ctx.set_materialize_grads(False)
 
 mm_op.register_autograd(backward, setup_context=setup_context)
 
 def lm_head_fp8(x: Tensor, w: Tensor) -> Tensor:
     _x = x.flatten(0, -2)
-    out: Tensor = torch.ops.nanogpt.mm(_x, w, x_s=2.0, w_s=32.0, grad_s=2.0**29)[0]
+    out: Tensor = torch.ops.nanogpt.mm(_x, w, x_s=2.0, w_s=32.0, grad_s=2.0**29)[0] # type: ignore
     return out.reshape(*x.shape[:-1], -1)
 
 # -----------------------------------------------------------------------------
@@ -162,7 +170,7 @@ class Muon(torch.optim.Optimizer):
         nesterov: Whether to use Nesterov-style momentum in the internal SGD. (recommended)
         ns_steps: The number of Newton-Schulz iteration steps to use.
     """
-    def __init__(self, params, lr=0.02, momentum=0.95, nesterov=True, ns_steps=5, rank=0, world_size=1):
+    def __init__(self, params, lr=0.02, momentum=0.95, nesterov=True, ns_steps=5, rank=0, world_size=1): # type: ignore
         self.rank = rank
         self.world_size = world_size
         defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov, ns_steps=ns_steps)
@@ -214,7 +222,8 @@ class Muon(torch.optim.Optimizer):
                 else:
                     g = update_buffer_views[self.rank]
                 update_prev() # async all_gather instead of sync all_reduce by @YouJiacheng
-                handle = dist.all_gather_into_tensor(update_buffer, g, async_op=True)
+                if dist.is_initialized():
+                    handle = dist.all_gather_into_tensor(update_buffer, g, async_op=True)
                 params_world = params[base_i : base_i + self.world_size]
             update_prev()
 
@@ -282,7 +291,8 @@ class CausalSelfAttention(nn.Module):
         q, k = norm(q), norm(k) # QK norm @Grad62304977
         q, k = self.rotary(q), self.rotary(k)
         y = flex_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), block_mask=block_mask)
-        y = y.transpose(1, 2).contiguous().view_as(x) # re-assemble all head outputs side by side
+        # re-assemble all head outputs side by side
+        y = y.transpose(1, 2).contiguous().view_as(x) # type: ignore
         y = self.c_proj(y)
         return y
 
@@ -419,27 +429,19 @@ class GPT(nn.Module):
 # -----------------------------------------------------------------------------
 # Our own simple Distributed Data Loader
 
-def _load_data_shard(file: Path):
-    header = torch.from_file(f"{file}", False, 256, dtype=torch.int32) # header is 256 int32
-    assert header[0] == 20240520, "magic number mismatch in the data .bin file"
-    assert header[1] == 1, "unsupported version"
-    num_tokens = int(header[2]) # number of tokens (claimed)
-    with file.open("rb", buffering=0) as f:
-        tokens = torch.empty(num_tokens, dtype=torch.uint16, pin_memory=True) # avoid pin_memory copy by @YouJiacheng
-        f.seek(256 * 4)
-        nbytes = f.readinto(tokens.numpy()) # avoid bytes->array copy by @YouJiacheng
-        assert nbytes == 2 * num_tokens, "number of tokens read does not match header"
+def _load_data_shard(filepath: str)->Tensor:
+    m = np.memmap(filepath, dtype=np.uint16, mode="r")
+    tokens = torch.zeros(len(m), dtype=torch.uint16, pin_memory=True)
+    tokens.copy_(torch.from_numpy(np.array(m)))
     return tokens
 
-def distributed_data_generator(filename_pattern: str, batch_size: int, rank : int, world_size : int):
-    files = sorted(Path.cwd().glob(filename_pattern))
+def distributed_data_generator(filepath: str, batch_size: int, rank : int, world_size : int):
     assert batch_size % world_size == 0
     local_batch_size = batch_size // world_size
-    file_iter = iter(files) # use cycle(files) if you want to do multi-epoch training
-    tokens, pos = _load_data_shard(next(file_iter)), 0
+    tokens, pos = _load_data_shard(filepath), 0
     while True:
         if pos + batch_size + 1 >= len(tokens):
-            tokens, pos = _load_data_shard(next(file_iter)), 0
+            pos = 0
         buf = tokens[pos + rank * local_batch_size:][:local_batch_size + 1]
         inputs = buf[:-1].to(device="cuda", dtype=torch.int32, non_blocking=True) # no sync on host side;
         targets = buf[1:].to(device="cuda", dtype=torch.int64, non_blocking=True) # H2D in another stream isn"t helpful.
@@ -449,68 +451,88 @@ def distributed_data_generator(filename_pattern: str, batch_size: int, rank : in
 # -----------------------------------------------------------------------------
 # int main
 
-@dataclass
-class Hyperparameters:
-    # data
-    train_files = "data/fineweb10B/fineweb_train_*.bin" # input .bin to train on
-    val_files = "data/fineweb10B/fineweb_val_*.bin" # input .bin to eval validation loss on
-    val_tokens = 10485760 # how many tokens of validation data? it's important to keep this fixed for consistent comparisons
-    # optimization
-    batch_size = 8*64*1024 # batch size in tokens
-    num_iterations = 1395 # number of iterations to run
-    cooldown_frac = 0.4 # fraction of training spent cooling down the learning rate
-    # evaluation and logging
-    val_loss_every = 125 # every how many steps to evaluate val loss? 0 for only at the end
-    # implementation
-    seq_len = 64*1024 # FlexAttention sequence length
-    save_checkpoint = False
-args = Hyperparameters()
+parser = argparse.ArgumentParser()
+# file system input / output
+parser.add_argument("--input_bin", type=str, default="$DATA_ROOT/tokenized/openwebtext/tiktoken/train.bin", help="input .bin to train on")
+parser.add_argument("--input_val_bin", type=str, default="$DATA_ROOT/tokenized/openwebtext/tiktoken/val.bin", help="input .bin to eval validation loss on")
+parser.add_argument("--output_dir", type=str, default="$OUT_DIR", help="output directory to which to write logs and checkpoints")
+# token layout for each step of the optimization
+parser.add_argument("--batch_size", type=int, default=524288, help="batch size, in units of #batch dimensions")
+parser.add_argument("--seq_len", type=int, default=65536, help="sequence length")
+# workload (number of steps)
+parser.add_argument("--num_iterations", type=int, default=9536, help="number of iterations to run")
+# optimization
+parser.add_argument("--learning_rate", type=float, default=0.0018, help="learning rate warmup iterations")
+parser.add_argument("--warmup_iters", type=int, default=256, help="learning rate warmup iterations")
+parser.add_argument("--cooldown_frac", type=float, default=0.4, help="learning rate warmdown iterations")
+parser.add_argument("--weight_decay", type=float, default=0.1, help="weight decay")
+# evaluation
+parser.add_argument("--val_loss_every", type=int, default=250, help="every how mant steps to evaluate val loss?")
+parser.add_argument("--val_max_steps", type=int, default=200, help="how many batches of val to average?")
+parser.add_argument("--save_every", type=int, default=500000, help="every how many steps to save the checkpoint")
+
+parser.add_argument("--run_id", type=str, default=time.strftime("%Y%m%d-%H%M%S"), help="unique identifier for this run")
+args = parser.parse_args()
+
+run_id = args.run_id
+
+args.input_bin = os.path.expandvars(args.input_bin)
+args.input_val_bin = os.path.expandvars(args.input_val_bin)
+args.output_dir = os.path.join(os.path.expandvars(args.output_dir), run_id)
 
 # torchrun sets these env variables
-rank = int(os.environ["RANK"])
-world_size = int(os.environ["WORLD_SIZE"])
+rank = int(os.environ.get('RANK', '0'))
+world_size = int(os.environ.get('WORLD_SIZE', '1'))
+local_rank = int(os.environ.get('LOCAL_RANK', '0'))
 assert torch.cuda.is_available()
-device = torch.device("cuda", int(os.environ["LOCAL_RANK"]))
+gpu_count = torch.cuda.device_count()
+if gpu_count > 1:
+    assert gpu_count-1 >= local_rank, f'LOCAL_RANK={local_rank} is greater than available GPUs={gpu_count}'
+    torch.cuda.set_device(local_rank)
+    device_name = f'cuda:{local_rank}'
+    device_id = local_rank
+elif gpu_count == 1:
+    torch.cuda.set_device(0)
+    device_name = 'cuda:0'
+    device_id = 0
+else:
+    raise ValueError('No GPU found. Set device_type=cpu.')
+device = torch.device("cuda", device_id)
 torch.cuda.set_device(device)
-dist.init_process_group(backend="nccl", device_id=device)
-dist.barrier()
+use_ddp = world_size > 1
+if use_ddp:
+    dist.init_process_group(backend="nccl", device_id=device)
+    dist.barrier()
 master_process = (rank == 0) # this process will do logging, checkpointing etc.
 
 # begin logging
-logfile = None
-if master_process:
-    run_id = uuid.uuid4()
-    os.makedirs("logs", exist_ok=True)
-    logfile = f"logs/{run_id}.txt"
-    print(logfile)
-def print0(s, console=False):
-    if master_process:
-        with open(logfile, "a") as f:
-             if console:
-                 print(s)
-             print(s, file=f)
+logger = setup_logger(config={
+        "logging":{
+                "project_name": os.getenv("JOB_NAME", "keller_train_gpt2"),
+                "run_name": run_id,
+                "enable_wandb": True,
+                "log_dir": args.output_dir,
+                "log_filename": "log.txt",
+                "summaries_filename": "summary.txt",
+                "allow_overwrite_log": True,
+                "metrics_type": "classification",
+                "summaries_stdout": True,
+            },
+})
 
-# begin by printing this file (the Python code)
-print0(code)
-print0("="*100)
-# log information about the hardware/software environment this is running on
-print0(f"Running Python {sys.version}")
-print0(f"Running PyTorch {torch.version.__version__} compiled for CUDA {torch.version.cuda}")
-def nvidia_smi():
-    import subprocess  # avoid top level import
-    return subprocess.run(["nvidia-smi"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True).stdout
-print0(nvidia_smi())
-print0("="*100)
+# convert args to dict and log
+logger.info(vars(args))
 
 # load data
-train_loader = distributed_data_generator(args.train_files, args.batch_size, rank, world_size)
+train_loader = distributed_data_generator(args.input_bin, args.batch_size, rank, world_size)
 
-model = GPT(vocab_size=50257, num_layers=12, num_heads=6, model_dim=768).cuda()
+model:nn.Module = GPT(vocab_size=50257, num_layers=12, num_heads=6, model_dim=768).cuda()
 for m in model.modules():
     if isinstance(m, nn.Embedding):
         m.bfloat16()
-for param in model.parameters():
-    dist.broadcast(param.detach(), 0)
+if use_ddp:
+    for param in model.parameters():
+        dist.broadcast(param.detach(), 0)
 
 # collect the parameters to optimize
 hidden_matrix_params = [p for p in model.blocks.parameters() if p.ndim == 2]
@@ -535,11 +557,15 @@ schedulers = [torch.optim.lr_scheduler.LambdaLR(opt, get_lr) for opt in optimize
 def sw_num_blks(window_size: int):
     return torch.tensor(window_size // 128, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
 
-model: nn.Module = torch.compile(model)
+model: nn.Module = torch.compile(model) # type: ignore
 training_time_ms = 0
 # start the clock
 torch.cuda.synchronize()
 t0 = time.perf_counter()
+train_tokens = 0
+metrics = {}
+train_start_time = time.time()
+
 # begin training
 train_steps = args.num_iterations
 for step in range(train_steps + 1):
@@ -562,9 +588,10 @@ for step in range(train_steps + 1):
         training_time_ms += 1000 * (time.perf_counter() - t0)
         model.eval()
         val_bs = world_size * args.seq_len
-        assert args.val_tokens % val_bs == 0
-        val_steps = args.val_tokens // val_bs
-        val_loader = distributed_data_generator(args.val_files, val_bs, rank, world_size)
+        #assert args.val_tokens % val_bs == 0
+        #val_steps = args.val_tokens // val_bs
+        val_steps = args.val_max_steps
+        val_loader = distributed_data_generator(args.input_val_bin, val_bs, rank, world_size)
         val_loss = 0
         with torch.no_grad():
             for _ in range(val_steps):
@@ -572,27 +599,40 @@ for step in range(train_steps + 1):
                 val_loss += model(x, y, sw_num_blks(window_size))
         val_loss /= val_steps
         del val_loader
-        dist.all_reduce(val_loss, op=dist.ReduceOp.AVG)
-        print0(f"step:{step}/{train_steps} val_loss:{val_loss:.4f} train_time:{training_time_ms:.0f}ms step_avg:{training_time_ms/(timed_steps-1):.2f}ms", console=True)
+        if use_ddp:
+            dist.all_reduce(val_loss, op=dist.ReduceOp.AVG)
+        metrics.update({
+            "train/step": step,
+            "val/step": step,
+            "val/loss": val_loss,
+            "train/train_time_hr": training_time_ms*1000*3600,
+            "train/step_interval_avg_ms": training_time_ms/(timed_steps-1),
+        })
         model.train()
         # start the clock again
         torch.cuda.synchronize()
         t0 = time.perf_counter()
 
     if last_step:
-        if master_process and args.save_checkpoint:
+        logger.info(metrics)
+        if master_process and args.save_every > 0:
             log = dict(step=step, code=code, model=model.state_dict(), optimizers=[opt.state_dict() for opt in optimizers])
-            os.makedirs(f"logs/{run_id}", exist_ok=True)
-            torch.save(log, f"logs/{run_id}/state_step{step:06d}.pt")
+            torch.save(log, os.path.join(args.output_dir, f"{run_id}/state_step{step:06d}.pt"))
         # the last step only has the validation loop, so break to avoid training
         break
 
     # --------------- TRAINING SECTION BEGIN -----------------
     inputs, targets = next(train_loader)
+    train_tokens += len(inputs)*world_size
+    loss_sum, loss_count = 0.0, 0
     for input_seq, target_seq in zip(inputs.split(args.seq_len), targets.split(args.seq_len)):
-        model(input_seq, target_seq, sw_num_blks(window_size)).backward()
-    for param in model.parameters():
-        dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
+        loss = model(input_seq, target_seq, sw_num_blks(window_size))
+        loss_sum += loss.item()
+        loss_count += 1
+        loss.backward()
+    if use_ddp:
+        for param in model.parameters():
+            dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
     # momentum warmup for Muon
     frac = min(step / 300, 1)
     for group in optimizer2.param_groups:
@@ -604,11 +644,24 @@ for step in range(train_steps + 1):
     # null the gradients
     model.zero_grad(set_to_none=True)
     # logging
-    approx_time = training_time_ms + 1000 * (time.perf_counter() - t0)
-    print0(f"step:{step+1}/{train_steps} train_time:{approx_time:.0f}ms step_avg:{approx_time/timed_steps:.2f}ms", console=True)
+    step_time = 1000 * (time.perf_counter() - t0)
+    approx_time = training_time_ms + step_time
+    metrics.update({
+        "train/step": step,
+        "train/loss": loss_sum / loss_count,
+        "train/token_per_sec": train_tokens / approx_time,
+        "train/step_interval": step_time,
+        "train/elapsed_hr": (time.time() - train_start_time) / 3600,
+        "train/train_time_hr": approx_time*1000*3600,
+        "train/tokens": train_tokens,
+        "train/lr": optimizer1.param_groups[0]["lr"],
+    })
+    logger.info(metrics)
 
-print0(
-    f"peak memory allocated: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB "
-    f"reserved: {torch.cuda.max_memory_reserved() // 1024 // 1024} MiB"
-)
-dist.destroy_process_group()
+    logger.info({
+        "memory_reserved (MiB)": torch.cuda.max_memory_reserved() // 1024 // 1024,
+        "pick_memory_consumption (MiB)": torch.cuda.max_memory_allocated() // 1024 // 1024,
+    })
+
+if use_ddp:
+    dist.destroy_process_group()
