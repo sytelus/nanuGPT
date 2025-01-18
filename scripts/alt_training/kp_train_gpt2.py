@@ -1,6 +1,10 @@
 # from: https://github.com/karpathy/llm.c/blob/7ecd8906afe6ed7a2b2cdb731c042f26d525b820/train_gpt2.py
 # Modified Karpathy's llm.c python baseline with logging
 
+# torchrun --nproc_per_node=1 --standalone kp_train_gpt2.py --batch_size 4 --num_iterations 6 --val_loss_every 2 --total_batch_size 4096
+# python kp_train_gpt2.py --batch_size 4 --num_iterations 6 --val_loss_every 2 --total_batch_size 4096
+
+
 """
 Reference code for GPT-2 training and inference.
 Will save the model weights into files, to be read from C as initialization.
@@ -60,7 +64,7 @@ class CausalSelfAttention(nn.Module):
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
         # output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd)
-        self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = 1
+        self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = 1 # type: ignore
         # regularization
         self.n_head = config.n_head
         self.n_embd = config.n_embd
@@ -98,7 +102,7 @@ class MLP(nn.Module):
         self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd)
         self.gelu    = NewGELU()
         self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd)
-        self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = 1
+        self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = 1 # type: ignore
 
     def forward(self, x):
         x = self.c_fc(x)
@@ -144,7 +148,8 @@ class GPT(nn.Module):
             ln_f = nn.LayerNorm(config.n_embd),
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        self.lm_head.LLMC_SKIP_INIT = 1 # don't init this one, we will tie weights
+        # don't init this one, we will tie weights
+        self.lm_head.LLMC_SKIP_INIT = 1 # type: ignore
         self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
         # init all weights, use a torch rng object to be very careful
@@ -506,7 +511,7 @@ if __name__ == "__main__":
     import time
     import argparse
     import tiktoken
-    print0(f"Running pytorch {torch.version.__version__}")
+    print0(f"Running pytorch {torch.version.__version__}") # type: ignore
 
     # default settings will overfit a tiny batch of data
     # and save model weights and debug state to disk on the first iteration
@@ -546,8 +551,32 @@ if __name__ == "__main__":
     parser.add_argument("--write_tensors", type=int, default=0, help="write tensors to disk")
 
     parser.add_argument("--inference_only", type=int, default=0, help="only run inference")
+    parser.add_argument("--run_id", type=str, default=time.strftime("%Y%m%d-%H%M%S"), help="unique identifier for this run")
 
     args = parser.parse_args()
+
+    run_id = args.run_id
+
+    args.input_bin = os.path.expandvars(args.input_bin)
+    args.input_val_bin = os.path.expandvars(args.input_val_bin)
+    args.output_dir = os.path.join(os.path.expandvars(args.output_dir), run_id)
+
+    logger = setup_logger(config={
+            "logging":{
+                    "project_name": os.getenv("JOB_NAME", "keller_train_gpt2"),
+                    "run_name": run_id,
+                    "enable_wandb": True,
+                    "log_dir": args.output_dir,
+                    "log_filename": "log.txt",
+                    "summaries_filename": "summary.txt",
+                    "allow_overwrite_log": True,
+                    "metrics_type": "classification",
+                    "summaries_stdout": True,
+                },
+    })
+
+    # convert args to dict and log
+    logger.info(vars(args))
 
     # args error checking and convenience variables
     B, T = args.batch_size, args.sequence_length
@@ -555,40 +584,38 @@ if __name__ == "__main__":
     assert args.dtype in {"float32", "float16", "bfloat16"}
     assert args.model in {"gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl", "d12", "d24", "d36", "d48"}
 
+    ddp_world_size = int(os.environ.get('WORLD_SIZE', '1'))
+    ddp_rank = int(os.environ.get('RANK', '0'))
+    ddp_local_rank = int(os.environ.get('LOCAL_RANK', '0'))
+
+    assert torch.cuda.is_available(), "for now i think we need CUDA for DDP"
+    gpu_count = torch.cuda.device_count()
+    if gpu_count > 1:
+        assert gpu_count-1 >= ddp_local_rank, f'LOCAL_RANK={ddp_local_rank} is greater than available GPUs={gpu_count}'
+        torch.cuda.set_device(ddp_local_rank)
+        device_name = f'cuda:{ddp_local_rank}'
+        device_id = ddp_local_rank
+    elif gpu_count == 1:
+        torch.cuda.set_device(0)
+        device_name = 'cuda:0'
+        device_id = 0
+    else:
+        raise ValueError('No GPU found. Set device_type=cpu.')
+    device = torch.device("cuda", device_id)
+    torch.cuda.set_device(device)
+
     # set up DDP (distributed data parallel). torchrun sets this env variable
-    ddp = int(os.environ.get('RANK', -1)) != -1 # is this a ddp run?
+    ddp = ddp_world_size > 1
     if ddp:
         # use of DDP atm demands CUDA, we set the device appropriately according to rank
-        assert torch.cuda.is_available(), "for now i think we need CUDA for DDP"
-        init_process_group(backend='nccl')
-        ddp_rank = int(os.environ['RANK'])
-        ddp_local_rank = int(os.environ['LOCAL_RANK'])
-        ddp_world_size = int(os.environ['WORLD_SIZE'])
-        device = f'cuda:{ddp_local_rank}'
-        torch.cuda.set_device(device)
+        init_process_group(backend='nccl', device_id=device)
         master_process = ddp_rank == 0 # this process will do logging, checkpointing etc.
         seed_offset = 0 # each process gets the exact same seed
         zero_stage = args.zero_stage
     else:
-        ddp_rank = 0
-        ddp_local_rank = 0
-        zero_stage = 0
-        ddp_world_size = 1
         master_process = True
         seed_offset = 0
-        # select the device
-        if args.device:
-            # provided explicitly by the user
-            device = args.device
-        else:
-            # attempt to autodetect the device
-            device = "cpu"
-            if torch.cuda.is_available():
-                device = "cuda"
-            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                device = "mps"
-    print(f"using device: {device}")
-    device_type = 'cuda' if 'cuda' in device else 'cpu'
+        zero_stage = 0
 
     # calculate gradient accumulation from the desired total batch size and the current run configuration
     tokens_per_fwdbwd = B * T * ddp_world_size
@@ -599,7 +626,7 @@ if __name__ == "__main__":
 
     # set up a context manager following the desired dtype and device
     ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[args.dtype]
-    ctx = torch.amp.autocast(device_type=device_type, dtype=ptdtype) if device_type == "cuda" else nullcontext()
+    ctx = torch.amp.autocast(device_type="cuda", dtype=ptdtype)
 
     # rng / reproducibility
     torch.manual_seed(42)
@@ -708,33 +735,44 @@ if __name__ == "__main__":
         with open(logfile, "w") as f:
             pass
 
-    if device == "cuda":
-        torch.cuda.reset_peak_memory_stats()
+    torch.cuda.reset_peak_memory_stats()
+
     timings = []
+    train_tokens = 0
+    train_start_time = time.time()
+    train_time_hr = 0.0
+    metrics = {}
     norm = -1.0   # dummy value to print in inference-only mode
     for step in range(args.num_iterations + 1):
         t0 = time.time()
         last_step = (step == args.num_iterations)
 
         # once in a while evaluate the validation dataset
+        val_time = 0.0
         if (args.val_loss_every > 0 \
             and (step % args.val_loss_every == 0 or last_step)) \
             and (val_loader is not None):
+            torch.cuda.synchronize()
+            val_start = time.time()
             model.eval()
             val_loader.reset()
+            val_loss = 0.0
             with torch.no_grad():
-                val_loss = 0.0
                 for _ in range(args.val_max_steps):
-                    x, y = val_loader.next_batch()
-                    x, y = x.to(device), y.to(device)
-                    _, loss = model(x, y, return_logits=False)
+                    x_val, y_val = val_loader.next_batch()
+                    _, loss = model(x_val, y_val, return_logits=False)
                     val_loss += loss.item()
-                val_loss /= args.val_max_steps
-            # log to console and to file
-            print0(f"val loss {val_loss}")
-            if master_process and logfile is not None:
-                with open(logfile, "a") as f:
-                    f.write("s:%d tel:%f\n" % (step, val_loss))
+            val_loss /= args.val_max_steps
+            if ddp:
+                torch.distributed.all_reduce(val_loss, op=torch.distributed.ReduceOp.AVG)
+            val_time = time.time() - val_start
+            metrics.update({
+                "train/step": step,
+                "val/step": step,
+                "val/loss": val_loss,
+                "val/time_s": val_time,
+            })
+            torch.cuda.synchronize()
 
         # once in a while perform model inference on the master process
         if (args.sample_every > 0 \
@@ -758,6 +796,7 @@ if __name__ == "__main__":
         # instead of just < num_iterations (one extra due to <=), only to do
         # the validation/sampling one last time, and then we break right here as we're done.
         if last_step:
+            logger.info(metrics)
             break
 
         # --------------- TRAINING SECTION BEGIN -----------------
@@ -791,7 +830,7 @@ if __name__ == "__main__":
                 loss.backward()
         if ddp:
             dist.all_reduce(lossf, op=dist.ReduceOp.AVG)
-        lossf = lossf.item()
+        lossf = lossf.item() # type: ignore
         norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
         # determine and set the learning rate for this iteration
         lr = get_lr(step)
@@ -803,19 +842,25 @@ if __name__ == "__main__":
         # everything that follows now is just diagnostics, prints, logging, etc.
 
         # wait on the CPU for all device work to end so we get accurate per-iteration timings below
-        if device == "mps":
-            torch.mps.synchronize()
-        elif device == "cuda":
-            torch.cuda.synchronize()
+        torch.cuda.synchronize()
         # time and print
         t1 = time.time()
+        train_tokens += grad_accum_steps * ddp_world_size * B * T
         # the 0th iteration is often an outlier (much slower) => skip logging it
         tokens_per_second = grad_accum_steps * ddp_world_size * B * T / (t1-t0)
-        print0(f"step {step+1:4d}/{args.num_iterations} | train loss {lossf:.6f} | norm {norm:.4f} | lr {lr:.2e} | ({(t1-t0)*1000:.2f} ms | {tokens_per_second:.0f} tok/s)")
-        # log to logile
-        if master_process and logfile is not None:
-            with open(logfile, "a") as f:
-                f.write("s:%d trl:%f\n" % (step, lossf))
+        train_time_hr += (t1-t0-val_time) / 3600.0
+        metrics.update({
+            "train/loss": lossf,
+            "train/token_per_sec": tokens_per_second,
+            "train/step_interval": t1-t0-val_time,
+            "train/elapsed_hr": (t1-train_start_time) / 3600.0,
+            "train/train_time_hr": train_time_hr,
+            "train/tokens": train_tokens,
+            "train/lr": lr,
+            "train/pre_clip_norm": norm,
+        })
+
+        logger.info(metrics)
 
         # keep track of smooth timings, last 20 iterations
         if step > 0 and step > args.num_iterations - 20:
@@ -823,8 +868,11 @@ if __name__ == "__main__":
 
     # print the average of the last 20 timings, to get something smooth-ish
     timings = timings[-20:]
-    print0(f"final {len(timings)} iters avg: {np.mean(timings)*1000:.3f}ms")
-    print0(f"peak memory consumption: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB")
+    logger.info({
+        "final_iters_avg (usec)": np.mean(timings),
+        "final_iters_stddev (usec)": np.std(timings),
+        "pick_memory_consumption (MiB)": torch.cuda.max_memory_allocated() // 1024 // 1024,
+    })
 
     # -------------------------------------------------------------------------
     # clean up nice
