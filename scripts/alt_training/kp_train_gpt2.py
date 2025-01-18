@@ -753,20 +753,20 @@ if __name__ == "__main__":
             val_start = time.time()
             model.eval()
             val_loader.reset()
-            val_loss = 0.0
             with torch.no_grad():
+                val_loss = 0.0
                 for _ in range(args.val_max_steps):
                     x_val, y_val = val_loader.next_batch()
                     _, loss = model(x_val, y_val, return_logits=False)
-                    val_loss += loss.item()
-            val_loss /= args.val_max_steps
+                    val_loss += loss
+                val_loss /= args.val_max_steps
             if ddp:
                 torch.distributed.all_reduce(val_loss, op=torch.distributed.ReduceOp.AVG)
             val_time = time.time() - val_start
             metrics.update({
                 "train/step": step,
                 "val/step": step,
-                "val/loss": val_loss,
+                "val/loss": val_loss.item(),
                 "val/time_s": val_time,
             })
             torch.cuda.synchronize()
