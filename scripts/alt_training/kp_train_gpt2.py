@@ -269,7 +269,7 @@ class GPT(nn.Module):
         # Create AdamW optimizer and use the fused version if it is available
         fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and device_type == 'cuda'
-        print0(f"using fused AdamW: {use_fused}")
+        print0(f"using fused AdamW: {use_fused}, fused_available: {fused_available}, device_type: {device_type}")
         if zero_stage == 1:
             print0("using ZeroRedundancyOptimizer")
             optimizer = ZeroRedundancyOptimizer(**optim_groups[0], optimizer_class=torch.optim.AdamW,
@@ -542,7 +542,6 @@ if __name__ == "__main__":
     # numerics
     parser.add_argument("--tensorcores", type=int, default=1, help="use tensorcores")
     # memory management
-    parser.add_argument("--device", type=str, default="", help="by default we autodetect, or set it here")
     parser.add_argument("--compile", type=int, default=1, help="torch.compile the model")
     parser.add_argument("--flash", type=int, default=1, help="use flash attention")
     parser.add_argument("--dtype", type=str, default="bfloat16", help="float32|float16|bfloat16")
@@ -709,7 +708,7 @@ if __name__ == "__main__":
     # init the optimizer
     optimizer = raw_model.configure_optimizers(weight_decay=args.weight_decay,
                                                learning_rate=args.learning_rate, betas=(0.9, 0.95),
-                                               device_type=device, zero_stage=zero_stage)
+                                               device_type="cuda", zero_stage=zero_stage)
 
     # learning rate decay scheduler (cosine with warmup)
     def get_lr(it):
