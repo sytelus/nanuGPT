@@ -526,7 +526,7 @@ if __name__ == "__main__":
     parser.add_argument("--sequence_length", type=int, default=1024, help="sequence length")
     parser.add_argument("--total_batch_size", type=int, default=524288, help="total desired batch size, in units of #tokens")
     # workload (number of steps)
-    parser.add_argument("--num_iterations", type=int, default=18865, help="number of iterations to run")
+    parser.add_argument("--num_iterations", type=int, default=9536, help="number of iterations to run") # original 18865
     # optimization
     parser.add_argument("--learning_rate", type=float, default=0.0006, help="learning rate warmup iterations")
     parser.add_argument("--warmup_iters", type=int, default=700, help="learning rate warmup iterations")
