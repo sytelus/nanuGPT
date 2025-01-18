@@ -591,11 +591,9 @@ if __name__ == "__main__":
     gpu_count = torch.cuda.device_count()
     if gpu_count > 1:
         assert gpu_count-1 >= ddp_local_rank, f'LOCAL_RANK={ddp_local_rank} is greater than available GPUs={gpu_count}'
-        torch.cuda.set_device(ddp_local_rank)
         device_name = f'cuda:{ddp_local_rank}'
         device_id = ddp_local_rank
     elif gpu_count == 1:
-        torch.cuda.set_device(0)
         device_name = 'cuda:0'
         device_id = 0
     else:
@@ -702,7 +700,7 @@ if __name__ == "__main__":
 
     # here we wrap model into DDP container
     if ddp:
-        model = DDP(model, device_ids=[ddp_local_rank])
+        model = DDP(model, device_ids=[device_id])
     raw_model = model.module if ddp else model # always contains the "raw" unwrapped model
 
     # init the optimizer
