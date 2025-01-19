@@ -27,7 +27,7 @@ scaler:
 
 training:
   device_batch_size: 64
-  max_steps: 20345
+  max_steps: 9536
   global_batch_size: 512
 
 optimizer:
