@@ -14,8 +14,8 @@ data:
     eval_batch_size: '_copy: /training/device_batch_size'
 
 training:
-  device_batch_size: 64
-  max_steps: 20345
+  device_batch_size: 32
+  max_steps: 18865 # for 10.6B tokens, use 20345
   global_batch_size: 512
 
 optimizer:
