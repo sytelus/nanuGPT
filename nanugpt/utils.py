@@ -273,6 +273,7 @@ def setup_torch(seed:int,
             raise ValueError('RANK environment variable not set BUT enable_distributed=True. You probably want to launch this script using torch.distributed.launch.')
 
         torch.distributed.init_process_group(backend=distributed_backend, init_method=distributed_init_method)  # type: ignore
+        torch.distributed.barrier()
 
         is_distributed = True
         global_rank = torch.distributed.get_rank()  # type: ignore

@@ -738,9 +738,9 @@ if __name__ == "__main__":
     train_tokens = 0
     train_start_time = time.time()
     train_time_hr = 0.0
-    metrics = {}
     norm = -1.0   # dummy value to print in inference-only mode
     for step in range(args.num_iterations + 1):
+        metrics = {}
         t0 = time.time()
         last_step = (step == args.num_iterations)
 

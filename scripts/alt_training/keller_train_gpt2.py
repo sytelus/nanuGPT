@@ -531,6 +531,7 @@ for m in model.modules():
     if isinstance(m, nn.Embedding):
         m.bfloat16()
 if use_ddp:
+    # send master's copy of params to all workers so everyone starts with the same weights
     for param in model.parameters():
         dist.broadcast(param.detach(), 0)
 
@@ -563,12 +564,12 @@ training_time_ms = 0
 torch.cuda.synchronize()
 t0 = time.perf_counter()
 train_tokens = 0
-metrics = {}
 train_start_time = time.time()
 
 # begin training
 train_steps = args.num_iterations
 for step in range(train_steps + 1):
+    metrics = {}
     last_step = (step == train_steps)
     # This effectively ignores timing first 10 steps, which are slower for weird reasons.
     # Alternately, and slightly more correctly in terms of benchmarking, we could do 10

@@ -3,7 +3,14 @@ import os
 import timeit
 import math
 
+# if os.environ.get("PYTORCH_CUDA_ALLOC_CONF", None) is None:
+#     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+# ref: https://rocm.docs.amd.com/en/docs-6.1.0/how-to/llm-fine-tuning-optimization/optimizing-triton-kernel.html
+if os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING", None) is None:
+    os.environ["TORCHINDUCTOR_COORDINATE_DESCENT_TUNING"] = "1"
 import torch
+torch.empty(1, device="cuda", requires_grad=True).backward() # prevents a bug on some systems
+
 from torch.nn.parallel import DistributedDataParallel
 from torch import distributed as dist
 
@@ -37,12 +44,13 @@ def estimate_loss(model:torch.nn.Module, get_loss:Callable,
     if torch_info.is_distributed:
         fp32_dist = torch.tensor([loss_sum, correct_sum, preds_count, sample_count, iter_count], dtype=torch.float32, device=device)
         dist.reduce(fp32_dist, dst=0, op=dist.ReduceOp.SUM)
-        if torch_info.is_master:
-            loss_sum, correct_sum, preds_count, sample_count, iter_count = tuple(fp32_dist.tolist())
-            # convert back to int
-            correct_sum, preds_count, sample_count, iter_count = int(correct_sum), int(preds_count), int(sample_count), int(iter_count)
+        loss_sum, correct_sum, preds_count, sample_count, iter_count = tuple(fp32_dist.tolist())
+        # convert back to int
+        correct_sum, preds_count, sample_count, iter_count = int(correct_sum), int(preds_count), int(sample_count), int(iter_count)
 
-
+    # sync before switching to train mode
+    if torch_info.is_distributed:
+        torch.distributed.barrier()
     model.train()
     assert sample_count > 0 and preds_count > 0, "No samples in the dataset"
     return loss_sum / sample_count, correct_sum / preds_count, sample_count, iter_count
@@ -174,6 +182,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         out_dir = utils.full_path(out_dir, create=True)
         logger.summary({'run/out_dir': out_dir})
 
+    if torch_info.is_cuda:
+        torch.cuda.synchronize()
     step, eval_count, total_samples, total_tokens = 0, 0, 0, 0
     best_train_loss, best_val_loss = float('inf'), float('inf')
     best_train_loss_step, best_val_loss_step = -1, -1
@@ -245,6 +255,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         # flush the gradients as soon as we can, no need for this memory anymore
         optimizer.zero_grad(set_to_none=True)
 
+        if torch_info.is_cuda:
+            torch.cuda.synchronize()
         fwd_bwd_interval = timeit.default_timer() - step_start_time
 
         # gather matrics from all ranks
@@ -254,13 +266,12 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             fp32_dist = torch.tensor([loss_sum, fwd_bwd_interval, pre_clip_norm,
                                       correct_sum, step_preds_count, step_sample_count, step_token_count], dtype=torch.float32, device=device)
             dist.reduce(fp32_dist, dst=0, op=dist.ReduceOp.SUM)
-            if torch_info.is_master:
-                loss_sum,fwd_bwd_interval_sum, pre_clip_norm_sum, \
-                correct_sum, step_preds_count, step_sample_count, step_token_count = tuple(fp32_dist.tolist())
-                # use sum of all worker values so we have more accurate idea of outliers
-                fwd_bwd_interval, pre_clip_norm = fwd_bwd_interval_sum, pre_clip_norm_sum
-                # convert back to int
-                correct_sum, step_preds_count, step_sample_count, step_token_count = int(correct_sum), int(step_preds_count), int(step_sample_count), int(step_token_count)
+            loss_sum,fwd_bwd_interval_sum, pre_clip_norm_sum, \
+            correct_sum, step_preds_count, step_sample_count, step_token_count = tuple(fp32_dist.tolist())
+            # use sum of all worker values so we have more accurate idea of outliers
+            fwd_bwd_interval, pre_clip_norm = fwd_bwd_interval_sum, pre_clip_norm_sum
+            # convert back to int
+            correct_sum, step_preds_count, step_sample_count, step_token_count = int(correct_sum), int(step_preds_count), int(step_sample_count), int(step_token_count)
 
         total_samples += step_sample_count
         total_tokens += step_token_count
@@ -279,42 +290,41 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         if torch_info.is_cuda:
             torch.cuda.synchronize()
 
-        if torch_info.is_master:
-            elapsed_hr = (timeit.default_timer() - loop_start_time)/3600.0
-            loss_pred_model = lin_predictor.fit(list(range(step-len(prev_train_losses)+1, step+1)), prev_train_losses)
-            pred_loss = float(lin_predictor.predict(loss_pred_model, [max_steps-1])[0])
-            step_interval = timeit.default_timer() - step_start_time
-            train_time_hr += step_interval / 3600.0
-            run_flops = utils.transformer_flops(batch_size=total_samples,
-                params_nonembedding_trainable=n_non_embedding_trainable,
-                context_length=context_length,
-                n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer']
-            )
-            metrics.update({
-                "train/step": step,
-                "train/loss": train_loss,
-                "train/acc": train_acc,
-                "train/ppl": math.exp(train_loss),
-                "train/best_loss": best_train_loss,
-                "train/best_loss_step": best_train_loss_step,
-                "train/epoch": step * grad_acc_steps / train_batch_count,
-                "train/step_interval": step_interval,
-                "train/train_time_hr": train_time_hr,
-                "train/fwd_bwd_interval": fwd_bwd_interval,
-                "train/samples": total_samples,
-                "train/step_samples": step_sample_count,
-                "train/tokens": total_tokens,
-                "train/tokens_per_sec": step_token_count / fwd_bwd_interval,
-                "train/loss_inversions": 100.0*loss_inversions/(step+1),
-                "train/loss_improvement_steps": 100.0*loss_improvement_steps/(step+1),
-                "train/pred_loss": pred_loss,
-                "train/pre_clip_norm": pre_clip_norm,
-                "run/lr": optimizer.param_groups[0]['lr'],
-                "run/flops": run_flops,
-                "run/elapsed_hr": elapsed_hr,
-                "run/eta_hr": elapsed_hr * (max_steps-step-1) / (step+1),
-                "run/checkpoint_since_hr": (timeit.default_timer() - last_checkpoint_time)/3600.0,
-            })
+        elapsed_hr = (timeit.default_timer() - loop_start_time)/3600.0
+        loss_pred_model = lin_predictor.fit(list(range(step-len(prev_train_losses)+1, step+1)), prev_train_losses)
+        pred_loss = float(lin_predictor.predict(loss_pred_model, [max_steps-1])[0])
+        step_interval = timeit.default_timer() - step_start_time
+        train_time_hr += step_interval / 3600.0
+        run_flops = utils.transformer_flops(batch_size=total_samples,
+            params_nonembedding_trainable=n_non_embedding_trainable,
+            context_length=context_length,
+            n_embd=model_kwargs['n_embd'], n_layer=model_kwargs['n_layer']
+        )
+        metrics.update({
+            "train/step": step,
+            "train/loss": train_loss,
+            "train/acc": train_acc,
+            "train/ppl": math.exp(train_loss),
+            "train/best_loss": best_train_loss,
+            "train/best_loss_step": best_train_loss_step,
+            "train/epoch": step * grad_acc_steps / train_batch_count,
+            "train/step_interval": step_interval,
+            "train/train_time_hr": train_time_hr,
+            "train/fwd_bwd_interval": fwd_bwd_interval,
+            "train/samples": total_samples,
+            "train/step_samples": step_sample_count,
+            "train/tokens": total_tokens,
+            "train/tokens_per_sec": step_token_count / fwd_bwd_interval,
+            "train/loss_inversions": 100.0*loss_inversions/(step+1),
+            "train/loss_improvement_steps": 100.0*loss_improvement_steps/(step+1),
+            "train/pred_loss": pred_loss,
+            "train/pre_clip_norm": pre_clip_norm,
+            "run/lr": optimizer.param_groups[0]['lr'],
+            "run/flops": run_flops,
+            "run/elapsed_hr": elapsed_hr,
+            "run/eta_hr": elapsed_hr * (max_steps-step-1) / (step+1),
+            "run/checkpoint_since_hr": (timeit.default_timer() - last_checkpoint_time)/3600.0,
+        })
 
         # is it time to evaluate? We evaluate after 1st step to get initial loss.
         eval_performed = False
@@ -332,33 +342,32 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                 best_val_loss = val_loss
                 best_val_loss_step = step
 
-            if torch_info.is_master: # only master has aggregated metrics
-                metrics.update({
-                    "val/loss": val_loss,
-                    "val/generalization_gap": val_loss - train_loss,
-                    "val/acc": val_acc,
-                    "val/ppl": math.exp(val_loss),
-                    "val/best_loss": best_val_loss,
-                    "val/best_loss_step": best_val_loss_step,
-                    "run/w_norm": utils.weight_norm(model),
-                    "val/interval": eval_interval,
-                    "train/max_memory_allocated": max_memory_allocated,
-                    "val/time_s": (timeit.default_timer() - eval_start_time),
-                    "val/samples": sample_count,
-                    "val/iter_count": iter_count,
-                })
+            metrics.update({
+                "val/loss": val_loss,
+                "val/generalization_gap": val_loss - train_loss,
+                "val/acc": val_acc,
+                "val/ppl": math.exp(val_loss),
+                "val/best_loss": best_val_loss,
+                "val/best_loss_step": best_val_loss_step,
+                "run/w_norm": utils.weight_norm(model),
+                "val/interval": eval_interval,
+                "train/max_memory_allocated": max_memory_allocated,
+                "val/time_s": (timeit.default_timer() - eval_start_time),
+                "val/samples": sample_count,
+                "val/iter_count": iter_count,
+            })
 
             if step+1 >= max_steps and test_loader:
                 test_loss, test_acc, sample_count, iter_count = estimate_loss(model, get_loss, test_loader, None,
                                             amp_ctx, torch_info, device)
-                if torch_info.is_master: # only master has aggregated metrics
-                    metrics.update({
-                        "test/loss": test_loss,
-                        "test/ppl": math.exp(test_loss),
-                        "test/acc": test_acc,
-                        "test/samples": sample_count,
-                        "test/iter_count": iter_count,
-                    })
+                # only master has aggregated metrics
+                metrics.update({
+                    "test/loss": test_loss,
+                    "test/ppl": math.exp(test_loss),
+                    "test/acc": test_acc,
+                    "test/samples": sample_count,
+                    "test/iter_count": iter_count,
+                })
             last_eval_time = timeit.default_timer()
 
         # if this is last step or enough time has passed, save checkpoint
@@ -418,15 +427,15 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         checkpoint_log_filepath = os.path.join(out_dir, "checkpoint_log.yaml")
         utils.save_yaml(checkpoint_log, checkpoint_log_filepath)
         logger.log_artifact('checkpoint_log', 'file', file_or_dir=checkpoint_log_filepath)
-        end_time = timeit.default_timer()
-        logger.summary({
-            'run/end_time': end_time,
-            'run/total_time_hr': (end_time - start_time)/3600.0
-        })
 
+    end_time = timeit.default_timer()
+    logger.summary({
+        'run/end_time': end_time,
+        'run/total_time_hr': (end_time - start_time)/3600.0
+    })
 
-        if torch_info.is_distributed:
-            dist.destroy_process_group()
+    if torch_info.is_distributed:
+        dist.destroy_process_group()
 
-        if own_logger:
-            logger.shutdown()
+    if own_logger:
+        logger.shutdown()

@@ -9,6 +9,7 @@ data:
   module_kwargs:
     tokenized_train_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/train.bin'
     tokenized_val_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/val.bin'
+    eval_batch_size: 32 # same as llm.c
 
 training:
   device_batch_size: 12 # default 12, GH200: 72
@@ -21,7 +22,7 @@ optimizer:
 
 eval:
   eval_every: 250
-  eval_iters: 200 # number of samples to evaluate for dataset
+  eval_iters: 1600 # 200*8 workers
   save_checkpoint: true
   checkoint_after: 0 # starts saving checkpoint after these steps
   checkpoint_every_hr: 200 # take checkpoint every this hours
