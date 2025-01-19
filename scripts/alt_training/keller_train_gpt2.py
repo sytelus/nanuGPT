@@ -606,7 +606,7 @@ for step in range(train_steps + 1):
             "train/step": step,
             "val/step": step,
             "val/loss": val_loss,
-            "train/train_time_hr": training_time_ms*1000*3600,
+            "train/train_time_hr": training_time_ms*1000.0/3600,
             "train/step_interval_avg_ms": training_time_ms/(timed_steps-1),
         })
         model.train()
