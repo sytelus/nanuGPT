@@ -606,7 +606,7 @@ for step in range(train_steps + 1):
             "train/step": step,
             "val/step": step,
             "val/loss": val_loss,
-            "train/train_time_hr": training_time_ms*1000.0/3600,
+            "train/train_time_hr": training_time_ms/1000.0/3600,
             "train/step_interval_avg_ms": training_time_ms/(timed_steps-1),
         })
         model.train()
@@ -653,7 +653,7 @@ for step in range(train_steps + 1):
         "train/token_per_sec": train_tokens / approx_time,
         "train/step_interval": step_time,
         "train/elapsed_hr": (time.time() - train_start_time) / 3600,
-        "train/train_time_hr": approx_time*1000*3600,
+        "train/train_time_hr": approx_time/1000.0/3600,
         "train/tokens": train_tokens,
         "train/lr": optimizer1.param_groups[0]["lr"],
     })
