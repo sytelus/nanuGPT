@@ -267,20 +267,22 @@ def setup_torch(seed:int,
         torch.set_float32_matmul_precision('high')
 
     if enable_distributed:
-        assert torch.distributed.is_available(), 'Distributed training not available. Set enable_distributed=False.'    # type: ignore
-        env_rank = os.environ.get('RANK', '-1')
-        if env_rank=='-1':
-            raise ValueError('RANK environment variable not set BUT enable_distributed=True. You probably want to launch this script using torch.distributed.launch.')
+        assert torch.distributed.is_available(), 'Distributed training not available because torch.distributed.is_available()==False'    # type: ignore
+        assert distributed_init_method=='env://', f'Only env:// is supported for distributed_init_method but distributed_init_method={distributed_init_method}'
 
-        torch.distributed.init_process_group(backend=distributed_backend, init_method=distributed_init_method)  # type: ignore
-        torch.distributed.barrier()
+        global_rank = int(os.environ.get('RANK', '-1'))
+        local_rank = int(os.environ.get('LOCAL_RANK', '-1'))
+        world_size = int(os.environ.get('WORLD_SIZE', '-1'))
+        local_world_size = int(os.environ.get('LOCAL_WORLD_SIZE', '-1'))
 
-        is_distributed = True
-        global_rank = torch.distributed.get_rank()  # type: ignore
-        local_rank = int(os.environ['LOCAL_RANK'])
-        world_size = torch.distributed.get_world_size() # type: ignore
+        assert global_rank >= 0, f'global_rank={global_rank} is invalid'
+        assert local_rank >= 0, f'local_rank={local_rank} is invalid'
+        assert world_size > 0, f'world_size={world_size} is invalid'
+        assert local_world_size > 0, f'local_world_size={local_world_size} is invalid'
+
         is_master = global_rank == 0
         seed_offset = global_rank
+        is_distributed = True
 
         if is_cuda:
             # When running from torchrun, all GPUs are visible so we select through LOCAL_RANK.
@@ -297,6 +299,13 @@ def setup_torch(seed:int,
                 device_id = 0
             else:
                 raise ValueError('No GPU found. Set device_type=cpu.')
+
+        torch.distributed.init_process_group(backend=distributed_backend,
+                                             init_method=distributed_init_method,
+                                             device_id=torch.device(device_name) if is_cuda else None,
+                                             )  # type: ignore
+        torch.distributed.barrier()
+
     else: # not distributed
         is_distributed = False
         global_rank = 0
