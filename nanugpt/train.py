@@ -122,7 +122,9 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                     })
 
     # get dataset
+    logger.info("Loading dataset...")
     train_loader, val_loader, test_loader = get_data(**data_config['module_kwargs'])
+    logger.info("Dataset loaded.")
     train_batch_count = len(train_loader)
     logger.summary({
                     'data/train_dataset_tokens': train_loader.dataset.token_count(),
