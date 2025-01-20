@@ -298,22 +298,22 @@ if __name__ == "__main__":
     if gpu_count > 1:
         assert gpu_count-1 >= ddp_local_rank, f'LOCAL_RANK={ddp_local_rank} is greater than available GPUs={gpu_count}'
         torch.cuda.set_device(ddp_local_rank)
-        device = f'cuda:{ddp_local_rank}'
+        device_name = f'cuda:{ddp_local_rank}'
         device_id = ddp_local_rank
     elif gpu_count == 1:
         torch.cuda.set_device(0)
-        device = 'cuda:0'
+        device_name = 'cuda:0'
         device_id = 0
     else:
         raise ValueError('No GPU found. Set device_type=cpu.')
 
     master_process = ddp_rank == 0 # this process will do logging, checkpointing etc.
     seed_offset = 0 # each process gets the exact same seed
-    print(f"device: {device}, ddp_rank: {ddp_rank}, ddp_local_rank: {ddp_local_rank}, ddp_world_size: {ddp_world_size}")
+    print(f"device_name: {device_name}, ddp_rank: {ddp_rank}, ddp_local_rank: {ddp_local_rank}, ddp_world_size: {ddp_world_size}")
 
     use_ddp = ddp_world_size > 1
     if use_ddp:
-        init_process_group(backend='nccl')
+        init_process_group(backend='nccl', device_id=torch.device(device_name))
 
     tokens_per_fwdbwd = B * T * ddp_world_size
     assert args.total_batch_size == tokens_per_fwdbwd
@@ -353,7 +353,7 @@ if __name__ == "__main__":
     # init the optimizer
     optimizer = raw_model.configure_optimizers(weight_decay=args.weight_decay,
                                                learning_rate=args.learning_rate, betas=(0.9, 0.95),
-                                               device_type=device)
+                                               device_type=device_name)
 
     # learning rate decay scheduler (linear warmup and warmdown)
     def get_lr(it):
