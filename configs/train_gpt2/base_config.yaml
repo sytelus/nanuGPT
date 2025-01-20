@@ -10,7 +10,7 @@ general:
   torch_compile: true # will not compile if Python > 3.11, torch < 2.1.0 or Windows
   seed: 42
   dtype: 'bfloat16'         # float32, float16, bfloat16
-  enable_distributed: null # automatically set to true if RANK is set
+  enable_distributed: null # automatically set to true if world_size > 1
 
 _env: # creates env vars
   project_name: '_copy: /general/project_name'
