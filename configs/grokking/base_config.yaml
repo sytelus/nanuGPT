@@ -35,6 +35,10 @@ model:
     n_head: 4
     context_length: 5 # currently each input eq has [eos a op b =] which is 5 tokens
 
+scaler:
+  module: 'nanugpt.scalers.amp_grad_scaler.get_scaler'
+  module_kwargs: {}
+
 loss:
   module: 'nanugpt.losses.grokking_loss.get_loss'
 
