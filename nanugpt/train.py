@@ -127,9 +127,9 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     logger.info("Dataset loaded.")
     train_batch_count = len(train_loader)
     logger.summary({
-                    'data/train_dataset_tokens': train_loader.dataset.token_count(),
-                    'data/val_dataset_tokens': val_loader.dataset.token_count(),
-                    'data/test_dataset_tokens': test_loader.dataset.token_count() if test_loader is not None else 0,
+                    'data/train_dataset_tokens': train_loader.dataset.token_count() if hasattr(train_loader.dataset, 'token_count') else -1,
+                    'data/val_dataset_tokens': val_loader.dataset.token_count() if hasattr(val_loader.dataset, 'token_count') else -1,
+                    'data/test_dataset_tokens': test_loader.dataset.token_count() if test_loader is not None and hasattr(test_loader.dataset, 'token_count') else -1,
                     'data/train_dataset_len': len(train_loader.dataset),
                     'data/val_dataset_len': len(val_loader.dataset),
                     'data/test_dataset_len': len(test_loader.dataset) if test_loader is not None else 0,
