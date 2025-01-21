@@ -4,7 +4,7 @@ from einops import rearrange, repeat
 import torch
 from torch import nn, Tensor
 
-from nanogpt import common
+from nanugpt import common
 
 class DecoderBlock(torch.nn.Module):
   def __init__(self, n_embd: int, n_heads: int,
