@@ -201,7 +201,7 @@ def get_data(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
         train_loader = DataLoader(train_dataset,
                                   batch_size=min(device_batch_size, len(train_dataset)),
                                   shuffle=True,
-                                  num_workers=1, # don't use main process as worker
+                                  num_workers=0, # don't use main process as worker
                                   generator=train_loader_gen)
     if val_dataset is not None:
         val_tokenizer = tokenizer_factory()
@@ -210,7 +210,7 @@ def get_data(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
         val_loader = DataLoader(val_dataset,
                                 batch_size=min(eval_batch_size, len(val_dataset)) ,
                                 shuffle=False,
-                                num_workers=1, # don't use main process as worker
+                                num_workers=0, # don't use main process as worker
                                 generator=val_loader_gen)
     if test_dataset is not None:
         test_tokenizer = tokenizer_factory()
@@ -219,7 +219,7 @@ def get_data(hf_name_path:str, hf_dataset_name:Optional[str], hf_data_dir:Option
         test_loader = DataLoader(test_dataset,
                                  batch_size=min(eval_batch_size, len(test_dataset)) ,
                                  shuffle=False,
-                                 num_workers=1, # don't use main process as worker
+                                 num_workers=0, # don't use main process as worker
                                  generator=test_loader_gen)
 
     return train_loader, val_loader, test_loader
