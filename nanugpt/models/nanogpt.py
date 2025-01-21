@@ -28,12 +28,12 @@ class NewGELU(nn.Module):
 @dataclass
 class GPTConfig:
     block_size: int = 1024
-    vocab_size: int = 50304 # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
+    vocab_size: int = 50257 # GPT-2 vocab_size of 50257, this can be padded up to nearest multiple of 64 which is 50304 for efficiency
     n_layer: int = 12
     n_head: int = 12
     n_embd: int = 768
-    mlp_bias: bool = True
-    attn_proj_bias: bool = True
+    mlp_bias: bool = True # default
+    attn_proj_bias: bool = True # default
     attn_kv_bias: bool = False  # Karpathy has this to PyTorch default which is True
     layer_norm_bias: bool = True
     attn_dropout: float = 0.0 # applied on softmax of QK^T
@@ -167,9 +167,9 @@ class Block(nn.Module):
         # So the layer norms in GPT are moved to start of sub-blocks instead of end.
         # GPT2 also has two residual connections, one after self-attention and other after MLP.
         # Residual connections applied before layer norms are applied so input travels intact.
-        self.ln_1 = LayerNorm(config.n_embd, bias=config.layer_norm_bias)
+        self.ln_1 = nn.LayerNorm(config.n_embd, bias=config.layer_norm_bias)
         self.attn = CausalSelfAttention(config)
-        self.ln_2 = LayerNorm(config.n_embd, bias=config.layer_norm_bias)
+        self.ln_2 = nn.LayerNorm(config.n_embd, bias=config.layer_norm_bias)
         self.mlp = MLP(config)
 
     def forward(self, x):
@@ -191,7 +191,7 @@ class GPT(nn.Module):
             wte = nn.Embedding(config.vocab_size, config.n_embd), # n_embd === hidden_size === d_model
             wpe = nn.Embedding(config.block_size, config.n_embd),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-            ln_f = LayerNorm(config.n_embd, bias=config.layer_norm_bias),
+            ln_f = nn.LayerNorm(config.n_embd, bias=config.layer_norm_bias),
         )
         if config.embed_dropout:
             modules['embed_dropout'] = nn.Dropout(config.embed_dropout)
