@@ -300,6 +300,10 @@ def setup_torch(seed:int,
             else:
                 raise ValueError('No GPU found. Set device_type=cpu.')
 
+            # for deterministic training, reset GPU after setting the device
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
+
         torch.distributed.init_process_group(backend=distributed_backend,
                                              init_method=distributed_init_method,
                                              device_id=torch.device(device_name) if is_cuda else None,

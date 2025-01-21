@@ -199,6 +199,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     batches = Batches(train_loader)
     train_time_hr = 0.0
 
+    x, y = batches.next()
+
     # run steps
     while step < max_steps:
         step_start_time = timeit.default_timer()
@@ -207,8 +209,6 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         metrics = {} # add metrics here if any
 
         model.train()
-
-        x, y = batches.next()
 
         # grad accumulations
         for micro_step in range(grad_acc_steps):
