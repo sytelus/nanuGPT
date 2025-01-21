@@ -2,7 +2,7 @@ from typing import Tuple, Mapping
 
 import torch
 
-def get_loss(model_output, labels)->Tuple[torch.Tensor, torch.Tensor, int]:
+def get_loss(model_output, labels)->Tuple[torch.Tensor, torch.Tensor]:
     # model_output: [batch_size, seq_len, vocab_size]
     # cross entropy loss expects a tensor of shape [batch_size, num_classes] and [batch_size]
 
@@ -18,5 +18,5 @@ def get_loss(model_output, labels)->Tuple[torch.Tensor, torch.Tensor, int]:
     # dim=-1 means we take the max along the last dimension, which is the vocab_size, so max is taken over the vocab
     correct = (torch.argmax(preds, dim=-1) == targets).sum()
 
-    return loss, correct, len(targets) # total num of predictions
+    return loss, correct # total num of predictions
 

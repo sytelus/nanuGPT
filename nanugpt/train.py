@@ -1,4 +1,4 @@
-from typing import Mapping, Tuple, Optional, Callable, Mapping
+from typing import Mapping, Tuple, Optional, Callable, Mapping, Union
 import os
 import timeit
 import math
@@ -20,7 +20,7 @@ from nanugpt import glogging as logging
 from nanugpt import lin_predictor
 from nanugpt.scalers.scaler_base import ScalerBase
 
-def estimate_loss(model:torch.nn.Module, get_loss:Callable,
+def estimate_loss(model:torch.nn.Module,
                   data_loader, eval_iters:Optional[int],
                   amp_ctx, torch_info:utils.TorchInfo, device)->Tuple[float, float, int, int]:
     model.eval()
@@ -33,11 +33,11 @@ def estimate_loss(model:torch.nn.Module, get_loss:Callable,
             x, y = x.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else x.to(device), \
                 y.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else y.to(device)
             #with amp_ctx:
-            loss, correct, n_preds = get_loss(model(x), y)
+            _, loss, correct = model(x, y, return_logits=False)
             n_samples = len(y)
             loss_sum += loss.item() * n_samples # loss is average so we need to multiply by n_samples to get total loss over batch
             correct_sum += correct.item()
-            preds_count += n_preds
+            preds_count += len(y)
             sample_count += n_samples
     iter_count = i+1
     # gather matrics from all ranks
@@ -95,7 +95,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     get_data = utils.import_fn(data_config['module'])
     get_optim = utils.import_fn(optimizer_config['module'])
     get_scheduler = utils.import_fn(scheduler_config['module'])
-    get_loss = utils.import_fn(loss_config['module'])
+    get_loss:common.GetLossType = utils.import_fn(loss_config['module'])
     get_scaler = utils.import_fn(scaler_config['module'])
 
     # setup system, device, logger, torch
@@ -143,7 +143,9 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     logger.summary({'run/vocab_size': len(tokenizer)})
 
     # create model
-    model, model_config = common.create_model(config, logger, device, vocab_size=len(tokenizer))
+    model, model_config = common.create_model(config, logger, device,
+                                              vocab_size=len(tokenizer),
+                                              get_loss=get_loss)
     model_kwargs = model_config['module_kwargs']
     n_all, n_trainable, n_embedding, n_non_embedding_trainable = utils.module_params_count(model)
     context_length = model_kwargs['context_length']
@@ -227,12 +229,10 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             step_token_count += x.numel()
 
             with amp_ctx:
-                # logits = model(x)
-                loss, correct, n_preds = get_loss(model(x), y)
-
+                _, loss, correct = model(x, y, return_logits=False)
                 loss_sum += loss.item() * n_samples
                 correct_sum += correct.item()
-                step_preds_count += n_preds
+                step_preds_count += len(y)
 
                 # Scale the loss to account for gradient accumulation
                 # During gradient accumulation, gradients are summed at each micro step.
@@ -338,7 +338,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             eval_count += 1
             eval_interval = timeit.default_timer() - last_eval_time
 
-            val_loss, val_acc, sample_count, iter_count = estimate_loss(model, get_loss, val_loader, eval_iters,
+            val_loss, val_acc, sample_count, iter_count = estimate_loss(model, val_loader, eval_iters,
                                             amp_ctx, torch_info, device)
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
@@ -360,7 +360,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             })
 
             if step+1 >= max_steps and test_loader:
-                test_loss, test_acc, sample_count, iter_count = estimate_loss(model, get_loss, test_loader, None,
+                test_loss, test_acc, sample_count, iter_count = estimate_loss(model, test_loader, None,
                                             amp_ctx, torch_info, device)
                 # only master has aggregated metrics
                 metrics.update({

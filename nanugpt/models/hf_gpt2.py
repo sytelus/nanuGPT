@@ -2,16 +2,19 @@ from typing import List, Optional
 
 from transformers.models.gpt2 import GPT2Config, GPT2LMHeadModel
 
-from nanugpt import utils
-from nanugpt import glogging as logging
+from nanugpt import common
+from nanugpt.models.model_with_loss import ModelWithLoss
 
 def compute_intermediate_size(n, ffn_dim_multiplier=1, multiple_of=256):
     return multiple_of * ((int(ffn_dim_multiplier * int(8 * n / 3)) + multiple_of - 1) // multiple_of)
 
 # for llama: sample values are at https://huggingface.co/EleutherAI/llemma_7b/blob/main/config.json
 def get_model(
+                vocab_size: int,
+                get_loss: Optional[common.GetLossType],
+
                 n_layer: int, n_embd: int, n_head: int,
-                vocab_size: int, context_length: int,
+                context_length: int,
                 n_inner:Optional[int]=None, # inner later of MLP, defaults to 4*n_embd
 
                 activation_function:Optional[str]='gelu_new', # defaults to 'gelu_new'
@@ -60,4 +63,6 @@ def get_model(
 
     model = GPT2LMHeadModel(config=model_config)
 
-    return model
+    model_with_loss = ModelWithLoss(model=model, get_loss=get_loss)
+
+    return model_with_loss

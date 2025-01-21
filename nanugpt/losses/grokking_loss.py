@@ -2,7 +2,7 @@ from typing import Tuple, Mapping
 
 import torch
 
-def get_loss(model_output, labels)->Tuple[torch.Tensor, torch.Tensor, int]:
+def get_loss(model_output, labels)->Tuple[torch.Tensor, torch.Tensor]:
 
     if isinstance(model_output, Mapping):
         model_output = model_output['logits']
@@ -16,5 +16,5 @@ def get_loss(model_output, labels)->Tuple[torch.Tensor, torch.Tensor, int]:
     # argmax over vocab_size to get the index of the predicted token for each item in batch
     correct = (torch.argmax(last_logits, dim=-1) == labels).sum()
 
-    return loss, correct, len(labels) # total num of predictions
+    return loss, correct
 

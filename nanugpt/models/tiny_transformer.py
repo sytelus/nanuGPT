@@ -1,6 +1,10 @@
+from typing import Optional, Tuple
 from einops import rearrange, repeat
+
 import torch
 from torch import nn, Tensor
+
+from nanogpt import common
 
 class DecoderBlock(torch.nn.Module):
   def __init__(self, n_embd: int, n_heads: int,
@@ -42,8 +46,12 @@ class TinyTransformer(torch.nn.Module):
     def __init__(self, n_layer: int, n_embd: int, n_head: int,
                 vocab_size: int, context_len: int,
                 mlp_bias: bool, attn_proj_bias: float, attn_kv_bias: float,
-                attn_dropout: float, mlp_dropout: float):
+                attn_dropout: float, mlp_dropout: float,
+                get_loss: Optional[common.GetLossType],
+                ):
         super().__init__()
+
+        self.get_loss = get_loss
 
         self.token_embeddings = nn.Embedding(vocab_size, n_embd)
         self.position_embeddings = nn.Embedding(context_len, n_embd)
@@ -56,7 +64,11 @@ class TinyTransformer(torch.nn.Module):
             nn.Linear(n_embd, vocab_size, bias=mlp_bias)
         )
 
-    def forward(self, inputs: Tensor):
+    def forward(self, inputs: Tensor,
+                labels: Optional[torch.Tensor] = None,
+                return_logits: bool = True,
+                ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]: # logits, loss, num_correct, num_labels
+
         # inputs: (batch_size, context_len)
 
         batch_size, context_len = inputs.shape
@@ -72,11 +84,23 @@ class TinyTransformer(torch.nn.Module):
         embedding = rearrange(embedding, 'b s d -> s b d')
         #embedding = embedding.permute(1, 0, 2)
         # output: (context_len, batch_size, vocab_size)
-        return self.model(embedding)
+        logits = self.model(embedding)
 
+        loss:Optional[torch.Tensor] = None
+        if labels is not None:
+            assert self.get_loss is not None, "Loss function is not defined"
+            loss, correct = self.get_loss(logits, labels)
+            # keeping logits around may unnecessarily consume a lot of memory  (atleast 1GB for 124M params)
+            return logits if return_logits else None, loss, correct
 
-def get_model(n_layer: int, n_embd: int, n_head: int,
-              vocab_size: int, context_length: int,
+        return logits, None, None
+
+def get_model(
+              vocab_size: int,
+              get_loss: Optional[common.GetLossType],
+
+              n_layer: int, n_embd: int, n_head: int,
+              context_length: int,
 
               mlp_bias: bool=True,
               attn_proj_bias: bool=True, # for projection layers in attention
@@ -88,4 +112,4 @@ def get_model(n_layer: int, n_embd: int, n_head: int,
               vocab_size=vocab_size, context_len=context_length,
               mlp_bias=mlp_bias, attn_proj_bias=attn_proj_bias,
               attn_kv_bias=attn_kv_bias, attn_dropout=attn_dropout,
-              mlp_dropout=mlp_dropout)
+              mlp_dropout=mlp_dropout, get_loss=get_loss)

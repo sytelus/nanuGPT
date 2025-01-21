@@ -51,7 +51,7 @@ def train_step(batch_iter, model, gread_acc_steps, scaler, optimizer, grad_clip,
     sw.start('train_step\forward')
     for _ in range(gread_acc_steps):
         x, y = next(batch_iter)
-        loss, n_samples, n_tokens = forward_xy(x, y, model, device, torch_info, amp_ctx, get_loss)
+        loss, n_samples, n_tokens = forward_xy(x, y, model, device, torch_info, amp_ctx)
         loss = loss / gread_acc_steps # scale the loss to account for gradient accumulation
         step_samples += n_samples
         step_tokens += n_tokens
@@ -78,7 +78,7 @@ def train_step(batch_iter, model, gread_acc_steps, scaler, optimizer, grad_clip,
 
     return step_samples, step_tokens
 
-def forward_xy(x, y, model, device, torch_info, amp_ctx, get_loss):
+def forward_xy(x, y, model, device, torch_info, amp_ctx):
     """Run a forward pass"""
     x, y = x.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else x.to(device), \
         y.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else y.to(device)
@@ -88,9 +88,8 @@ def forward_xy(x, y, model, device, torch_info, amp_ctx, get_loss):
 
     with amp_ctx:
         sw.start('forward')
-        logits = model(x)
+        _, loss, correct = model(x, y, return_logits=False)
         sw.pause('forward')
-        loss, correct, n_preds = get_loss(logits, y)
 
     return loss, n_samples, n_tokens
 
@@ -134,7 +133,9 @@ def measure_global_batch(config:Mapping,
     tokenizer, tokenizer_config = common.create_tokenizer(config, logger)
 
     # create model
-    model, model_config = common.create_model(config, logger, device, vocab_size=len(tokenizer))
+    model, model_config = common.create_model(config, logger, device,
+                                              vocab_size=len(tokenizer),
+                                              get_loss=get_loss)
 
     # create optimizer
     get_optim = utils.import_fn(optimizer_config['module'])

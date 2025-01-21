@@ -69,7 +69,10 @@ class Generator:
         self.tokenizer, tokenizer_config = common.create_tokenizer(config, logger)
 
         # create model
-        self.model, model_config = common.create_model(config, logger, self.device, vocab_size=len(self.tokenizer), state_dict=state_dict)
+        self.model, model_config = common.create_model(config, logger, self.device,
+                                                       vocab_size=len(self.tokenizer),
+                                                       get_loss=None,
+                                                       state_dict=state_dict)
         self.model.eval()
 
     @torch.no_grad()

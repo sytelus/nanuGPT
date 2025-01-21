@@ -4,7 +4,7 @@ Original code from: https://github.com/KellerJordan/modded-nanogpt/blob/09a49d4a
 
 # TODO: add grad norm from KellerJordan's code
 
-from typing import Optional
+from typing import Optional, Tuple
 
 import math
 from dataclasses import dataclass
@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+from nanugpt import common
 
 @dataclass
 class GPTConfig:
@@ -115,9 +116,11 @@ class Block(nn.Module):
         return x
 
 class GPT(nn.Module):
-    def __init__(self, config:GPTConfig):
+    def __init__(self, config:GPTConfig, get_loss: Optional[common.GetLossType]):
         super().__init__()
+
         self.config = config
+        self.get_loss = get_loss
 
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd),
@@ -126,7 +129,12 @@ class GPT(nn.Module):
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
-    def forward(self, idx, only_last=False):
+    def forward(self,
+                idx:torch.Tensor,
+                labels: Optional[torch.Tensor] = None,
+                return_logits: bool = True,
+                only_last=False,
+    )-> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]: # logits, loss, num_correct, num_labels
         b, t = idx.size()
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
         pos = torch.arange(0, t, dtype=torch.long, device=idx.device) # shape (t)
@@ -142,15 +150,24 @@ class GPT(nn.Module):
             logits = self.lm_head(x) # [batch, seq_len, vocab_size]
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
-            # note: using list [-1] to preserve the time dim
+             # note: using list [-1] to preserve the time dim
             logits = self.lm_head(x[:, [-1], :]) # [batch, 1, vocab_size]
 
-        return logits
+        loss:Optional[torch.Tensor] = None
+        if labels is not None:
+            assert self.get_loss is not None, "Loss function is not defined"
+            loss, correct = self.get_loss(logits, labels)
+            # keeping logits around may unnecessarily consume a lot of memory  (atleast 1GB for 124M params)
+            return logits if return_logits else None, loss, correct
 
+        return logits, None, None
 
 def get_model(
+                vocab_size: int,
+                get_loss: Optional[common.GetLossType],
+
                 n_layer: int, n_embd: int, n_head: int,
-                vocab_size: int, context_length: int,
+                context_length: int,
               ):
 
     gpt_config = GPTConfig(
@@ -161,4 +178,4 @@ def get_model(
                             n_embd=n_embd,
                         )
 
-    return GPT(gpt_config)
+    return GPT(gpt_config, get_loss)

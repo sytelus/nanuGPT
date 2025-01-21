@@ -1,4 +1,4 @@
-from typing import Optional, Mapping, Tuple
+from typing import Optional, Mapping, Tuple, Callable, Union, TypeAlias
 import os
 import sys
 import dataclasses
@@ -11,6 +11,8 @@ import torch
 from nanugpt import utils
 from nanugpt import glogging as logging
 from nanugpt.tokenizers.tokenizer_base import TokenizerBase
+
+GetLossType:TypeAlias = Callable[[Union[torch.Tensor, Mapping], torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]
 
 def setup_device(config:Mapping, logger:logging.Logger)->Tuple[torch.device, AbstractContextManager, utils.TorchInfo]:
     seed = config['general']['seed']
@@ -89,13 +91,14 @@ def compile_torch_model(model:torch.nn.Module, logger:logging.Logger)->torch.nn.
 
 
 def create_model(config:Mapping, logger:logging.Logger, device:torch.device,
-                           vocab_size:int, state_dict=None)->Tuple[torch.nn.Module, Mapping]:
+                vocab_size:int, get_loss:Optional[GetLossType],
+                state_dict=None)->Tuple[torch.nn.Module, Mapping]:
     model_config = config['model']
     torch_compile = config['general']['torch_compile']
 
     get_model = utils.import_fn(model_config['module'])
 
-    model = get_model(vocab_size=vocab_size,
+    model = get_model(vocab_size=vocab_size, get_loss=get_loss,
                       **model_config['module_kwargs']).to(device)
 
     if state_dict is not None:

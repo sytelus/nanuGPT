@@ -13,7 +13,7 @@ from flash_attn import flash_attn_func # type: ignore
 
 from nanugpt.models.fused_rotary_embedding import apply_rotary_emb_func
 from nanugpt.models.rmsnorm import RMSNorm
-from nanugpt import utils
+from nanugpt import common
 
 
 RoPECache = Tuple[torch.Tensor, torch.Tensor]
@@ -121,10 +121,12 @@ class LlamaConfig:
 
 
 class Llama(nn.Module):
-    def __init__(self, config: LlamaConfig) -> None:
+    def __init__(self, config: LlamaConfig, get_loss:common.GetLossType) -> None:
         super().__init__()
         assert config.padded_vocab_size is not None
+
         self.config = config
+        self.get_loss = get_loss
 
         self.lm_head = nn.Linear(config.n_embd, config.padded_vocab_size, bias=False)
         self.transformer = nn.ModuleDict(
@@ -165,8 +167,11 @@ class Llama(nn.Module):
             self.mask_cache = None
 
     def forward(
-        self, idx: torch.Tensor, max_seq_length: Optional[int] = None, input_pos: Optional[torch.Tensor] = None
-    ) -> torch.Tensor:
+        self, idx: torch.Tensor, max_seq_length: Optional[int] = None, input_pos: Optional[torch.Tensor] = None,
+        labels: Optional[torch.Tensor] = None,
+        return_logits: bool = True,
+    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]: # logits, loss, num_correct, num_labels
+
         B, T = idx.size()
         use_kv_cache = input_pos is not None
 
@@ -213,7 +218,17 @@ class Llama(nn.Module):
 
         x = self.transformer.ln_f(x) # type: ignore
 
-        return self.lm_head(x)  # (b, t, vocab_size)
+        logits = self.lm_head(x)  # (b, t, vocab_size)
+
+        loss:Optional[torch.Tensor] = None
+        if labels is not None:
+            assert self.get_loss is not None, "Loss function is not defined"
+            loss, correct = self.get_loss(logits, labels)
+            # keeping logits around may unnecessarily consume a lot of memory  (atleast 1GB for 124M params)
+            return logits if return_logits else None, loss, correct
+
+        return logits, None, None
+
 
     def build_rope_cache(self, idx: torch.Tensor) -> RoPECache:
         return build_rope_cache(
@@ -454,8 +469,10 @@ def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.T
     return roped.type_as(x)
 
 def get_model(
-                context_length=2048,
                 vocab_size=32000, # GPT2 vocab size: 50257
+                get_loss: Optional[common.GetLossType]=None,
+
+                context_length=2048,
                 padding_multiple=64,
                 n_layer=12,
                 n_head=12,
@@ -491,4 +508,4 @@ def get_model(
         condense_ratio=condense_ratio,
     )
 
-    return Llama(gpt_config)
+    return Llama(gpt_config, get_loss)
