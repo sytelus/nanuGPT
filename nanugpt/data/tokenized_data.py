@@ -113,13 +113,9 @@ class MemmapDataloader:
             # we are sequentially returning batches
             start = self.idx
 
-        tokens = self.dataset[start]
-
-        # convert tokens to x, y sequences using tensor views
-        # x is first batch_size*context_length tokens
-        # y is next token
-        x = torch.from_numpy(tokens[:-1].astype(np.int64)).view(self.batch_size, self.dataset.context_length)
-        y = torch.from_numpy(tokens[1:].astype(np.int64)).view(self.batch_size, self.dataset.context_length)
+        tokens_tensor = torch.tensor(self.dataset[start].astype(np.int32), dtype=torch.long)
+        x = tokens_tensor[:-1].view(self.batch_size, self.dataset.context_length)
+        y = tokens_tensor[1:].view(self.batch_size, self.dataset.context_length)
 
         self.idx = (self.idx + x.numel()) % self.dataset.token_count()
         self.batch_index += 1
