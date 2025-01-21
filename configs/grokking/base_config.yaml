@@ -20,7 +20,7 @@ logging:
   run_name: '_copy: /general/run_name'
   log_dir: '_copy: /general/out_dir'
   run_description: '_copy: /general/run_description'
-  enable_wandb: true
+  enable_wandb: false
   log_filename: 'log.txt'
   summaries_filename: 'summaries.txt'
   allow_overwrite_log: true

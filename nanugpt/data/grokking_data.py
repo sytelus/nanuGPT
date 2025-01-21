@@ -4,6 +4,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from nanugpt.tokenizers.grokking_tokenizer import GrokkingTokenizer, get_tokenizer_factory, DIVISION_MODULO_OPERATIONS, ALL_OPERATIONS
+from nanugpt import utils
 
 """
 The `get_data` implementation for generating `operation_mod_p` data for grokking experiments.
@@ -53,7 +54,13 @@ def operation_mod_p_data(operation: str, p: int, tokenizer: GrokkingTokenizer):
 
 def get_data(operation: str, prime: int, training_fraction: float, val_fraction:Optional[float],
              device_batch_size: int, eval_batch_size:int, data_loader_seed:int,
-             local_rank:int, context_length:int)->Tuple[DataLoader,DataLoader, Optional[DataLoader]]:
+             context_length:int)->Tuple[DataLoader,DataLoader, Optional[DataLoader]]:
+
+    world_size = utils.get_world_size()
+    global_rank = utils.get_global_rank()
+    local_world_size = utils.get_local_world_size()
+    assert world_size > 0 and global_rank >= 0 and global_rank < world_size and local_world_size >= 1, f"Invalid values: Word size={world_size}, global rank={global_rank}, local world size={local_world_size}"
+
     tokenizer = get_tokenizer_factory(prime)()
 
     inputs, labels = operation_mod_p_data(operation, prime, tokenizer)
@@ -71,7 +78,7 @@ def get_data(operation: str, prime: int, training_fraction: float, val_fraction:
     train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(dataset,
                                                                [train_size, val_size, test_size])
 
-    train_loader_seed, val_loader_seed, test_loader_seed = data_loader_seed+local_rank, data_loader_seed+local_rank + 1, data_loader_seed+local_rank + 2
+    train_loader_seed, val_loader_seed, test_loader_seed = data_loader_seed+global_rank, data_loader_seed+global_rank + 1, data_loader_seed+global_rank + 2
 
     train_loader_gen = torch.Generator().manual_seed(train_loader_seed)
     val_loader_gen = torch.Generator().manual_seed(val_loader_seed)
