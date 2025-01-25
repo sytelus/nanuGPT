@@ -2,7 +2,7 @@ general:
   project_name: 'grokking'
   run_name: '_time:' # default run name is timestamp
   run_description: null
-  out_dir: '~/out_dir/$project_name/$run_name'
+  out_dir: '$OUT_DIR/$project_name/$run_name'
   device_type: 'cuda'            # auto select if blank or cpu, cuda
   distributed_backend: 'nccl'       # nccl, gloo, mpi, horovod)
   distributed_init_method: 'env://' # for horovod, use 'tcp://localhost:23456'

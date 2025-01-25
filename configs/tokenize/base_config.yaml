@@ -3,7 +3,7 @@ general:
   project_name: 'tokenization'
   run_name: '_time:' # default run name is timestamp
   run_description: null
-  out_dir: '~/out_dir/$project_name/$run_name'
+  out_dir: '$OUT_DIR/$project_name/$run_name'
 
 _env: # creates env vars
   project_name: '_copy: /general/project_name'

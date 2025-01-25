@@ -3,7 +3,7 @@ general:
   project_name: 'train_gpt2'
   run_name: '_time:' # default run name is timestamp
   run_description: null
-  out_dir: '~/out_dir/$project_name/$run_name'
+  out_dir: '$OUT_DIR/$project_name/$run_name'
   device_type: 'cuda'            # auto select if blank or cpu, cuda
   distributed_backend: 'nccl'       # nccl, gloo, mpi, horovod)
   distributed_init_method: 'env://' # for horovod, use 'tcp://localhost:23456'
@@ -84,7 +84,7 @@ scheduler:
     end_factor: 1.0E-2
 
 generate:
-  checkpoint_path: '~/out_dir/$project_name'
+  checkpoint_path: '$OUT_DIR/$project_name'
   checkpoint_name: null # filename or use last from checkpoint_log.yaml, also can be set 'checkpoint_best.pt'
 
 eval:
