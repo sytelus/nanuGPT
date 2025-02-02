@@ -281,6 +281,7 @@ class Muon(torch.optim.Optimizer):
         assert all(isinstance(p, torch.Tensor) for p in params)
         sizes = {p.numel() for p in params}
         def create_update_buffer(size: int):
+            # allocate a buffer with world_size rows for the distributed all_gather
             b = torch.empty(self.world_size, size, dtype=torch.bfloat16, device="cuda")
             return dict(update_buffer=b, update_buffer_views=[b[i] for i in range(self.world_size)])
         param_groups = [
@@ -296,38 +297,62 @@ class Muon(torch.optim.Optimizer):
             ns_steps = group["ns_steps"]
             update_buffer = group["update_buffer"]
             update_buffer_views: list[torch.Tensor] = group["update_buffer_views"]
-            # generate weight updates in distributed fashion
+            # list of parameters to update
             params: list[torch.Tensor] = group["params"]
-            handle = None
+            handle = None  # will be used for async op if distributed is enabled
             params_world = None
+
+            # Define update_prev: in distributed mode we need to wait for the async op.
             def update_prev():
+                # If there is nothing to update, return early.
                 if params_world is None:
                     return
-                assert handle is not None
-                handle.wait()
+                # Only wait for the async op if we are in distributed mode.
+                if torch.distributed.is_initialized():
+                    assert handle is not None
+                    handle.wait()
+                # Apply the update from each gathered tensor
                 for p_world, g_world in zip(params_world, update_buffer_views):
+                    # The update uses a scaling factor based on parameter shape.
                     p_world.add_(
                         g_world.view_as(p_world),
                         alpha=-lr * max(1, p_world.size(0) / p_world.size(1)) ** 0.5,
                     )
+
+            # Loop over parameters in groups of size self.world_size.
             for base_i in range(len(params))[::self.world_size]:
                 if base_i + self.rank < len(params):
                     p = params[base_i + self.rank]
                     g = p.grad
-                    assert g is not None
+                    assert g is not None, "Gradient not set for parameter!"
                     state = self.state[p]
                     if "momentum_buffer" not in state:
                         state["momentum_buffer"] = torch.zeros_like(g)
                     buf: torch.Tensor = state["momentum_buffer"]
                     buf.lerp_(g, 1 - momentum)
+                    # Use Nesterov momentum if enabled.
                     g = g.lerp_(buf, momentum) if nesterov else buf
+                    # Apply the Newton-Schulz orthogonalization (assume zeropower_via_newtonschulz5 is defined)
                     g = zeropower_via_newtonschulz5(g, steps=ns_steps).flatten()
                 else:
+                    # For parameters that are not updated by this rank, use the buffer view.
                     g = update_buffer_views[self.rank]
-                update_prev() # async all_gather instead of sync all_reduce by @YouJiacheng
+
+                # Perform the previous updates before moving on.
+                update_prev()
+
+                # Only perform distributed all_gather if torch.distributed is initialized.
                 if torch.distributed.is_initialized():
+                    # This will asynchronously gather the tensor 'g' from all processes into update_buffer.
                     handle = torch.distributed.all_gather_into_tensor(update_buffer, g, async_op=True)
+                else:
+                    # In a single-worker setting, there is no need to gather; copy g into all views.
+                    for view in update_buffer_views:
+                        view.copy_(g)
+                # Determine the group of parameters that correspond to the current block.
                 params_world = params[base_i : base_i + self.world_size]
+
+            # Perform a final update for the last block.
             update_prev()
 
 # -----------------------------------------------------------------------------
