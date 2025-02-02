@@ -53,9 +53,9 @@ def print_summary(file_summaries):
         summary_table.add_row(filename, str(num_rows), str(total_chars), str(file_size), col_str)
     console.print(summary_table)
 
-def print_sample(df, filename, sample_size):
-    sample_size = min(sample_size, len(df))
-    sample_df = df.sample(n=sample_size)
+def print_sample(df, filename, samples):
+    samples = min(samples, len(df))
+    sample_df = df.sample(n=samples)
     sample_table = Table(title=f"Random Sample from {filename}", show_lines=True)
     for col in sample_df.columns:
         sample_table.add_column(str(col), style="green", overflow="fold")
@@ -63,7 +63,7 @@ def print_sample(df, filename, sample_size):
         sample_table.add_row(*[str(val) for val in row])
     console.print(sample_table)
 
-def process_huggingface_dataset(folder_path, sample_size):
+def process_huggingface_dataset(folder_path, samples):
     console.print(f"[yellow]Detected Hugging Face dataset in {folder_path}[/yellow]")
     dataset = load_dataset(folder_path)
     df = pd.DataFrame(dataset["train"][0:1000])
@@ -80,20 +80,20 @@ def process_huggingface_dataset(folder_path, sample_size):
     console.print(f"[blue]Dataset Info:[/blue] {json.dumps(dataset_info, indent=2)}")
     console.print(f"[blue]State Info:[/blue] {json.dumps(state_info, indent=2)}")
 
-    print_sample(df, folder_path, sample_size)
+    print_sample(df, folder_path, samples)
     return (folder_path, num_rows, total_chars, columns, "N/A")
 
 def main():
     parser = argparse.ArgumentParser(description="Summarize dataset files and Hugging Face datasets.")
     parser.add_argument("--folder", required=True, help="Path to dataset folder")
-    parser.add_argument("--sample_size", type=int, default=2, help="Number of sample rows to display")
+    parser.add_argument("--samples", type=int, default=2, help="Number of sample rows to display")
     parser.add_argument("--max_sample_files", type=int, default=1, help="Maximum number of files to display samples from")
     args = parser.parse_args()
     folder_path = args.folder
     file_summaries = []
 
     if detect_huggingface_dataset(folder_path):
-        hf_summary = process_huggingface_dataset(folder_path, args.sample_size)
+        hf_summary = process_huggingface_dataset(folder_path, args.samples)
         file_summaries.append(hf_summary)
     else:
         file_types = [".parquet", ".jsonl", ".txt"]
@@ -111,7 +111,7 @@ def main():
                     df, num_rows, total_chars, columns, file_size = result
                     file_summaries.append((os.path.basename(filepath), num_rows, total_chars, columns, file_size))
                     if idx < args.max_sample_files:
-                        print_sample(df, os.path.basename(filepath), args.sample_size)
+                        print_sample(df, os.path.basename(filepath), args.samples)
         else:
             console.print(f"[red]No supported dataset files found in {folder_path}[/red]")
 
