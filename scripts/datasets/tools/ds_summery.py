@@ -23,18 +23,27 @@ def process_hf_dataset(folder, samples):
             table.add_row(split, f"{nrows:,}" if isinstance(nrows, int) else str(nrows))
         console.print(table)
 
-        # Sample from the first valid split (list of dicts)
+        # Sample from the first valid split (list of items)
         first_split = next((k for k, v in dataset_dict.items() if isinstance(v, list) and len(v) > 0), None)
         if first_split is not None:
             data = dataset_dict[first_split]
             sample_n = min(samples, len(data))
             sample_rows = random.sample(data, sample_n)
-            sample_table = Table(title=f"Random Samples from split '{first_split}'")
-            keys = list(sample_rows[0].keys())
-            for key in keys:
-                sample_table.add_column(key, style="white")
-            for row in sample_rows:
-                sample_table.add_row(*[str(row.get(k, "")) for k in keys])
+
+            # Check if the sample is a dict or a simple value
+            if isinstance(sample_rows[0], dict):
+                sample_table = Table(title=f"Random Samples from split '{first_split}'")
+                keys = list(sample_rows[0].keys())
+                for key in keys:
+                    sample_table.add_column(key, style="white")
+                for row in sample_rows:
+                    sample_table.add_row(*[str(row.get(k, "")) for k in keys])
+            else:
+                # Treat samples as simple values, use a single column
+                sample_table = Table(title=f"Random Samples from split '{first_split}'")
+                sample_table.add_column("Value", style="white")
+                for row in sample_rows:
+                    sample_table.add_row(str(row))
             console.print(sample_table)
         else:
             console.print("[red]No sample data available in any split.[/red]")
