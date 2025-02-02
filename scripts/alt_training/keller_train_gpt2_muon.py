@@ -598,7 +598,7 @@ if __name__ == "__main__":
             "train/elapsed_hr": (t1-train_start_time) / 3600.0,
             "train/train_time_hr": train_time_hr,
             "train/tokens": train_tokens,
-            "train/lr": lr,
+            "train/lr": get_lr(step),
         })
 
         logger.info(metrics)
