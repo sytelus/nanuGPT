@@ -1,8 +1,8 @@
 # from https://raw.githubusercontent.com/KellerJordan/modded-nanogpt/09a49d4af4804af92d14216b43136f5510a8fba8/train_gpt2.py
 # altered to use OpenWebText
 # Test commandline:
-# torchrun --nproc_per_node=1 --standalone keller_train_gpt2_adamw.py --batch_size 4 --num_iterations 6 --val_loss_every 2 --total_batch_size 4096
-# python keller_train_gpt2_adamw.py --batch_size 4 --num_iterations 6 --val_loss_every 2 --total_batch_size 4096
+# torchrun --nproc_per_node=1 --standalone keller_train_gpt2_adamw.py --batch_size 4 --num_iterations 6 --val_loss_every 2 --total_batch_size 4096 --enable_wandb 0
+# python keller_train_gpt2_muon.py --batch_size 4 --num_iterations 6 --val_loss_every 2 --total_batch_size 4096 --enable_wandb 0
 
 import os
 import sys
@@ -248,12 +248,13 @@ if __name__ == "__main__":
     # optimization
     parser.add_argument("--learning_rate", type=float, default=0.0018, help="learning rate warmup iterations")
     parser.add_argument("--warmup_iters", type=int, default=256, help="learning rate warmup iterations")
-    parser.add_argument("--warmdown_iters", type=int, default=2048, help="learning rate warmdown iterations")
+    parser.add_argument("--cooldown_frac", type=float, default=0.4, help="learning rate warmdown iterations")
     parser.add_argument("--weight_decay", type=float, default=0.1, help="weight decay")
     # evaluation
     parser.add_argument("--val_loss_every", type=int, default=250, help="every how mant steps to evaluate val loss?")
     parser.add_argument("--val_max_steps", type=int, default=200, help="how many batches of val to average?")
     parser.add_argument("--save_every", type=int, default=5000, help="every how many steps to save the checkpoint")
+    parser.add_argument("--enable_wandb", type=int, default=1, help="disabled if 0")
 
     parser.add_argument("--run_id", type=str, default=time.strftime("%Y%m%d-%H%M%S"), help="unique identifier for this run")
     args = parser.parse_args()
@@ -263,12 +264,13 @@ if __name__ == "__main__":
     args.input_bin = os.path.expandvars(args.input_bin)
     args.input_val_bin = os.path.expandvars(args.input_val_bin)
     args.output_dir = os.path.join(os.path.expandvars(args.output_dir), run_id)
+    warmdown_iters = int(args.num_iterations * args.cooldown_frac)
 
     logger = setup_logger(config={
             "logging":{
                     "project_name": os.getenv("JOB_NAME", "keller_train_gpt2"),
                     "run_name": run_id,
-                    "enable_wandb": True,
+                    "enable_wandb": args.enable_wandb != 0,
                     "log_dir": args.output_dir,
                     "log_filename": "log.txt",
                     "summaries_filename": "summary.txt",
@@ -362,11 +364,11 @@ if __name__ == "__main__":
         if it < args.warmup_iters:
             return args.learning_rate * (it+1) / args.warmup_iters
         # 2) constant lr for a while
-        elif it < args.num_iterations - args.warmdown_iters:
+        elif it < args.num_iterations - warmdown_iters:
             return args.learning_rate
         # 3) linear warmdown
         else:
-            decay_ratio = (args.num_iterations - it) / args.warmdown_iters
+            decay_ratio = (args.num_iterations - it) / warmdown_iters
             return args.learning_rate * decay_ratio
 
     timings = []
