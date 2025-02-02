@@ -48,15 +48,33 @@ def print_summary(file_summaries):
     summary_table.add_column("Columns", style="magenta")
 
     total_rows = 0
+    total_chars = 0
+    total_size = 0
+
     for summary in file_summaries:
-        filename, num_rows, total_chars, columns, file_size = summary
+        filename, num_rows, total_chars_file, columns, file_size = summary
         col_str = ", ".join(columns)
-        summary_table.add_row(filename, str(num_rows), str(total_chars), str(file_size), col_str)
+        summary_table.add_row(filename, str(num_rows), str(total_chars_file), str(file_size), col_str)
         total_rows += num_rows
+        total_chars += total_chars_file
+        if file_size != "N/A":
+            total_size += file_size
+
+    # Add a separator line before the totals
+    summary_table.add_section()
+
+    # Add the totals row
+    summary_table.add_row(
+        "Total",
+        str(total_rows),
+        str(total_chars),
+        str(total_size) if total_size > 0 else "N/A",
+        "",
+        style="bold"
+    )
 
     console.print(summary_table)
-    console.print(f"[green]Total Number of Files Processed: {len(file_summaries)}[/green]")
-    console.print(f"[green]Total Rows Across All Files: {total_rows}[/green]")
+
 
 def print_sample(df, filename, samples):
     samples = min(samples, len(df))
