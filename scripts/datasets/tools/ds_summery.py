@@ -8,7 +8,6 @@ from rich.console import Console
 from rich.table import Table
 
 def detect_huggingface_dataset(folder_path):
-    """Check if the folder contains Hugging Face dataset files."""
     return os.path.exists(os.path.join(folder_path, "dataset_info.json")) and \
            os.path.exists(os.path.join(folder_path, "state.json"))
 
@@ -47,11 +46,17 @@ def print_summary(file_summaries):
     summary_table.add_column("Total Characters", justify="right")
     summary_table.add_column("File Size (bytes)", justify="right")
     summary_table.add_column("Columns", style="magenta")
+
+    total_rows = 0
     for summary in file_summaries:
         filename, num_rows, total_chars, columns, file_size = summary
         col_str = ", ".join(columns)
         summary_table.add_row(filename, str(num_rows), str(total_chars), str(file_size), col_str)
+        total_rows += num_rows
+
     console.print(summary_table)
+    console.print(f"[green]Total Number of Files Processed: {len(file_summaries)}[/green]")
+    console.print(f"[green]Total Rows Across All Files: {total_rows}[/green]")
 
 def print_sample(df, filename, samples):
     samples = min(samples, len(df))
@@ -71,7 +76,6 @@ def process_huggingface_dataset(folder_path, samples):
     total_chars = int(df.astype(str).apply(lambda col: col.str.len()).sum().sum())
     columns = list(df.columns)
 
-    # Load dataset_info.json and state.json
     with open(os.path.join(folder_path, "dataset_info.json"), "r") as f:
         dataset_info = json.load(f)
     with open(os.path.join(folder_path, "state.json"), "r") as f:
