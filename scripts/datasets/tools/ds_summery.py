@@ -87,6 +87,7 @@ def main():
     parser = argparse.ArgumentParser(description="Summarize dataset files and Hugging Face datasets.")
     parser.add_argument("--folder", required=True, help="Path to dataset folder")
     parser.add_argument("--sample_size", type=int, default=2, help="Number of sample rows to display")
+    parser.add_argument("--max_sample_files", type=int, default=1, help="Maximum number of files to display samples from")
     args = parser.parse_args()
     folder_path = args.folder
     file_summaries = []
@@ -104,12 +105,13 @@ def main():
                 break  # Process only the first detected file type
 
         if selected_files:
-            for filepath in selected_files:
+            for idx, filepath in enumerate(selected_files):
                 result = get_file_stats(filepath)
                 if result:
                     df, num_rows, total_chars, columns, file_size = result
                     file_summaries.append((os.path.basename(filepath), num_rows, total_chars, columns, file_size))
-                    print_sample(df, os.path.basename(filepath), args.sample_size)
+                    if idx < args.max_sample_files:
+                        print_sample(df, os.path.basename(filepath), args.sample_size)
         else:
             console.print(f"[red]No supported dataset files found in {folder_path}[/red]")
 
