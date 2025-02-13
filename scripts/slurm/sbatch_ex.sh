@@ -101,7 +101,7 @@ sbatch \
     --job-name=${JOB_NAME} \
     --output="${JOB_OUT_DIR}/sbatch_log.txt" \
     --error="${JOB_OUT_DIR}/sbatch_err.txt" \
-    --mem=0 \
+    #--mem=0 \
     "${SLURM_SCRIPT_DIR}/srun_ex.sh" # this will be run once on primary node
 
 echo "Job submitted. Use for job status:"
