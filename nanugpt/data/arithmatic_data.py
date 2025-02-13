@@ -102,8 +102,8 @@ def get_data(device_batch_size: int, eval_batch_size:int, data_loader_seed:int,
                            op='*', eq='=',
                            sep=tokenizer.eos_str, pad=tokenizer.pad_str,
                            seed=seed)
-    train_tensors = tokenizer.strings2tensor(train_strings).to(torch.int)
-    val_tensors = tokenizer.strings2tensor(val_strings).to(torch.int)
+    train_tensors = tokenizer.strings2tensor(train_strings).to(torch.long)
+    val_tensors = tokenizer.strings2tensor(val_strings).to(torch.long)
 
     train_dataset = torch.utils.data.TensorDataset(train_tensors, shift_by_1(train_tensors, tokenizer.eos_token_id))
     val_dataset = torch.utils.data.TensorDataset(val_tensors, shift_by_1(val_tensors, tokenizer.eos_token_id))
