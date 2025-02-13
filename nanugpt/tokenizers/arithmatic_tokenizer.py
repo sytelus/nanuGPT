@@ -7,26 +7,28 @@ from nanugpt.tokenizers.tokenizer_base import TokenizerBase
 
 
 class ArithmaticTokenizer(TokenizerBase):
-    def __init__(self, bos_token="$", pad_token="_", eos_token="|"):
-        self.bos_token = bos_token
-        self.pad_token = pad_token
-        self.eos_token = eos_token
+    def __init__(self, bos_str="$", pad_str="_", eos_str="|"):
+        self.bos_str = bos_str
+        self.pad_str = pad_str
+        self.eos_str = eos_str
 
         tokens = (
             [str(d) for d in range(10)] +
-            [self.bos_token, self.pad_token, self.eos_token] +
-            ['.', 'E', 'e', 'i', '+', '-', '*', '/', '^', '%', '\\', '~', ' ', '\n', '\r', 'π', '∞', '<', '>', ',', '∀', '…', '❌']
+            [self.bos_str, self.pad_str, self.eos_str] +
+            ['=', '.', 'E', 'e', 'i', '+', '-', '*', '/', '^', '%', '\\', '~', ' ', '\n', '\r', '<', '>', ','] #'π', '∞', '∀', '…', '❌'
         )
         self.idx_to_token = {i: token for i, token in enumerate(tokens)}
         assert all(len(token) == 1 for token in self.idx_to_token.values()), "All tokens should have length 1"
+        # we use 255 as not found token
+        assert len(self.idx_to_token) < 255, "Number of tokens should be less than 255"
 
         self.vocab_size = len(self.idx_to_token)
         self.token_to_idx = {token: i for i, token in self.idx_to_token.items()}
-        self.eos_token_id = self.token_to_idx[self.eos_token]
+        self.eos_token_id = self.token_to_idx[self.eos_str]
 
         # Cache lookup tables to avoid recomputation in tensor2strings and strings2tensor
         self._lookup = [self.idx_to_token[i] for i in range(self.vocab_size)]
-        self._lut = np.zeros(256, dtype=np.uint16)
+        self._lut = np.full(256, 255, dtype=np.uint16)
         for token, index in self.token_to_idx.items():
             self._lut[ord(token)] = index
 
@@ -68,7 +70,10 @@ class ArithmaticTokenizer(TokenizerBase):
         big_str = ''.join(strings)
         arr = np.frombuffer(big_str.encode('latin1'), dtype=np.uint8).reshape(n, l)
         tokens = self._lut[arr]
+        # assert none of the tokens are 255
+        if tokens.max() == 255:
+            raise AssertionError("Invalid chars exist in input")
         return torch.from_numpy(tokens)
 
-def get_tokenizer_factory(prime:int)->Callable[[], ArithmaticTokenizer]:
+def get_tokenizer_factory()->Callable[[], ArithmaticTokenizer]:
     return lambda : ArithmaticTokenizer()
