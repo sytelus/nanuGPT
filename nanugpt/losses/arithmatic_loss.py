@@ -3,108 +3,102 @@ import torch.nn.functional as F
 from torch import Tensor
 from typing import Tuple
 
-def get_loss(model_output: Tensor, labels: Tensor, eq_token_id: int, pad_token_id: int, eos_token_id: int) -> Tuple[Tensor, Tensor]:
+def get_loss(model_output: Tensor,
+             labels: Tensor,
+             eq_token_id: int,
+             pad_token_id: int,
+             eos_token_id: int
+            ) -> Tuple[Tensor, Tensor]:
+    r"""
+    Compute cross entropy loss (only on answer tokens) and count how many documents
+    have all tokens predicted correctly.
+
+    The model_output is of shape [batch, context_len, vocab_size] and labels is of shape [batch, context_len].
+    In each sequence, documents are separated by eos_token_id and within each document there is exactly one eq_token_id.
+    Only tokens between the eq_token_id and the following eos_token_id (excluding both) are used to compute the loss.
+    A document is considered "correct" if every token in its answer segment (the selected tokens) is predicted
+    correctly.
+
+    Padding tokens (pad_token_id) are ignored.
     """
-    Computes (1) cross-entropy loss and (2) the number of correct documents.
+    # Ensure we work on the same device as the inputs.
+    device = model_output.device
 
-    model_output: Tensor of shape [B, L, V] (logits over vocab)
-    labels:       Tensor of shape [B, L] (token ids, shifted by one for autoregression)
+    # Create boolean masks for the special tokens.
+    eq_mask  = (labels == eq_token_id)
+    eos_mask = (labels == eos_token_id)
+    pad_mask = (labels == pad_token_id)
 
-    For each document (a segment in a sequence ending with eos_token_id, containing exactly one eq_token_id),
-    we only compute loss on tokens between eq_token_id and eos_token_id (both excluded).
+    # Compute cumulative sums along the context (sequence) dimension.
+    # These will help us decide if a token is in an answer segment.
+    # For each position, eq_cumsum counts how many eq tokens have been seen so far.
+    # Similarly, eos_cumsum counts how many eos tokens have been seen.
+    eq_cumsum  = eq_mask.to(torch.int64).cumsum(dim=1)
+    eos_cumsum = eos_mask.to(torch.int64).cumsum(dim=1)
 
-    A document is considered “correct” if the predicted tokens (via argmax) exactly match the label tokens
-    in the answer region.
+    # A token is part of an answer segment if it is:
+    #   - After an eq_token has occurred (i.e. eq_cumsum > eos_cumsum)
+    #   - Not the eq token itself
+    #   - Not an eos token
+    #   - Not a padding token
+    valid_mask = (eq_cumsum > eos_cumsum) & (~eq_mask) & (~eos_mask) & (~pad_mask)
 
-    Sequences may have padding at the end (pad_token_id) which do not belong to any document.
-    """
-    B, L, V = model_output.shape
-    device = labels.device  # ensure all new tensors are on the same device
+    # ---------------------------
+    # Compute the cross entropy loss over valid tokens.
+    # ---------------------------
+    batch_size, seq_len, vocab_size = model_output.size()
+    # Flatten the tensors so that we can index only the valid positions.
+    logits_flat = model_output.view(-1, vocab_size)       # shape: [batch*seq_len, vocab_size]
+    labels_flat = labels.view(-1)                           # shape: [batch*seq_len]
+    valid_mask_flat = valid_mask.view(-1)                   # shape: [batch*seq_len]
 
-    # ---------------------------------------------------------------
-    # Create a mask for tokens that belong to an answer region.
-    # We do this by computing, for each position, the last seen eq token and eos token.
-    #
-    # For each sequence, define:
-    #   last_eq[i]  = maximum index j <= i such that labels[j] == eq_token_id (or -1 if none)
-    #   last_eos[i] = maximum index j <= i such that labels[j] == eos_token_id (or -1 if none)
-    #
-    # Then, a token at position i is in the answer region if:
-    #   (a) It is not pad, eq, or eos,
-    #   (b) And it comes after an eq token in the current document,
-    #       i.e. last_eq[i] > last_eos[i]   (since eos resets the document)
-    # ---------------------------------------------------------------
-    # positions: tensor [B, L] with values 0,1,...,L-1
-    positions = torch.arange(L, device=device).unsqueeze(0).expand(B, L)
+    if valid_mask_flat.sum() > 0:
+        # Compute the token-level cross entropy loss only for positions in valid_mask.
+        loss = F.cross_entropy(logits_flat[valid_mask_flat],
+                               labels_flat[valid_mask_flat],
+                               reduction='mean')
+    else:
+        # If there are no valid tokens (edge-case), return a loss of zero.
+        loss = torch.tensor(0.0, device=device)
 
-    # For eq tokens: record position if token equals eq_token_id, else -1.
-    eq_positions = torch.where(labels == eq_token_id, positions, torch.full_like(positions, -1))
-    # Cumulative max gives, at each position, the last (largest) eq token position seen so far.
-    last_eq = eq_positions.cummax(dim=1).values
+    # ---------------------------
+    # Compute the number of "correct" documents.
+    # A document is correct if for all valid tokens in that document, the model's prediction is correct.
+    # ---------------------------
+    # Get token-level predictions by taking the argmax over the vocab dimension.
+    predictions = model_output.argmax(dim=-1)  # shape: [batch, seq_len]
+    # Compute a boolean tensor indicating if each token is correctly predicted.
+    token_correct = (predictions == labels)  # shape: [batch, seq_len]
 
-    # Similarly for eos tokens.
-    eos_positions = torch.where(labels == eos_token_id, positions, torch.full_like(positions, -1))
-    last_eos = eos_positions.cummax(dim=1).values
+    # To group tokens by document, we need a unique group id for each document.
+    # We use the fact that within a sequence, valid tokens in a document appear after an eq_token
+    # and before the subsequent eos_token. Here we use eos_cumsum as the document identifier.
+    # First, create a tensor with the batch indices for each token.
+    batch_idx = torch.arange(batch_size, device=device).unsqueeze(1).expand(batch_size, seq_len)
 
-    # A token is valid for loss if:
-    #  (1) it is not a pad token,
-    #  (2) it is not the eq or eos token (we exclude these from loss),
-    #  (3) and it is in the region after an eq in the current document: last_eq > last_eos.
-    valid_loss_mask = (labels != pad_token_id) & (labels != eq_token_id) & (labels != eos_token_id) & (last_eq > last_eos)
+    # Now, restrict to the valid answer tokens.
+    valid_batch_idx = batch_idx[valid_mask]       # shape: [N_valid]
+    valid_eos_cumsum = eos_cumsum[valid_mask]       # shape: [N_valid]
 
-    # ---------------------------------------------------------------
-    # Compute cross-entropy loss only on the valid tokens.
-    # We index model_output and labels with the mask.
-    # If no token qualifies (mask is empty) we return a loss of 0.
-    # ---------------------------------------------------------------
-    assert valid_loss_mask.sum() > 0, "No valid tokens found for loss computation."
-    # model_output has shape [B, L, V] and valid_loss_mask is [B, L] --> result is [N, V]
-    logits = model_output[valid_loss_mask]
-    target = labels[valid_loss_mask]
-    loss = F.cross_entropy(logits, target, reduction='mean')
+    # Combine batch index and document id to create a unique group id per document.
+    # Use an offset (here, seq_len is safe) so that different batches don't conflict.
+    offset = seq_len
+    group_ids = valid_batch_idx * offset + valid_eos_cumsum  # shape: [N_valid]
 
-    # ---------------------------------------------------------------
-    # Compute number of correct documents.
-    # For each sequence in the batch, we identify each document using the location of its eq and eos tokens.
-    # For each eq token, we take the first eos token that follows it.
-    # We then compare the predicted tokens (argmax from model_output) with the label tokens for the answer region.
-    # A document is correct only if all tokens in the answer region match.
-    # (If there is no answer token (i.e. empty region), we count it as correct.)
-    # ---------------------------------------------------------------
-    preds = torch.argmax(model_output, dim=-1)  # shape [B, L]
-    correct_docs = 0
-    for b in range(B):
-        # Find positions of eq and eos tokens in this sequence.
-        eq_indices = (labels[b] == eq_token_id).nonzero(as_tuple=False).flatten()
-        eos_indices = (labels[b] == eos_token_id).nonzero(as_tuple=False).flatten()
+    # For each valid token, get whether it was predicted correctly.
+    valid_correct = token_correct[valid_mask].to(torch.int64)  # convert booleans to 0/1
 
-        # If there are no eq tokens or eos tokens, skip this sequence.
-        if eq_indices.numel() == 0 or eos_indices.numel() == 0:
-            continue
+    # Now, we want to group these tokens by group_ids and check per group if all tokens are correct.
+    # We use torch.unique to get unique document ids and group information.
+    unique_groups, group_inverse, group_counts = torch.unique(group_ids, return_inverse=True, return_counts=True)
+    # Initialize a tensor to accumulate correct counts for each document.
+    group_correct_sum = torch.zeros_like(group_counts, device=device, dtype=torch.int64)
+    # Scatter-add the correctness values into their respective groups.
+    group_correct_sum = group_correct_sum.scatter_add(0, group_inverse, valid_correct)
 
-        # For each eq token (document start), find the first eos token that comes after it.
-        # (Assumes documents occur in order and each document has exactly one eq and one eos.)
-        for eq_idx in eq_indices.tolist():
-            # Find the first eos index greater than eq_idx.
-            eos_after = eos_indices[eos_indices > eq_idx]
-            if eos_after.numel() == 0:
-                continue  # no eos token after this eq token; skip
-            eos_idx = int(eos_after[0].item())
+    # A document is correct if the number of correct tokens equals the total token count in that document.
+    # (Note: Documents with zero answer tokens do not appear in unique_groups and hence are not counted.)
+    correct_docs = (group_correct_sum == group_counts)
+    num_correct_docs = correct_docs.sum()  # Total count of correct documents
 
-            # The answer region is the tokens between eq and eos (excluding both).
-            start = eq_idx + 1
-            end = eos_idx  # end index is not included
-
-            # If the answer region is empty, we count it as correct.
-            if end - start <= 0:
-                correct_docs += 1
-            else:
-                pred_segment = preds[b, start:end]
-                label_segment = labels[b, start:end]
-                if torch.equal(pred_segment, label_segment):
-                    correct_docs += 1
-
-    # Return correct_docs as a tensor on the same device.
-    correct_docs_tensor = torch.tensor(correct_docs, device=device, dtype=torch.long)
-
-    return loss, correct_docs_tensor
+    return loss, num_correct_docs
