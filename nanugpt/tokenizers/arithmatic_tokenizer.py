@@ -26,6 +26,11 @@ class ArithmaticTokenizer(TokenizerBase):
         self.token_to_idx = {token: i for i, token in self.idx_to_token.items()}
         self.eos_token_id = self.token_to_idx[self.eos_str]
 
+        # below are used in config
+        assert self.eos_token_id == 12, "The eos token should be at index 12"
+        assert self.token_to_idx['='] == 13, "The eq token should be at index 13"
+        assert  self.token_to_idx[self.pad_str] == 11, "The pad token should be at index 11"
+
         # Cache lookup tables to avoid recomputation in tensor2strings and strings2tensor
         self._lookup = [self.idx_to_token[i] for i in range(self.vocab_size)]
         self._lut = np.full(256, 255, dtype=np.uint16)

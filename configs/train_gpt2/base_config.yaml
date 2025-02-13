@@ -46,7 +46,8 @@ tokenizer:
     encoding_name: 'gpt2'
 
 loss:
-  module: 'nanugpt.losses.autoregressive_loss.get_loss'
+  module: 'nanugpt.losses.autoregressive_loss.get_loss_factory'
+  module_kwargs: {}
 
 data:
   module: 'nanugpt.data.tokenized_data.get_data'

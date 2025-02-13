@@ -95,7 +95,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     get_data = utils.import_fn(data_config['module'])
     get_optim = utils.import_fn(optimizer_config['module'])
     get_scheduler = utils.import_fn(scheduler_config['module'])
-    get_loss:common.GetLossType = utils.import_fn(loss_config['module'])
+    get_loss_factory = utils.import_fn(loss_config['module'])
     get_scaler = utils.import_fn(scaler_config['module'])
 
     # setup system, device, logger, torch
@@ -137,6 +137,9 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                     'data/val_dataloader_len': len(val_loader),
                     'data/test_dataloader_len': len(test_loader) if test_loader is not None else 0
                     })
+
+    # get loss function
+    get_loss:common.GetLossType = get_loss_factory(**loss_config['module_kwargs'])
 
     # create tokenizer
     tokenizer, tokenizer_config = common.create_tokenizer(config, logger)

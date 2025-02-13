@@ -1,4 +1,4 @@
-from typing import Tuple, Mapping
+from typing import Tuple, Mapping, Callable
 
 import torch
 
@@ -17,3 +17,6 @@ def get_loss(model_output, labels)->Tuple[torch.Tensor, torch.Tensor]:
     correct = (torch.argmax(last_logits, dim=-1) == labels).sum()
 
     return loss, correct
+
+def get_loss_factory()->Callable[[torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
+    return get_loss

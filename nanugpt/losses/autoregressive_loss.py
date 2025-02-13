@@ -1,4 +1,4 @@
-from typing import Tuple, Mapping
+from typing import Tuple, Mapping, Callable
 
 import torch
 
@@ -20,3 +20,5 @@ def get_loss(model_output, labels)->Tuple[torch.Tensor, torch.Tensor]:
 
     return loss, correct # total num of predictions
 
+def get_loss_factory()->Callable[[torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
+    return get_loss

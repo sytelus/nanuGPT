@@ -5,9 +5,6 @@ __include__: ['base_config.yaml']
 model:
   module: 'nanugpt.models.tiny_transformer.get_model'
 
-loss:
-  module: 'nanugpt.losses.grokking_loss.get_loss'
-
 tokenizer:
   module: 'nanugpt.tokenizers.grokking_tokenizer.get_tokenizer'
 

@@ -1,13 +1,14 @@
 import torch
 import torch.nn.functional as F
 from torch import Tensor
-from typing import Tuple
+from typing import Tuple, Callable
+
+_eq_token_id: int = -1
+_pad_token_id: int = -1
+_eos_token_id: int = -1
 
 def get_loss(model_output: Tensor,
              labels: Tensor,
-             eq_token_id: int,
-             pad_token_id: int,
-             eos_token_id: int
             ) -> Tuple[Tensor, Tensor]:
     r"""
     Compute cross entropy loss (only on answer tokens) and count how many documents
@@ -21,13 +22,15 @@ def get_loss(model_output: Tensor,
 
     Padding tokens (pad_token_id) are ignored.
     """
+    global _eq_token_id, _pad_token_id, _eos_token_id
+
     # Ensure we work on the same device as the inputs.
     device = model_output.device
 
     # Create boolean masks for the special tokens.
-    eq_mask  = (labels == eq_token_id)
-    eos_mask = (labels == eos_token_id)
-    pad_mask = (labels == pad_token_id)
+    eq_mask  = (labels == _eq_token_id)
+    eos_mask = (labels == _eos_token_id)
+    pad_mask = (labels == _pad_token_id)
 
     # Compute cumulative sums along the context (sequence) dimension.
     # These will help us decide if a token is in an answer segment.
@@ -99,3 +102,13 @@ def get_loss(model_output: Tensor,
     num_correct_docs = correct_docs.sum()  # Total count of correct documents
 
     return loss, num_correct_docs
+
+def get_loss_factory(
+             eq_token_id: int,
+             pad_token_id: int,
+             eos_token_id: int,)->Callable[[Tensor, Tensor], Tuple[Tensor, Tensor]]:
+    global _eq_token_id, _pad_token_id, _eos_token_id
+
+    _eq_token_id, _pad_token_id, _eos_token_id = eq_token_id, pad_token_id, eos_token_id
+
+    return get_loss

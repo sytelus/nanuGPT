@@ -40,7 +40,8 @@ scaler:
   module_kwargs: {}
 
 loss:
-  module: 'nanugpt.losses.grokking_loss.get_loss'
+  module: 'nanugpt.losses.grokking_loss.get_loss_factory'
+  module_kwargs: {}
 
 data:
   module: 'nanugpt.data.grokking_data.get_data'
