@@ -54,8 +54,9 @@ loss:
 data:
   module: 'nanugpt.data.arithmatic_data.get_data'
   module_kwargs:
-    training_fraction: 0.5
-    val_fraction: null # if null, use 1 - training_fraction, test fraction is 0
+    min_digits: 1
+    max_digits: 5
+    max_samples: 10000
     device_batch_size: '_copy: /training/device_batch_size'
     eval_batch_size: 64 # 2^15=32768
     data_loader_seed: 8
