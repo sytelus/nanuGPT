@@ -57,13 +57,11 @@ def get_loss(model_output: Tensor, labels: Tensor, eq_token_id: int, pad_token_i
     # We index model_output and labels with the mask.
     # If no token qualifies (mask is empty) we return a loss of 0.
     # ---------------------------------------------------------------
-    if valid_loss_mask.sum() > 0:
-        # model_output has shape [B, L, V] and valid_loss_mask is [B, L] --> result is [N, V]
-        logits = model_output[valid_loss_mask]
-        target = labels[valid_loss_mask]
-        loss = F.cross_entropy(logits, target, reduction='mean')
-    else:
-        loss = torch.tensor(0.0, device=device)
+    assert valid_loss_mask.sum() > 0, "No valid tokens found for loss computation."
+    # model_output has shape [B, L, V] and valid_loss_mask is [B, L] --> result is [N, V]
+    logits = model_output[valid_loss_mask]
+    target = labels[valid_loss_mask]
+    loss = F.cross_entropy(logits, target, reduction='mean')
 
     # ---------------------------------------------------------------
     # Compute number of correct documents.
