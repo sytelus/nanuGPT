@@ -52,14 +52,11 @@ def get_loss(model_output: Tensor,
     labels_flat = labels.view(-1)                           # shape: [batch*seq_len]
     valid_mask_flat = valid_mask.view(-1)                   # shape: [batch*seq_len]
 
-    if valid_mask_flat.sum() > 0:
-        # Compute the token-level cross entropy loss only for positions in valid_mask.
-        loss = F.cross_entropy(logits_flat[valid_mask_flat],
-                               labels_flat[valid_mask_flat],
-                               reduction='mean')
-    else:
-        # If there are no valid tokens (edge-case), return a loss of zero.
-        loss = torch.tensor(0.0, device=device)
+    assert valid_mask_flat.sum() > 0, "No valid tokens found in the batch."
+    # Compute the token-level cross entropy loss only for positions in valid_mask.
+    loss = F.cross_entropy(logits_flat[valid_mask_flat],
+                            labels_flat[valid_mask_flat],
+                            reduction='mean')
 
     # ---------------------------
     # Compute the number of "correct" documents.
