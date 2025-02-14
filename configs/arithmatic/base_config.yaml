@@ -44,12 +44,16 @@ tokenizer:
   module: 'nanugpt.tokenizers.arithmatic_tokenizer.get_tokenizer_factory'
   module_kwargs: {}
 
+# loss:
+#   module: 'nanugpt.losses.arithmatic_loss.get_loss_factory'
+#   module_kwargs:
+#     eq_token_id: 13
+#     pad_token_id: 11
+#     eos_token_id: 12
+
 loss:
-  module: 'nanugpt.losses.arithmatic_loss.get_loss_factory'
-  module_kwargs:
-    eq_token_id: 13
-    pad_token_id: 11
-    eos_token_id: 12
+  module: 'nanugpt.losses.autoregressive_loss.get_loss_factory'
+  module_kwargs: {}
 
 data:
   module: 'nanugpt.data.arithmatic_data.get_data'
