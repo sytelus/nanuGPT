@@ -59,8 +59,8 @@ data:
   module: 'nanugpt.data.arithmatic_data.get_data'
   module_kwargs:
     min_digits: 1
-    max_digits: 5
-    max_samples: 10000
+    max_digits: 7
+    max_samples: 100000
     device_batch_size: '_copy: /training/device_batch_size'
     eval_batch_size: 64 # 2^15=32768
     data_loader_seed: 8
