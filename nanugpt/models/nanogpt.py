@@ -139,7 +139,8 @@ class CausalSelfAttention(nn.Module):
             y = att @ v # (batch_size, n_heads, seq_len, seq_len) x (batch_size, n_heads, seq_len, head_size) -> (batch_size, n_heads, seq_len, head_size)
 
         # put back the head dimension together at the last and join them to produce n_embd
-        y = y.transpose(1, 2).contiguous().view(batch_size, seq_len, n_embd) # re-assemble all head outputs side by side
+        # re-assemble all head outputs side by side
+        y = y.transpose(1, 2).contiguous().view(batch_size, seq_len, n_embd) # (batch_size, seq_len, d_model)
 
         # output projection basically does the "ensemble" of all heads into one head
         y = self.resid_dropout(self.c_proj(y))
