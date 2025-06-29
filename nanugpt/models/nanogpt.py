@@ -81,6 +81,9 @@ class CausalSelfAttention(nn.Module):
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
         if not self.flash:
             logging.warning("Using slow attention. Flash Attention requires PyTorch >= 2.0")
+            # TODO: change name from bias to tri, this is a causal mask and "bias" is confusing name here
+            # register_buffer ensures that this is not a parameter even though it is a tensor
+            # unfortunately, this will get saved in the model state dict, it might be good to handle this
             # causal mask to ensure that attention is only applied to the left in the input sequence
             self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
                                         .view(1, 1, config.block_size, config.block_size))
@@ -102,7 +105,7 @@ class CausalSelfAttention(nn.Module):
             y = torch.nn.functional.scaled_dot_product_attention(q, k, v,
                     attn_mask=None,
                     dropout_p=self.flash_attn_dropout_val if self.training else 0.0,
-                    is_causal=True)
+                    is_causal=True) # TODO: is_causal shouldn't be true for inference!
         else:
             # manual implementation of attention
 
@@ -112,13 +115,14 @@ class CausalSelfAttention(nn.Module):
             # This dot product is across all embeddings of those two sequences.
             # @ is matrix multiplication
             att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))  # (batch_size, n_heads, seq_len, seq_len)
+            # we use fixed triangular matrix and where it is 0, we set the attention to -inf so that softmax will ignore those values
             att = att.masked_fill(self.bias[:,:,:seq_len,:seq_len] == 0, float('-inf'))
 
-            # softmax on last axis (seq_len) so that values in each row sum to 1
+            # softmax on last axis (seq_len) so that values in each row sum to 1 in attention matrix.
             # The way this works is, we sum up exponents of values in each row and divide each value by that sum.
             # So, the output of softmax has same shape as input, and each row sums to 1 because we set dim=-1 which means
             # each value exponent in column gets divided by sum of exponents of all values in that column.
-            # At this point each row in attn contains float in each column indicating importance of that column for that row.
+            # At this element in each row in attn contains float indicating importance of that column for that row.
             att = F.softmax(att, dim=-1) # (batch_size, n_heads, seq_len, seq_len)
             # attn dropout will most likely turn off noisy values and therefore strenghten the signal
             att = self.attn_dropout(att)
@@ -126,15 +130,18 @@ class CausalSelfAttention(nn.Module):
             # now that each row sums upto 1, we can multiply row with column to get weighted sum of values in each column
             # The way tensor multiplication works is that you just pretend there are only last two dimentions and
             # produce same shape as normal multiplication to replace last two dimentions. Other way to think is that
-            # each batch and each head has a matrix which gets multiplied independently.
-            # Each column in v is sequence embedding for one head. We do weighted sum of that sequence for that head as per
-            # the attention.
+            # each batch and each head having its own matrix which gets multiplied independently.
+            # Each row in v is for one token so there same number of rows in v as there are tokens in the input
+            # Each column in v is for one head so there same number of columns in v as there are heads
+            # When we multiply the attention matrix with v, we are doing weighted sum of the values in v for each head.
+            # The weight for each token is sequence is the attention value for that token in that sequence.
+            # The output is one row for each token in the input sequence and one column for each head.
             y = att @ v # (batch_size, n_heads, seq_len, seq_len) x (batch_size, n_heads, seq_len, head_size) -> (batch_size, n_heads, seq_len, head_size)
 
         # put back the head dimension together at the last and join them to produce n_embd
         y = y.transpose(1, 2).contiguous().view(batch_size, seq_len, n_embd) # re-assemble all head outputs side by side
 
-        # output projection
+        # output projection basically does the "ensemble" of all heads into one head
         y = self.resid_dropout(self.c_proj(y))
 
         return y
