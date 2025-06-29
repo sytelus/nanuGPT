@@ -158,9 +158,12 @@ class MLP(nn.Module):
         self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = 1 # type: ignore
 
     def forward(self, x):
-        x = self.c_fc(x)
-        x = self.gelu(x)
-        x = self.c_proj(x)
+        # notice that each token in the sequence is processed independently
+        # basically embedding for each token gets projected by FFN weight matrix to produce 4X bigger embedding
+        # this is why FFN can be trivially parallelized across tokens in the sequence
+        x = self.c_fc(x) # (batch_size, seq_len, n_embd) -> (batch_size, seq_len, 4 * n_embd)
+        x = self.gelu(x) # (batch_size, seq_len, 4 * n_embd) -> (batch_size, seq_len, 4 * n_embd)
+        x = self.c_proj(x) # (batch_size, seq_len, 4 * n_embd) -> (batch_size, seq_len, n_embd)
         if self.dropout:
             x = self.dropout(x)
         return x
