@@ -20,6 +20,8 @@ from nanugpt import glogging as logging
 from nanugpt import lin_predictor
 from nanugpt.scalers.scaler_base import ScalerBase
 
+# TODO: set env vars OMP_NUM_THREADS=1 and TOKENIZERS_PARALLELISM=false to disable hidden parallelism that may interfere with distributed training??
+
 def estimate_loss(model:torch.nn.Module,
                   data_loader, eval_iters:Optional[int],
                   amp_ctx, torch_info:utils.TorchInfo, device)->Tuple[float, float, int, int]:
