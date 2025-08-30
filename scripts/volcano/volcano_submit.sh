@@ -100,13 +100,19 @@ mkdir -p "${VOLCANO_SCRIPT_DIR}"
 cp "${SCRIPT_DIR}/"*.sh "${VOLCANO_SCRIPT_DIR}/"
 chmod +x "${VOLCANO_SCRIPT_DIR}/"*.sh
 
-envsubst < "${SCRIPT_DIR}/volcano_template.yaml" | kubectl create -f -
+envsubst < "${SCRIPT_DIR}/volcano_template.yaml" | tee "${JOB_OUT_DIR}/volcano_rendered.yaml"
 
-for p in $(kubectl get pods -l volcano.sh/job-name=${JOB_NAME} -o name); do
-  echo "=== Logs for $p ==="
-  kubectl logs -f $p
+VCJOB_NAME=$(kubectl create -f "${JOB_OUT_DIR}/volcano_rendered.yaml")
+echo "Created VCJob: $VCJOB_NAME"
+
+# Wait until at least one pod is Ready (optional but handy)
+kubectl wait --for=condition=ready pod -l volcano.sh/job-name="$VCJOB_NAME" --timeout=10m
+
+# Tail logs from a specific container (e.g., "trainer") in all pods of this job
+for P in $(kubectl get pods -l volcano.sh/job-name="$VCJOB_NAME" -o name); do
+  echo "=== $P ==="
+  kubectl logs -f "$P" -c trainer &
 done
+wait
 
-
-echo "Job submitted."
 

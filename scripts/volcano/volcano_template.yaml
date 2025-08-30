@@ -67,62 +67,65 @@ spec:
                   containerPort: ${CONTAINER_PORT}   # pytorch MASTER_PORT; svc plugin creates DNS
               env:
                 - name: NPROC_PER_NODE
-                  value: "${GPUS_PER_NODE:-8}"             # spawn one worker per GPU on each node
+                  value: "${GPUS_PER_NODE}"             # spawn one worker per GPU on each node
                 - name: GPUS_PER_NODE
-                  value: "${GPUS_PER_NODE:-8}"
+                  value: "${GPUS_PER_NODE}"
                 - name: NODES
-                  value: "${NODES:-1}"
+                  value: "${NODES}"
                 - name: OMP_NUM_THREADS
-                  value: "${OMP_NUM_THREADS:-8}"
+                  value: "${OMP_NUM_THREADS}"
                 - name: NCCL_DEBUG
-                  value: "${NCCL_DEBUG:-WARN}"
+                  value: "${NCCL_DEBUG}"
                 - name: NCCL_IB_DISABLE
-                  value: "${NCCL_IB_DISABLE:-0}"
+                  value: "${NCCL_IB_DISABLE}"
                 - name: PYTHONUNBUFFERED
-                  value: "${PYTHONUNBUFFERED:-1}"
+                  value: "${PYTHONUNBUFFERED}"
 
                 - name: START_COMMAND
-                  value: "${START_COMMAND:-}"
+                  value: "${START_COMMAND}"
                 - name: DATA_ROOT
-                  value: "${DATA_ROOT:-}"
+                  value: "${DATA_ROOT}"
                 - name: JOB_OUT_DIR
-                  value: "${JOB_OUT_DIR:-}"
+                  value: "${JOB_OUT_DIR}"
                 - name: ENV_SETUP_SCRIPT
-                  value: "${ENV_SETUP_SCRIPT:-}"
+                  value: "${ENV_SETUP_SCRIPT}"
                 - name: INSTALL_PACKAGE
-                  value: "${INSTALL_PACKAGE:-1}"
+                  value: "${INSTALL_PACKAGE}"
                 - name: UPDATE_PYTHONPATH
-                  value: "${UPDATE_PYTHONPATH:-0}"
+                  value: "${UPDATE_PYTHONPATH}"
 
                 - name: JOB_OUT_DIR
-                  value: "${JOB_OUT_DIR:-}"
+                  value: "${JOB_OUT_DIR}"
                 - name: JOB_ENV_SETUP_SCRIPT
-                  value: "${JOB_ENV_SETUP_SCRIPT:-}"
+                  value: "${JOB_ENV_SETUP_SCRIPT}"
                 - name: TARGET_SOURCE_DIR
-                  value: "${TARGET_SOURCE_DIR:-}"
+                  value: "${TARGET_SOURCE_DIR}"
                 - name: VOLCANO_SCRIPT_DIR
-                  value: "${VOLCANO_SCRIPT_DIR:-}"
+                  value: "${VOLCANO_SCRIPT_DIR}"
 
 
               command: ["/bin/bash","-lc"]
               args:
                 - |
-                  set -eu -o pipefail # fail if any command failes, log all commands, -o xtrace
+                  set -eu -o pipefail -o xtrace # fail if any command failes, log all commands, -o xtrace
+                  nvidia-smi
+                  ls -la
+                  ls -la data/
                   bash "${VOLCANO_SCRIPT_DIR}/volcano_command.sh"
 
               resources:
                 requests: &requests
-                  nvidia.com/gpu: "${GPUS_PER_NODE:-8}"
-                  cpu: "${CPU_REQUESTS:-192}"
-                  memory: "${MEMORY_REQUESTS:-2600Gi}"
-                  rdma/rdma_shared_device_a: "${RDMA_REQUESTS:-1}"
+                  nvidia.com/gpu: "${GPUS_PER_NODE}"
+                  cpu: "${CPU_REQUESTS}"
+                  memory: "${MEMORY_REQUESTS}"
+                  rdma/rdma_shared_device_a: "${RDMA_REQUESTS}"
                 limits: *requests
 
     - name: worker
       replicas: ${WORKERS} # number of worker nodes = total nodes - 1 master node
-      policies:
-        - event: TaskCompleted
-          action: None # if workers finish first, don't consider job as complete
+  # policies removed: using action: None is invalid per Volcano validation webhook.
+  # We don't want worker TaskCompleted to trigger CompleteJob (only master does that),
+  # so we simply omit a policy for TaskCompleted here.
       template:
         metadata:
           labels:
