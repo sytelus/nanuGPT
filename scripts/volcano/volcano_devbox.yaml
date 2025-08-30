@@ -81,37 +81,12 @@ spec:
                 - name: PYTHONUNBUFFERED
                   value: "${PYTHONUNBUFFERED}"
 
-                - name: START_COMMAND
-                  value: "${START_COMMAND}"
-                - name: DATA_ROOT
-                  value: "${DATA_ROOT}"
-                - name: JOB_OUT_DIR
-                  value: "${JOB_OUT_DIR}"
-                - name: ENV_SETUP_SCRIPT
-                  value: "${ENV_SETUP_SCRIPT}"
-                - name: INSTALL_PACKAGE
-                  value: "${INSTALL_PACKAGE}"
-                - name: UPDATE_PYTHONPATH
-                  value: "${UPDATE_PYTHONPATH}"
-
-                - name: JOB_OUT_DIR
-                  value: "${JOB_OUT_DIR}"
-                - name: JOB_ENV_SETUP_SCRIPT
-                  value: "${JOB_ENV_SETUP_SCRIPT}"
-                - name: TARGET_SOURCE_DIR
-                  value: "${TARGET_SOURCE_DIR}"
-                - name: VOLCANO_SCRIPT_DIR
-                  value: "${VOLCANO_SCRIPT_DIR}"
-
-
               command: ["/bin/bash","-lc"]
               args:
                 - |
                   set -eu -o pipefail -o xtrace # fail if any command failes, log all commands, -o xtrace
                   nvidia-smi
-                  ls -la
-                  ls -la data/
-                  bash "${VOLCANO_SCRIPT_DIR}/volcano_command.sh"
+                  sleep infinity
 
               resources:
                 requests: &requests
