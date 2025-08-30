@@ -1,0 +1,138 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: ${JOB_NAME}
+  namespace: ${VOLCANO_NAMESPACE}
+spec:
+  queue: ${VOLCANO_NAMESPACE}
+  minAvailable: ${NODES} # this is number of pods in k8s, one pod=one node in volcano
+  plugins:
+    ssh: []        # passwordless SSH + /etc/volcano hostfiles
+    svc: []        # headless Services when containerPorts exist
+    env: []        # VC_* envs (host lists, etc.)
+    pytorch:    # sets MASTER_ADDR/PORT, WORLD_SIZE, RANK for DDP
+      - --master=master
+      - --worker=worker
+      - --port=${CONTAINER_PORT}
+  # policies:
+  #   - event: PodFailed
+  #     action: RestartJob
+  tasks:
+    - name: master
+      replicas: 1 # should be one for one job
+      policies:
+        - event: TaskCompleted
+          action: CompleteJob
+      template:
+        metadata:
+          labels:
+            app: ${JOB_NAME}
+            role: master
+        spec: &podspec
+          schedulerName: volcano
+          restartPolicy: Never
+          volumes:
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: ${MEMORY_SIZE_LIMIT}
+            - name: data
+              persistentVolumeClaim:
+               claimName: ${VOLCANO_DATA_PVC_NAME}
+          tolerations:
+            - key: "rdma"
+              operator: "Exists"
+              effect: "NoSchedule"
+            - key: "nvidia.com/gpu"
+              operator: "Exists"
+              effect: "NoSchedule"
+          affinity:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      app: ${JOB_NAME}
+                  topologyKey: kubernetes.io/hostname
+          containers:
+            - name: master
+              image: ${CONTAINER_IMAGE}
+              imagePullPolicy: IfNotPresent
+              volumeMounts:
+                - name: dshm
+                  mountPath: /dev/shm
+                - name: data
+                  mountPath: /data
+              ports:
+                - name: torch
+                  containerPort: ${CONTAINER_PORT}   # pytorch MASTER_PORT; svc plugin creates DNS
+              env:
+                - name: NPROC_PER_NODE
+                  value: "${GPUS_PER_NODE:-8}"             # spawn one worker per GPU on each node
+                - name: GPUS_PER_NODE
+                  value: "${GPUS_PER_NODE:-8}"
+                - name: NODES
+                  value: "${NODES:-1}"
+                - name: OMP_NUM_THREADS
+                  value: "${OMP_NUM_THREADS:-8}"
+                - name: NCCL_DEBUG
+                  value: "${NCCL_DEBUG:-WARN}"
+                - name: NCCL_IB_DISABLE
+                  value: "${NCCL_IB_DISABLE:-0}"
+                - name: PYTHONUNBUFFERED
+                  value: "${PYTHONUNBUFFERED:-1}"
+
+                - name: START_COMMAND
+                  value: "${START_COMMAND:-}"
+                - name: DATA_ROOT
+                  value: "${DATA_ROOT:-}"
+                - name: JOB_OUT_DIR
+                  value: "${JOB_OUT_DIR:-}"
+                - name: ENV_SETUP_SCRIPT
+                  value: "${ENV_SETUP_SCRIPT:-}"
+                - name: INSTALL_PACKAGE
+                  value: "${INSTALL_PACKAGE:-1}"
+                - name: UPDATE_PYTHONPATH
+                  value: "${UPDATE_PYTHONPATH:-0}"
+
+                - name: JOB_OUT_DIR
+                  value: "${JOB_OUT_DIR:-}"
+                - name: JOB_ENV_SETUP_SCRIPT
+                  value: "${JOB_ENV_SETUP_SCRIPT:-}"
+                - name: TARGET_SOURCE_DIR
+                  value: "${TARGET_SOURCE_DIR:-}"
+                - name: VOLCANO_SCRIPT_DIR
+                  value: "${VOLCANO_SCRIPT_DIR:-}"
+
+
+              command: ["/bin/bash","-lc"]
+              args:
+                - |
+                  set -eu -o pipefail # fail if any command failes, log all commands, -o xtrace
+                  bash "${VOLCANO_SCRIPT_DIR}/volcano_command.sh"
+
+              resources:
+                requests: &requests
+                  nvidia.com/gpu: "${GPUS_PER_NODE:-8}"
+                  cpu: "${CPU_REQUESTS:-192}"
+                  memory: "${MEMORY_REQUESTS:-2600Gi}"
+                  rdma/rdma_shared_device_a: "${RDMA_REQUESTS:-1}"
+                limits: *requests
+
+    - name: worker
+      replicas: ${WORKERS} # number of worker nodes = total nodes - 1 master node
+      policies:
+        - event: TaskCompleted
+          action: None # if workers finish first, don't consider job as complete
+      template:
+        metadata:
+          labels:
+            app: ${JOB_NAME}
+            role: worker
+        # Reuse the exact same pod spec (containers, resources, env, etc.)
+        spec: *podspec
+        # If you need worker-specific tweaks later, switch to:
+        # spec:
+        #   <<: *podspec
+        #   containers:
+        #     - <<: *trainer
+        #       # add/override worker-only fields here

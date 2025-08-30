@@ -15,23 +15,25 @@ SOURCE_DIR=${SOURCE_DIR:-.} # where is source directory
 export JOB_NAME=${JOB_NAME:-test_job}
 export START_COMMAND=${START_COMMAND:-"$@"}
 export DATA_ROOT=${DATA_ROOT:-} # data directory to mount in container
-export OUT_DIR=${OUT_DIR:-"${HOME}/out_dir"} # set default output directory
+export OUT_DIR=${OUT_DIR:-"${HOME}/out_dir"} # set default output directory inside which sub dir for job and run instance would be created
 
 NODES=${NODES:-1}
-MAX_GPUS_PER_NODE=${MAX_GPUS_PER_NODE:-8}
+MAX_GPUS_PER_NODE=${MAX_GPUS_PER_NODE:-8}   # max GPUs allows sharing node
 export GPUS_PER_NODE="${GPUS_PER_NODE:-${MAX_GPUS_PER_NODE}}"
 
 PARTITION=${PARTITION:-}
 RESERVATION=${RESERVATION:-}
 export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
-export ENV_SETUP_SCRIPT=${ENV_SETUP_SCRIPT:-} # script to setup environment for specific cluster
+export ENV_SETUP_SCRIPT=${ENV_SETUP_SCRIPT:-} # script to setup environment for specific cluster, this runs before any code
 
-export INSTALL_PACKAGE=${INSTALL_PACKAGE:-1} # pip install in source directory
+export INSTALL_PACKAGE=${INSTALL_PACKAGE:-1} # assume source directory is package and first do pip install -e .
 export UPDATE_PYTHONPATH=${UPDATE_PYTHONPATH:-0} # add source dir to PYTHONPATH (ignored if INSTALL_PACKAGE=1)
 RESTARTABLE=${RESTARTABLE:-1}   # is job restartable if preempted?
 
+# directory where this script is running
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 
+# create sub dir for this specific run in our dir
 export JOB_OUT_DIR="${OUT_DIR}/${JOB_NAME}/$(date +%Y-%m-%d_%H-%M-%S_%3N)" # append job info
 mkdir -p "${JOB_OUT_DIR}"
 
@@ -76,9 +78,11 @@ fi
 # All tasks in job works off of the same source directory
 # We wll also install package requirements from this directory
 export TARGET_SOURCE_DIR="${JOB_OUT_DIR}/source_dir"
+# remove existing directory
 rm -rf "${TARGET_SOURCE_DIR}"
 mkdir -p "${TARGET_SOURCE_DIR}"
 pushd "${SOURCE_DIR}"
+# if all commited changes then get latest head and copy except .git folder
 if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
     git archive --format=tar HEAD | tar -x -C "${TARGET_SOURCE_DIR}"
 else
