@@ -10,7 +10,7 @@
 ####################################################################################################
 
 
-set -eu -o pipefail # fail if any command failes, log all commands, -o xtrace
+set -eu -o pipefail -o xtrace # fail if any command failes, log all commands, -o xtrace
 
 REQUIRED_VARS=("OUT_DIR") # out_dir specified where source code will be copied and job outputs will be stored, sypically mount shared to the cluster
 SOURCE_DIR=${SOURCE_DIR:-.} # where is source directory
@@ -45,9 +45,10 @@ for var in "${REQUIRED_VARS[@]}"; do
 done
 ### ---------- End check required environment variables
 
-if kubectl get "vcjob" "{JOB_NAME}" -n "${VOLCANO_NAMESPACE}" >/dev/null 2>&1; then
+if kubectl get vcjob "${JOB_NAME}" -n "${VOLCANO_NAMESPACE}" >/dev/null 2>&1; then
   echo "Job ${JOB_NAME} already exists in ${VOLCANO_NAMESPACE}"
   exit 1
+fi
 
 # directory where this script is running
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
@@ -99,7 +100,7 @@ mkdir -p "${VOLCANO_SCRIPT_DIR}"
 cp "${SCRIPT_DIR}/"*.sh "${VOLCANO_SCRIPT_DIR}/"
 chmod +x "${VOLCANO_SCRIPT_DIR}/"*.sh
 
-envsubst < volcano_template.yaml | kubectl create -f -
+envsubst < "${SCRIPT_DIR}/volcano_template.yaml" | kubectl create -f -
 
 for p in $(kubectl get pods -l volcano.sh/job-name=${JOB_NAME} -o name); do
   echo "=== Logs for $p ==="
