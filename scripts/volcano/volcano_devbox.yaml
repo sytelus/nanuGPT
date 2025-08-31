@@ -55,7 +55,7 @@ spec:
                   topologyKey: kubernetes.io/hostname
           containers:
             - name: master
-              image: ${CONTAINER_IMAGE}
+              image: ${CONTAINER_IMAGE_PATH}
               imagePullPolicy: IfNotPresent
               volumeMounts:
                 - name: dshm
@@ -84,8 +84,8 @@ spec:
               command: ["/bin/bash","-lc"]
               args:
                 - |
-                  set -eu -o pipefail -o xtrace # fail if any command failes, log all commands, -o xtrace
-                  nvidia-smi
+                  # set -eu -o pipefail -o xtrace # fail if any command failes, log all commands, -o xtrace
+                  # nvidia-smi
                   sleep infinity
 
               resources:

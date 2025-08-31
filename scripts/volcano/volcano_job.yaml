@@ -55,7 +55,7 @@ spec:
                   topologyKey: kubernetes.io/hostname
           containers:
             - name: master
-              image: ${CONTAINER_IMAGE}
+              image: ${CONTAINER_IMAGE_PATH}
               imagePullPolicy: IfNotPresent
               volumeMounts:
                 - name: dshm

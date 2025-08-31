@@ -40,8 +40,21 @@ fi
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 
 # create a temp working directory for rendered artifacts
+# Cleanup handler
+VCJOB_FQN=""
 TMP_DIR="$(mktemp -d -t volcano_devbox.XXXXXXXXXX)"
-cleanup() { rm -rf "${TMP_DIR}"; }
+cleanup() {
+  local rc=$?
+  set +e
+  rm -rf "${TMP_DIR}";
+  if [[ -n "${VCJOB_FQN}" ]]; then
+    echo "[cleanup] Deleting ${VCJOB_FQN} ..."
+    kubectl -n "${VOLCANO_NAMESPACE}" delete "${VCJOB_FQN}" --ignore-not-found=true >/dev/null 2>&1 || true
+    # Best-effort wait for pods to vanish
+    kubectl -n "${VOLCANO_NAMESPACE}" wait --for=delete pod -l volcano.sh/job-name="${JOB_NAME}" --timeout=120s >/dev/null 2>&1 || true
+  fi
+  exit ${rc}
+}
 trap cleanup EXIT
 
 # number os workers = nodes - 1 (master node)
@@ -55,11 +68,39 @@ echo "GPUS_PER_NODE: ${GPUS_PER_NODE:-<not set>}"
 
 envsubst < "${SCRIPT_DIR}/volcano_job.yaml" | tee "${TMP_DIR}/volcano_rendered.yaml"
 
-VCJOB_NAME=$(kubectl create -f "${TMP_DIR}/volcano_rendered.yaml" -o jsonpath='{.metadata.name}{"\n"}')
-echo "Created VCJob: $VCJOB_NAME"
+VCJOB_FQN=$(kubectl create -f "${TMP_DIR}/volcano_rendered.yaml" -o name)
+echo "Created: $VCJOB_FQN"
 
-# drop into the node
-kubectl exec -it $VCJOB_NAME -- bash
+# Extract job name (vcjob/<name> -> <name>) for selectors
+VCJOB_NAME="${VCJOB_FQN#*/}"
+echo "Volcano Job name: ${VCJOB_NAME}"
+
+# Track pod creation immediately (busy cluster aware)
+echo "Waiting for loader pod to be scheduled..."
+POD_NAME=""
+DEADLINE=$((SECONDS + 600))  # 10 minutes max
+while [[ -z "${POD_NAME}" ]]; do
+  POD_POD_NAME="$(kubectl -n "${VOLCANO_NAMESPACE}" get pods -l "volcano.sh/job-name=${VCJOB_NAME}" -o name 2>/dev/null || true)"
+  POD_NAME="${POD_POD_NAME#*/}"
+  if [[ ${SECONDS} -ge ${DEADLINE} ]]; then
+    echo "Timed out waiting for pod creation for job ${JOB_NAME}" >&2
+    exit 1
+  fi
+  sleep 1
+done
+echo "Pod: ${POD_NAME}"
+
+# Wait until the pod is Ready
+echo "Waiting for pod to be Ready..."
+kubectl -n "${VOLCANO_NAMESPACE}" wait --for=condition=Ready "${POD_POD_NAME}" --timeout=10m
+
+echo
+echo "=== Loader pod initial logs ==="
+kubectl -n "${VOLCANO_NAMESPACE}" logs "${POD_NAME}" || true
+echo "=== End logs ==="
+echo
+
+set +e; kubectl -n "${VOLCANO_NAMESPACE}" exec -it "${POD_NAME}" -c master -- bash; rc=$?; set -e; echo "session exit code rc=$rc"
 
 wait
 
