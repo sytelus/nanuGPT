@@ -85,8 +85,6 @@ spec:
                   value: "${START_COMMAND}"
                 - name: DATA_ROOT
                   value: "${DATA_ROOT}"
-                - name: JOB_OUT_DIR
-                  value: "${JOB_OUT_DIR}"
                 - name: ENV_SETUP_SCRIPT
                   value: "${ENV_SETUP_SCRIPT}"
                 - name: INSTALL_PACKAGE
@@ -97,13 +95,8 @@ spec:
                   value: "${WANDB_API_KEY}"
                 - name: WANDB_HOST
                   value: "${WANDB_HOST}"
-
-                - name: JOB_ENV_SETUP_SCRIPT
-                  value: "${JOB_ENV_SETUP_SCRIPT}"
-                - name: TARGET_SOURCE_DIR
-                  value: "${TARGET_SOURCE_DIR}"
-                - name: VOLCANO_SCRIPT_DIR
-                  value: "${VOLCANO_SCRIPT_DIR}"
+                - name: JOB_OUT_DIR
+                  value: "${JOB_OUT_DIR}"
 
 
               command: ["/bin/bash","-lc"]
@@ -112,7 +105,9 @@ spec:
                   set -eu -o pipefail -o xtrace # fail if any command failes, log all commands, -o xtrace
                   nvidia-smi
                   ls -la
-                  bash "${VOLCANO_SCRIPT_DIR}/volcano_command.sh"
+                  export REMOTE_JOB_OUT_DIR="/data/${JOB_OUT_DIR}"
+                  cd ${REMOTE_JOB_OUT_DIR}
+                  bash "./volcano_scripts/volcano_command.sh"
 
               resources:
                 requests: &requests

@@ -56,17 +56,21 @@ fi
 # directory where this script is running
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 
+USER_NAME=${USER%@*}
+
 # number os workers = nodes - 1 (master node)
 export WORKERS=$(( NODES - 1 ))
 
 # create sub dir for this specific run in our dir
-export JOB_OUT_DIR="${OUT_DIR}/${JOB_NAME}/$(date +%Y-%m-%d_%H-%M-%S_%3N)"
-mkdir -p "${JOB_OUT_DIR}"
+export JOB_OUT_DIR=runs/${USER_NAME}/${JOB_NAME}/$(date +%Y-%m-%d_%H-%M-%S_%3N)
+LOCAL_JOB_OUT_DIR="${OUT_DIR}/${JOB_OUT_DIR}"
+mkdir -p "${LOCAL_JOB_OUT_DIR}"
 
 # output core variables so user can see what is being used
 echo "SOURCE_DIR: $(realpath ${SOURCE_DIR:-<not set>})"
 echo "START_COMMAND: ${START_COMMAND:-<not set>}"
 echo "JOB_OUT_DIR: ${JOB_OUT_DIR:-<not set>}"
+echo "LOCAL_JOB_OUT_DIR: ${LOCAL_JOB_OUT_DIR:-<not set>}"
 echo "DATA_ROOT: ${DATA_ROOT:-<not set>}"
 echo "CONTAINER_IMAGE_PATH: ${CONTAINER_IMAGE_PATH:-<not set>}"
 echo "ENV_SETUP_SCRIPT: ${ENV_SETUP_SCRIPT:-<not set>}"
@@ -76,13 +80,11 @@ echo "GPUS_PER_NODE: ${GPUS_PER_NODE:-<not set>}"
 # some clusters may need additional env vars in which case specify script that sets them
 if [ ! -z "${ENV_SETUP_SCRIPT}" ]; then
     # copy to job out dir so its available in the container
-    cp "${ENV_SETUP_SCRIPT}" "${JOB_OUT_DIR}/env_setup.sh"
-    # update the variable to point to the copied file
-    export JOB_ENV_SETUP_SCRIPT="${JOB_OUT_DIR}/env_setup.sh"
+    cp "${ENV_SETUP_SCRIPT}" "${LOCAL_JOB_OUT_DIR}/env_setup.sh"
 fi
 
 # We wll also install package requirements from this directory
-export TARGET_SOURCE_DIR="${JOB_OUT_DIR}/source_dir"
+TARGET_SOURCE_DIR="${LOCAL_JOB_OUT_DIR}/source_dir"
 # remove existing directory
 rm -rf "${TARGET_SOURCE_DIR}"
 mkdir -p "${TARGET_SOURCE_DIR}"
@@ -96,16 +98,19 @@ fi
 popd
 
 # copy volcano scripts to job out dir so we can use it in cluster
-export VOLCANO_SCRIPT_DIR="${JOB_OUT_DIR}/volcano_scripts"
+VOLCANO_SCRIPT_DIR="${LOCAL_JOB_OUT_DIR}/volcano_scripts"
 # copy all slurm scripts to job out dir so we can use them in cluster
 rm -rf "${VOLCANO_SCRIPT_DIR}"
 mkdir -p "${VOLCANO_SCRIPT_DIR}"
 cp "${SCRIPT_DIR}/"*.sh "${VOLCANO_SCRIPT_DIR}/"
 chmod +x "${VOLCANO_SCRIPT_DIR}/"*.sh
 
-envsubst < "${SCRIPT_DIR}/volcano_job.yaml" > "${JOB_OUT_DIR}/volcano_rendered.yaml"
+envsubst < "${SCRIPT_DIR}/volcano_job.yaml" > "${LOCAL_JOB_OUT_DIR}/volcano_rendered.yaml"
 
-VCJOB_FQN=$(kubectl create -f "${JOB_OUT_DIR}/volcano_rendered.yaml" -o name)
+# now that direcoty is ready, we need to copy this to pvc available to cluster
+bash ${SCRIPT_DIR}/copy2pvc.sh ${LOCAL_JOB_OUT_DIR} ${JOB_OUT_DIR}
+
+VCJOB_FQN=$(kubectl create -f "${LOCAL_JOB_OUT_DIR}/volcano_rendered.yaml" -o name)
 echo "Created: $VCJOB_FQN"
 
 # Extract job name (vcjob/<name> -> <name>) for selectors

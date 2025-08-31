@@ -1,9 +1,10 @@
 #! /bin/bash
 set -eu -o pipefail # fail if any command failes, log all commands, -o xtrace
 
-REQUIRED_VARS=("GPUS_PER_NODE" "CONTAINER_IMAGE_PATH" "JOB_OUT_DIR" "TARGET_SOURCE_DIR" "VOLCANO_SCRIPT_DIR" \
+# register code direcoty as python package and do the torchrun
+
+REQUIRED_VARS=("GPUS_PER_NODE" "CONTAINER_IMAGE_PATH" "REMOTE_JOB_OUT_DIR" \
                  "START_COMMAND" "INSTALL_PACKAGE" "UPDATE_PYTHONPATH")
-JOB_ENV_SETUP_SCRIPT=${JOB_ENV_SETUP_SCRIPT:-}
 
 ### ---------- Check required environment variables
 for var in "${REQUIRED_VARS[@]}"; do
@@ -11,12 +12,12 @@ for var in "${REQUIRED_VARS[@]}"; do
 done
 ### ---------- End check required environment variables
 
-# setup cluster specific environment variables, these will be inherited by the container
-if [ ! -z "${JOB_ENV_SETUP_SCRIPT}" ]; then
-    source "${JOB_ENV_SETUP_SCRIPT}"
+# if file job_env_setup.sh exist then source it
+if [ -f "${REMOTE_JOB_OUT_DIR}/job_env_setup.sh" ]; then
+    source "${REMOTE_JOB_OUT_DIR}/job_env_setup.sh"
 fi
 
-cd "${TARGET_SOURCE_DIR}"
+cd ${REMOTE_JOB_OUT_DIR}/source_dir
 
 # package installation if requested
 if [ "${INSTALL_PACKAGE}" = "1" ]; then
