@@ -13,10 +13,9 @@ set -euo pipefail
 
 ### --- Args ---
 LOCAL_PATH="${1:-}"
-SLEEP_ARG="${2:-inf}"               # "inf" = infinite sleep
 
 if [[ -z "${LOCAL_PATH}" ]]; then
-  echo "Usage: $0 <local-path> [sleep-seconds|inf]" >&2
+  echo "Usage: $0 <local-path>" >&2
   exit 1
 fi
 if [[ ! -d "${LOCAL_PATH}" ]]; then
@@ -29,17 +28,7 @@ ABS_LOCAL="$(readlink -f "${LOCAL_PATH}")"
 PVC_TARGET_BASENAME="$(basename "${ABS_LOCAL}")"
 PVC_TARGET_DIR="/mnt/pvc/${PVC_TARGET_BASENAME}"
 
-# Sleep command for the pod
-if [[ "${SLEEP_ARG}" == "inf" ]]; then
-  POD_SLEEP_CMD='while true; do sleep 3600; done'
-else
-  # Validate numeric seconds
-  if ! [[ "${SLEEP_ARG}" =~ ^[0-9]+$ ]]; then
-    echo "Invalid sleep value '${SLEEP_ARG}'. Use an integer number of seconds or 'inf'." >&2
-    exit 1
-  fi
-  POD_SLEEP_CMD="sleep ${SLEEP_ARG}"
-fi
+POD_SLEEP_CMD='while true; do sleep 3600; done'
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
 JOB_NAME="pvc-loader-${STAMP}"
@@ -49,7 +38,7 @@ echo "PVC claim:            ${VOLCANO_DATA_PVC_NAME}"
 echo "Volcano Job:          ${JOB_NAME}"
 echo "Local path:           ${ABS_LOCAL}"
 echo "PVC target directory: ${PVC_TARGET_DIR}"
-echo "Pod sleep:            ${SLEEP_ARG}"
+echo "Pod sleep:            infinite"
 echo "Resources:            GPU=${GPUS_PER_NODE} CPU=${CPU_REQUESTS} MEM=${MEMORY_REQUESTS} RDMA=${RDMA_REQUESTS}"
 echo
 
@@ -102,7 +91,7 @@ spec:
                   echo "[\$(date -u +%FT%TZ)] pvc-loader starting; PVC at /mnt/pvc"
                   mkdir -p ${PVC_TARGET_DIR}
                   echo "[\$(date -u +%FT%TZ)] target dir ready: ${PVC_TARGET_DIR}"
-                  echo "[\$(date -u +%FT%TZ)] going to sleep (${SLEEP_ARG}) so you can upload"
+                  echo "[\$(date -u +%FT%TZ)] going to sleep (infinite) so you can upload"
                   ${POD_SLEEP_CMD}
               volumeMounts:
                 - name: data
