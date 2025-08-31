@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+
+
+# Filename: copy2pvc.sh
+# USAGE: copy2pvc /path/on/jumpbox [remote/path/in/pvc]
+
 set -euo pipefail
 
 ### --- Config via environment ---
@@ -15,6 +20,8 @@ set -euo pipefail
 
 ### --- Args ---
 LOCAL_PATH="${1:-}"
+ABS_LOCAL="$(readlink -f "${LOCAL_PATH}")"
+REMOTE_PATH="${2:-$(basename "${ABS_LOCAL}")}" # shoudl be of the form "abc/xyz/pqr"
 
 if [[ -z "${LOCAL_PATH}" ]]; then
   echo "Usage: $0 <local-path>" >&2
@@ -27,10 +34,10 @@ if [[ ! -d "${LOCAL_PATH}" ]]; then
 fi
 
 # Compute target dir inside PVC
-ABS_LOCAL="$(readlink -f "${LOCAL_PATH}")"
+
 PVC_TARGET_BASENAME="$(basename "${ABS_LOCAL}")"
 PVC_MOUNT="/mnt/pvc"
-PVC_TARGET_DIR="${PVC_MOUNT}/${PVC_TARGET_BASENAME}"
+PVC_TARGET_DIR="${PVC_MOUNT}/${REMOTE_PATH}"
 
 JOB_NAME="pvc-loader"
 

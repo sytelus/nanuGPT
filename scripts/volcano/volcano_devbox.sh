@@ -39,6 +39,11 @@ fi
 # directory where this script is running
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 
+# create a temp working directory for rendered artifacts
+TMP_DIR="$(mktemp -d -t volcano_devbox.XXXXXXXXXX)"
+cleanup() { rm -rf "${TMP_DIR}"; }
+trap cleanup EXIT
+
 # number os workers = nodes - 1 (master node)
 export WORKERS=$(( NODES - 1 ))
 
@@ -48,14 +53,13 @@ echo "ENV_SETUP_SCRIPT: ${ENV_SETUP_SCRIPT:-<not set>}"
 echo "NODES: ${NODES:-<not set>}"
 echo "GPUS_PER_NODE: ${GPUS_PER_NODE:-<not set>}"
 
-envsubst < "${SCRIPT_DIR}/volcano_job.yaml" | tee "${JOB_OUT_DIR}/volcano_rendered.yaml"
+envsubst < "${SCRIPT_DIR}/volcano_job.yaml" | tee "${TMP_DIR}/volcano_rendered.yaml"
 
-VCJOB_NAME=$(kubectl create -f "${JOB_OUT_DIR}/volcano_rendered.yaml" -o jsonpath='{.metadata.name}{"\n"}')
+VCJOB_NAME=$(kubectl create -f "${TMP_DIR}/volcano_rendered.yaml" -o jsonpath='{.metadata.name}{"\n"}')
 echo "Created VCJob: $VCJOB_NAME"
 
 # drop into the node
 kubectl exec -it $VCJOB_NAME -- bash
 
 wait
-
 
