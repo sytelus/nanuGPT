@@ -10,7 +10,7 @@
 ####################################################################################################
 
 
-set -eu -o pipefail -o xtrace # fail if any command failes, log all commands, -o xtrace
+set -eu -o pipefail # -o xtrace # fail if any command failes, log all commands, -o xtrace
 
 export JOB_NAME=${JOB_NAME:-devbox}
 export NODES=${NODES:-1}
@@ -66,7 +66,7 @@ echo "ENV_SETUP_SCRIPT: ${ENV_SETUP_SCRIPT:-<not set>}"
 echo "NODES: ${NODES:-<not set>}"
 echo "GPUS_PER_NODE: ${GPUS_PER_NODE:-<not set>}"
 
-envsubst < "${SCRIPT_DIR}/volcano_job.yaml" | tee "${TMP_DIR}/volcano_rendered.yaml"
+envsubst < "${SCRIPT_DIR}/volcano_devbox.yaml" | tee "${TMP_DIR}/volcano_rendered.yaml"
 
 VCJOB_FQN=$(kubectl create -f "${TMP_DIR}/volcano_rendered.yaml" -o name)
 echo "Created: $VCJOB_FQN"

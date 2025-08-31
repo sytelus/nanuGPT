@@ -10,7 +10,7 @@
 ####################################################################################################
 
 
-set -eu -o pipefail -o xtrace # fail if any command failes, log all commands, -o xtrace
+set -eu -o pipefail # -o xtrace # fail if any command failes, log all commands, -o xtrace
 
 REQUIRED_VARS=("OUT_DIR") # out_dir specified where source code will be copied and job outputs will be stored, sypically mount shared to the cluster
 SOURCE_DIR=${SOURCE_DIR:-.} # where is source directory
@@ -102,11 +102,31 @@ chmod +x "${VOLCANO_SCRIPT_DIR}/"*.sh
 
 envsubst < "${SCRIPT_DIR}/volcano_job.yaml" | tee "${JOB_OUT_DIR}/volcano_rendered.yaml"
 
-VCJOB_NAME=$(kubectl create -f "${JOB_OUT_DIR}/volcano_rendered.yaml" -o jsonpath='{.metadata.name}{"\n"}')
-echo "Created VCJob: $VCJOB_NAME"
+VCJOB_FQN=$(kubectl create -f "${JOB_OUT_DIR}/volcano_rendered.yaml" -o name)
+echo "Created: $VCJOB_FQN"
 
-# Wait until at least one pod is Ready (optional but handy)
-kubectl wait --for=condition=ready pod -l volcano.sh/job-name="$VCJOB_NAME" --timeout=10m
+# Extract job name (vcjob/<name> -> <name>) for selectors
+VCJOB_NAME="${VCJOB_FQN#*/}"
+echo "Volcano Job name: ${VCJOB_NAME}"
+
+# Track pod creation immediately (busy cluster aware)
+echo "Waiting for loader pod to be scheduled..."
+POD_NAME=""
+DEADLINE=$((SECONDS + 600))  # 10 minutes max
+while [[ -z "${POD_NAME}" ]]; do
+  POD_POD_NAME="$(kubectl -n "${VOLCANO_NAMESPACE}" get pods -l "volcano.sh/job-name=${VCJOB_NAME}" -o name 2>/dev/null || true)"
+  POD_NAME="${POD_POD_NAME#*/}"
+  if [[ ${SECONDS} -ge ${DEADLINE} ]]; then
+    echo "Timed out waiting for pod creation for job ${JOB_NAME}" >&2
+    exit 1
+  fi
+  sleep 1
+done
+echo "Pod: ${POD_NAME}"
+
+# Wait until the pod is Ready
+echo "Waiting for pod to be Ready..."
+kubectl -n "${VOLCANO_NAMESPACE}" wait --for=condition=Ready "${POD_POD_NAME}" --timeout=10m
 
 # Tail logs from a specific container (e.g., "trainer") in all pods of this job
 for P in $(kubectl get pods -l volcano.sh/job-name="$VCJOB_NAME" -o name); do
