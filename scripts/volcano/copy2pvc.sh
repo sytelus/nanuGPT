@@ -9,7 +9,9 @@ set -euo pipefail
 : "${GPUS_PER_NODE:=8}"
 : "${CPU_REQUESTS:=192}"
 : "${MEMORY_REQUESTS:=2600Gi}"
-: "${RDMA_REQUESTS:=1}"
+: "${RDMA_REQUESTS:=0}"
+: "${MEMORY_SIZE_LIMIT:=100Gi}"
+: "${CONTAINER_IMAGE:=nvcr.io/nvidia/pytorch:25.08-py3}"
 
 ### --- Args ---
 LOCAL_PATH="${1:-}"
@@ -27,12 +29,10 @@ fi
 # Compute target dir inside PVC
 ABS_LOCAL="$(readlink -f "${LOCAL_PATH}")"
 PVC_TARGET_BASENAME="$(basename "${ABS_LOCAL}")"
-PVC_TARGET_DIR="/mnt/pvc/${PVC_TARGET_BASENAME}"
+PVC_MOUNT="/mnt/pvc"
+PVC_TARGET_DIR="${PVC_MOUNT}/${PVC_TARGET_BASENAME}"
 
-POD_SLEEP_CMD='while true; do sleep 3600; done'
-
-STAMP="$(date +%Y%m%d-%H%M%S)"
-JOB_NAME="pvc-loader-${STAMP}"
+JOB_NAME="pvc-loader"
 
 echo "Namespace:            ${VOLCANO_NAMESPACE}"
 echo "PVC claim:            ${VOLCANO_DATA_PVC_NAME}"
@@ -65,38 +65,66 @@ kubectl create -f - -n "${VOLCANO_NAMESPACE}" -o name <<YAML
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: ${JOB_NAME}
+  generateName: ${JOB_NAME}
+  namespace: ${VOLCANO_NAMESPACE}
 spec:
-  schedulerName: volcano
+  queue: ${VOLCANO_NAMESPACE}
   minAvailable: 1
+  plugins:
+    ssh: []        # passwordless SSH + /etc/volcano hostfiles
+    svc: []        # headless Services when containerPorts exist
+    env: []        # VC_* envs (host lists, etc.)
   tasks:
     - name: loader
       replicas: 1
       template:
         metadata:
           labels:
-            app: pvc-loader
+            app: ${JOB_NAME}
+            role: master
         spec:
+          schedulerName: volcano
           restartPolicy: Never
           volumes:
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: ${MEMORY_SIZE_LIMIT}
             - name: data
               persistentVolumeClaim:
                 claimName: ${VOLCANO_DATA_PVC_NAME}
+          tolerations:
+            - key: "rdma"
+              operator: "Exists"
+              effect: "NoSchedule"
+            - key: "nvidia.com/gpu"
+              operator: "Exists"
+              effect: "NoSchedule"
+          affinity:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      app: ${JOB_NAME}
+                  topologyKey: kubernetes.io/hostname
           containers:
             - name: loader
-              image: busybox:1.36
+              image: ${CONTAINER_IMAGE}
+              imagePullPolicy: IfNotPresent
               command: ["/bin/sh","-lc"]
               args:
                 - |
-                  set -euo pipefail
-                  echo "[\$(date -u +%FT%TZ)] pvc-loader starting; PVC at /mnt/pvc"
+                  set -eu -o pipefail -o xtrace # fail if any command failes, log all commands, -o xtrace
+                  echo "[\$(date -u +%FT%TZ)] ${JOB_NAME} starting; PVC at ${PVC_MOUNT}"
                   mkdir -p ${PVC_TARGET_DIR}
-                  echo "[\$(date -u +%FT%TZ)] target dir ready: ${PVC_TARGET_DIR}"
+                  echo "[\$(date -u +%FT%TZ)] target dir ready: ${PVC_MOUNT}/${PVC_TARGET_DIR}"
                   echo "[\$(date -u +%FT%TZ)] going to sleep (infinite) so you can upload"
-                  ${POD_SLEEP_CMD}
+                  sleep infinity
               volumeMounts:
+                - name: dshm
+                  mountPath: /dev/shm
                 - name: data
-                  mountPath: /mnt/pvc
+                  mountPath: ${PVC_MOUNT}
               resources:
                 requests: &requests
                   nvidia.com/gpu: "${GPUS_PER_NODE}"
@@ -110,13 +138,15 @@ echo "Created: ${VCJOB_FQN}"
 
 # Extract job name (vcjob/<name> -> <name>) for selectors
 VCJOB_NAME="${VCJOB_FQN#*/}"
+echo "Volcano Job name: ${VCJOB_NAME}"
 
 # Track pod creation immediately (busy cluster aware)
 echo "Waiting for loader pod to be scheduled..."
 POD_NAME=""
 DEADLINE=$((SECONDS + 600))  # 10 minutes max
 while [[ -z "${POD_NAME}" ]]; do
-  POD_NAME="$(kubectl -n "${VOLCANO_NAMESPACE}" get pods -l volcano.sh/job-name="${JOB_NAME}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+  POD_POD_NAME="$(kubectl -n "${VOLCANO_NAMESPACE}" get pods -l "volcano.sh/job-name=${VCJOB_NAME}" -o name 2>/dev/null || true)"
+  POD_NAME="${POD_POD_NAME#*/}"
   if [[ ${SECONDS} -ge ${DEADLINE} ]]; then
     echo "Timed out waiting for pod creation for job ${JOB_NAME}" >&2
     exit 1
@@ -127,7 +157,7 @@ echo "Pod: ${POD_NAME}"
 
 # Wait until the pod is Ready
 echo "Waiting for pod to be Ready..."
-kubectl -n "${VOLCANO_NAMESPACE}" wait --for=condition=Ready "pod/${POD_NAME}" --timeout=10m
+kubectl -n "${VOLCANO_NAMESPACE}" wait --for=condition=Ready "${POD_POD_NAME}" --timeout=10m
 
 echo
 echo "=== Loader pod initial logs ==="

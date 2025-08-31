@@ -108,7 +108,6 @@ spec:
                   set -eu -o pipefail -o xtrace # fail if any command failes, log all commands, -o xtrace
                   nvidia-smi
                   ls -la
-                  ls -la data/
                   bash "${VOLCANO_SCRIPT_DIR}/volcano_command.sh"
 
               resources:
