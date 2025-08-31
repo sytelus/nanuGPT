@@ -3,12 +3,12 @@ set -eu -o pipefail # fail if any command failes, log all commands, -o xtrace
 
 # register code direcoty as python package and do the torchrun
 
-REQUIRED_VARS=("GPUS_PER_NODE" "CONTAINER_IMAGE_PATH" "REMOTE_JOB_OUT_DIR" \
+REQUIRED_VARS=("GPUS_PER_NODE" "REMOTE_JOB_OUT_DIR" \
                  "START_COMMAND" "INSTALL_PACKAGE" "UPDATE_PYTHONPATH")
 
 ### ---------- Check required environment variables
 for var in "${REQUIRED_VARS[@]}"; do
-    [ -z "${!var}" ] && { echo "Error: Required environment variable '$var' is not set." >&2; exit 1; }
+    if [[ -z "${!var:-}" ]]; then echo "Error: Required environment variable '$var' is not set." >&2; exit 1; fi
 done
 ### ---------- End check required environment variables
 

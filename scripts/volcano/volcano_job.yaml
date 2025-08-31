@@ -106,7 +106,7 @@ spec:
                   nvidia-smi
                   ls -la
                   export REMOTE_JOB_OUT_DIR="/data/${JOB_OUT_DIR}"
-                  cd ${REMOTE_JOB_OUT_DIR}
+                  cd ${REMOTE_JOB_OUT_DIR:-} # :- is used to prevent envsubst avoid replacing this variable
                   bash "./volcano_scripts/volcano_command.sh"
 
               resources:
