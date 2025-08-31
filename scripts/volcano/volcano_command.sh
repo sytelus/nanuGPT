@@ -1,9 +1,10 @@
 #! /bin/bash
-set -eu -o pipefail # fail if any command failes, log all commands, -o xtrace
+set -eu -o pipefail -o xtrace # fail if any command failes, log all commands, -o xtrace
 
 # register code direcoty as python package and do the torchrun
 
-REQUIRED_VARS=("GPUS_PER_NODE" "REMOTE_JOB_OUT_DIR" \
+REQUIRED_VARS=("GPUS_PER_NODE" "REMOTE_JOB_OUT_DIR" "NPROC_PER_NODE" \
+                "NODES" "RANK" "MASTER_ADDR" "MASTER_PORT" \
                  "START_COMMAND" "INSTALL_PACKAGE" "UPDATE_PYTHONPATH")
 
 ### ---------- Check required environment variables
@@ -44,5 +45,6 @@ else
 fi
 
 # build the torchrun command
-TORCH_RUN_ARGS="--nproc_per_node=${NPROC_PER_NODE} --nnodes=${NNODES} --node_rank=${NODE_RANK} --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT}
+# RANK variable is set by Pytorch plugin and its actually one per node (i.e. node index), as opposed to global rank of worker which torchrun will reset to
+TORCH_RUN_ARGS="--nproc_per_node=${NPROC_PER_NODE} --nnodes=${NODES} --node_rank=${RANK} --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT}"
 eval "OUT_DIR=\"${JOB_OUT_DIR}\" torchrun ${TORCH_RUN_ARGS} ${START_COMMAND}"

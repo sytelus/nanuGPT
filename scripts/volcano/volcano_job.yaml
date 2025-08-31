@@ -105,8 +105,9 @@ spec:
                   set -eu -o pipefail -o xtrace # fail if any command failes, log all commands, -o xtrace
                   nvidia-smi
                   ls -la
+
                   export REMOTE_JOB_OUT_DIR="/data/${JOB_OUT_DIR}"
-                  cd ${REMOTE_JOB_OUT_DIR:-} # :- is used to prevent envsubst avoid replacing this variable
+                  cd ${REMOTE_JOB_OUT_DIR:-}  # :- is used to prevent envsubst avoid replacing this variable
                   bash "./volcano_scripts/volcano_command.sh"
 
               resources:
