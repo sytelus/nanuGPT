@@ -20,6 +20,8 @@ export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"nvcr.io/nvidia/pytorch:25.0
 export VOLCANO_NAMESPACE=${VOLCANO_NAMESPACE:-} # namespace in volcano cluster
 export VOLCANO_DATA_PVC_NAME=${VOLCANO_DATA_PVC_NAME:-} # data PVC claim in volcano cluster
 export CONTAINER_PORT=${CONTAINER_PORT:-23456} # pytorch MASTER_PORT
+export WANDB_API_KEY=${WANDB_API_KEY:-}
+export WANDB_HOST=${WANDB_HOST:-}
 
 export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
 export NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-0}

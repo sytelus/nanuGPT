@@ -80,6 +80,10 @@ spec:
                   value: "${NCCL_IB_DISABLE}"
                 - name: PYTHONUNBUFFERED
                   value: "${PYTHONUNBUFFERED}"
+                - name: WANDB_API_KEY
+                  value: "${WANDB_API_KEY}"
+                - name: WANDB_HOST
+                  value: "${WANDB_HOST}"
 
               command: ["/bin/bash","-lc"]
               args:

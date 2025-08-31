@@ -93,6 +93,10 @@ spec:
                   value: "${INSTALL_PACKAGE}"
                 - name: UPDATE_PYTHONPATH
                   value: "${UPDATE_PYTHONPATH}"
+                - name: WANDB_API_KEY
+                  value: "${WANDB_API_KEY}"
+                - name: WANDB_HOST
+                  value: "${WANDB_HOST}"
 
                 - name: JOB_ENV_SETUP_SCRIPT
                   value: "${JOB_ENV_SETUP_SCRIPT}"

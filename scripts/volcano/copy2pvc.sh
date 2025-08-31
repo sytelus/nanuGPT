@@ -21,7 +21,9 @@ set -euo pipefail
 ### --- Args ---
 LOCAL_PATH="${1:-}"
 ABS_LOCAL="$(readlink -f "${LOCAL_PATH}")"
-REMOTE_PATH="${2:-$(basename "${ABS_LOCAL}")}" # shoudl be of the form "abc/xyz/pqr"
+TARGET_BASENAME="$(basename "${ABS_LOCAL}")"
+REMOTE_PATH="${2:-${TARGET_BASENAME}}" # should be of the form "abc/xyz/pqr" after which TARGET_BASENAME is enforced
+
 
 if [[ -z "${LOCAL_PATH}" ]]; then
   echo "Usage: $0 <local-path>" >&2
@@ -35,9 +37,8 @@ fi
 
 # Compute target dir inside PVC
 
-PVC_TARGET_BASENAME="$(basename "${ABS_LOCAL}")"
 PVC_MOUNT="/mnt/pvc"
-PVC_TARGET_DIR="${PVC_MOUNT}/${REMOTE_PATH}"
+PVC_TARGET_DIR="${PVC_MOUNT%/}/${REMOTE_PATH}"
 
 JOB_NAME="pvc-loader"
 

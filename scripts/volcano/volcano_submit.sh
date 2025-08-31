@@ -24,6 +24,8 @@ export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"nvcr.io/nvidia/pytorch:25.0
 export ENV_SETUP_SCRIPT=${ENV_SETUP_SCRIPT:-} # script to setup environment for specific cluster, this runs before any code
 export VOLCANO_NAMESPACE=${VOLCANO_NAMESPACE:-} # namespace in volcano cluster
 export VOLCANO_DATA_PVC_NAME=${VOLCANO_DATA_PVC_NAME:-} # data PVC claim in volcano cluster
+export WANDB_API_KEY=${WANDB_API_KEY:-}
+export WANDB_HOST=${WANDB_HOST:-}
 
 export INSTALL_PACKAGE=${INSTALL_PACKAGE:-1} # assume source directory is package and first do pip install -e .
 export UPDATE_PYTHONPATH=${UPDATE_PYTHONPATH:-0} # add source dir to PYTHONPATH (ignored if INSTALL_PACKAGE=1)
