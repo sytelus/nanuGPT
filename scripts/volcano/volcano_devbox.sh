@@ -12,7 +12,8 @@
 
 set -eu -o pipefail # -o xtrace # fail if any command failes, log all commands, -o xtrace
 
-export JOB_NAME=${JOB_NAME:-devbox}
+USER_NAME=${USER%@*}
+export JOB_NAME=${JOB_NAME:-${USER_NAME}-devbox}
 export NODES=${NODES:-1}
 export GPUS_PER_NODE=${GPUS_PER_NODE:-8}
 export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"nvcr.io/nvidia/pytorch:25.08-py3"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
@@ -66,7 +67,7 @@ echo "ENV_SETUP_SCRIPT: ${ENV_SETUP_SCRIPT:-<not set>}"
 echo "NODES: ${NODES:-<not set>}"
 echo "GPUS_PER_NODE: ${GPUS_PER_NODE:-<not set>}"
 
-envsubst < "${SCRIPT_DIR}/volcano_devbox.yaml" | tee "${TMP_DIR}/volcano_rendered.yaml"
+envsubst < "${SCRIPT_DIR}/volcano_devbox.yaml" > "${TMP_DIR}/volcano_rendered.yaml"
 
 VCJOB_FQN=$(kubectl create -f "${TMP_DIR}/volcano_rendered.yaml" -o name)
 echo "Created: $VCJOB_FQN"

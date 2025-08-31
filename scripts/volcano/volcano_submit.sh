@@ -14,7 +14,8 @@ set -eu -o pipefail # -o xtrace # fail if any command failes, log all commands, 
 
 REQUIRED_VARS=("OUT_DIR") # out_dir specified where source code will be copied and job outputs will be stored, sypically mount shared to the cluster
 SOURCE_DIR=${SOURCE_DIR:-.} # where is source directory
-export JOB_NAME=${JOB_NAME:-test_job}
+USER_NAME=${USER%@*}
+export JOB_NAME=${JOB_NAME:-${USER_NAME}-test-job}
 export START_COMMAND=${START_COMMAND:-"$@"} # use all args to this script as command we will execute
 export DATA_ROOT=${DATA_ROOT:-} # data directory to mount in container
 export NODES=${NODES:-1}
@@ -100,7 +101,7 @@ mkdir -p "${VOLCANO_SCRIPT_DIR}"
 cp "${SCRIPT_DIR}/"*.sh "${VOLCANO_SCRIPT_DIR}/"
 chmod +x "${VOLCANO_SCRIPT_DIR}/"*.sh
 
-envsubst < "${SCRIPT_DIR}/volcano_job.yaml" | tee "${JOB_OUT_DIR}/volcano_rendered.yaml"
+envsubst < "${SCRIPT_DIR}/volcano_job.yaml" > "${JOB_OUT_DIR}/volcano_rendered.yaml"
 
 VCJOB_FQN=$(kubectl create -f "${JOB_OUT_DIR}/volcano_rendered.yaml" -o name)
 echo "Created: $VCJOB_FQN"
