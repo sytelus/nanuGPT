@@ -124,7 +124,7 @@ spec:
                 - |
                   set -eu -o pipefail -o xtrace # fail if any command failes, log all commands, -o xtrace
                   echo "[\$(date -u +%FT%TZ)] ${JOB_NAME} starting; PVC at ${PVC_MOUNT}"
-                  mkdir -p ${PVC_TARGET_DIR}
+                  # mkdir -p ${PVC_TARGET_DIR} # no longer needed as we do this inline before copy files
                   echo "[\$(date -u +%FT%TZ)] target dir ready: ${PVC_MOUNT}/${PVC_TARGET_DIR}"
                   echo "[\$(date -u +%FT%TZ)] going to sleep (infinite) so you can upload"
                   sleep infinity
@@ -173,10 +173,10 @@ kubectl -n "${VOLCANO_NAMESPACE}" logs "${POD_NAME}" || true
 echo "=== End logs ==="
 echo
 
-# Stream copy with tar -> tar; errors cause immediate exit due to pipefail
+# Stream copy with mkdir + tar in a single exec (race-free)
 echo "Uploading '${ABS_LOCAL}' -> '${PVC_TARGET_DIR}' ..."
 tar -C "${ABS_LOCAL}" -cf - . \
-| kubectl -n "${VOLCANO_NAMESPACE}" exec -i "${POD_NAME}" -- tar -C "${PVC_TARGET_DIR}" -xpf -
+| kubectl -n "${VOLCANO_NAMESPACE}" exec -i "${POD_NAME}" -- sh -lc "mkdir -p '${PVC_TARGET_DIR}' && tar -C '${PVC_TARGET_DIR}' -xpf -"
 
 echo "Upload complete. Verifying listing:"
 kubectl -n "${VOLCANO_NAMESPACE}" exec "${POD_NAME}" -- /bin/sh -lc "ls -lah ${PVC_TARGET_DIR} | head -50" || true
