@@ -5,11 +5,11 @@ set -euo pipefail
 : "${VOLCANO_DATA_PVC_NAME:?Set VOLCANO_DATA_PVC_NAME to your PVC claim name}"
 : "${VOLCANO_NAMESPACE:?Set VOLCANO_NAMESPACE to your target namespace}"
 
-# Resource defaults
-: "${GPUS_PER_NODE:=0}"             # >0 only if GPUs are actually available
-: "${CPU_REQUESTS:=500m}"
-: "${MEMORY_REQUESTS:=2Gi}"
-: "${RDMA_REQUESTS:=0}"             # >0 only if RDMA device plugin is present
+# Resource defaults (aligned with volcano_job.yaml usage)
+: "${GPUS_PER_NODE:=8}"
+: "${CPU_REQUESTS:=192}"
+: "${MEMORY_REQUESTS:=2600Gi}"
+: "${RDMA_REQUESTS:=1}"
 
 ### --- Args ---
 LOCAL_PATH="${1:-}"
