@@ -3,7 +3,7 @@ set -euo pipefail
 
 ### --- Config via environment ---
 : "${VOLCANO_DATA_PVC_NAME:?Set VOLCANO_DATA_PVC_NAME to your PVC claim name}"
-: "${VOLCANO_NAMESPACE:=default}"
+: "${VOLCANO_NAMESPACE:?Set VOLCANO_NAMESPACE to your target namespace}"
 
 # Resource defaults
 : "${GPUS_PER_NODE:=0}"             # >0 only if GPUs are actually available
@@ -16,6 +16,7 @@ LOCAL_PATH="${1:-}"
 
 if [[ -z "${LOCAL_PATH}" ]]; then
   echo "Usage: $0 <local-path>" >&2
+  echo "Requires env: VOLCANO_DATA_PVC_NAME, VOLCANO_NAMESPACE" >&2
   exit 1
 fi
 if [[ ! -d "${LOCAL_PATH}" ]]; then
