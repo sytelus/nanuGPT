@@ -6,7 +6,7 @@ set -eu -o pipefail # fail if any command failes, log all commands, -o xtrace
 # setup below values
 
 # need to declare separarely because we are using it as parameter to submit script
-export JOB_NAME=nanugpt-openwebtext-tokens10b-keller_adamw
+export JOB_NAME=nanugpt-openwebtext-tokens10b-keller-adamw
 
 # directory where this script is running
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
