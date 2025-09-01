@@ -424,6 +424,7 @@ if __name__ == "__main__":
         x, y = train_loader.next_batch()
         # backward pass
         loss.backward()
+        # normalize the gradient for each param to have unit norm
         for p in model.parameters():
             p.grad = p.grad / (p.grad.norm() + 1e-6) # type: ignore
         # determine and set the learning rate for this iteration

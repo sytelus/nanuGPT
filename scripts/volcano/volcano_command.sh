@@ -1,5 +1,5 @@
 #! /bin/bash
-set -eu -o pipefail -o xtrace # fail if any command failes, log all commands, -o xtrace
+set -eu -o pipefail # fail if any command failes, log all commands, -o xtrace
 
 # register code direcoty as python package and do the torchrun
 
