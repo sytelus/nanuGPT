@@ -57,6 +57,7 @@ fi
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 
 USER_NAME=${USER%@*}
+JOB_NAME=${JOB_NAME:-${USER_NAME}-test-job}
 
 # number os workers = nodes - 1 (master node)
 export WORKERS=$(( NODES - 1 ))
