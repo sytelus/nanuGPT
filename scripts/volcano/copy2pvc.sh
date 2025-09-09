@@ -40,7 +40,8 @@ fi
 PVC_MOUNT="/mnt/pvc"
 PVC_TARGET_DIR="${PVC_MOUNT%/}/${REMOTE_PATH}"
 
-JOB_NAME="pvc-loader"
+USER_NAME=${USER%@*}
+JOB_NAME=${JOB_NAME:-${USER_NAME}-pvc-loader}
 
 echo "Namespace:            ${VOLCANO_NAMESPACE}"
 echo "PVC claim:            ${VOLCANO_DATA_PVC_NAME}"
@@ -78,6 +79,18 @@ metadata:
 spec:
   queue: ${VOLCANO_NAMESPACE}
   minAvailable: 1
+  rules:
+    - name: add-submitter-label
+      match:
+        any:
+          - resources:
+              kinds: ["Job"]
+              apiGroups: ["batch.volcano.sh"]
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            labels:
+              submitter: "{{ request.userInfo.username }}"
   plugins:
     ssh: []        # passwordless SSH + /etc/volcano hostfiles
     svc: []        # headless Services when containerPorts exist

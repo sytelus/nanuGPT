@@ -17,6 +17,18 @@ spec:
   # policies:
   #   - event: PodFailed
   #     action: RestartJob
+  rules:
+    - name: add-submitter-label
+      match:
+        any:
+          - resources:
+              kinds: ["Job"]
+              apiGroups: ["batch.volcano.sh"]
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            labels:
+              submitter: "{{ request.userInfo.username }}"
   tasks:
     - name: master
       replicas: 1 # should be one for one job
