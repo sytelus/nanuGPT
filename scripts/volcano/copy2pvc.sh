@@ -12,10 +12,10 @@ set -euo pipefail
 
 # Resource defaults (aligned with volcano_job.yaml usage)
 : "${GPUS_PER_NODE:=8}"
-: "${CPU_REQUESTS:=1}" # typical default 192
-: "${MEMORY_REQUESTS:=2Gi}" # typical default 2600Gi
+: "${CPU_REQUESTS:=12}" # typical default 192
+: "${MEMORY_REQUESTS:=64Gi}" # typical default 2600Gi
 : "${RDMA_REQUESTS:=0}"
-: "${MEMORY_SIZE_LIMIT:=1Gi}" # typical default 100Gi
+: "${MEMORY_SIZE_LIMIT:=10Gi}" # typical default 100Gi
 : "${CONTAINER_IMAGE:=nvcr.io/nvidia/pytorch:25.08-py3}"
 
 ### --- Args ---
