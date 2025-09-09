@@ -57,7 +57,7 @@ fi
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 
 export USER_ALIAS=${USER%@*}
-JOB_NAME=${JOB_NAME:-${USER_ALIAS}-test-job}
+JOB_NAME=${USER_ALIAS}-${JOB_NAME:-test-job}
 
 # number os workers = nodes - 1 (master node)
 export WORKERS=$(( NODES - 1 ))
@@ -109,7 +109,9 @@ chmod +x "${VOLCANO_SCRIPT_DIR}/"*.sh
 envsubst < "${SCRIPT_DIR}/volcano_job.yaml" > "${LOCAL_JOB_OUT_DIR}/volcano_rendered.yaml"
 
 # now that direcoty is ready, we need to copy this to pvc available to cluster
-bash ${SCRIPT_DIR}/copy2pvc.sh ${LOCAL_JOB_OUT_DIR} ${JOB_OUT_DIR}
+echo "Copying source and scripts from ${LOCAL_JOB_OUT_DIR} to PVC ${VOLCANO_DATA_PVC_NAME}..."
+JOB_NAME=pvc-copy-${JOB_NAME} bash ${SCRIPT_DIR}/copy2pvc.sh ${LOCAL_JOB_OUT_DIR} ${JOB_OUT_DIR}
+echo "Copy complete."
 
 VCJOB_FQN=$(kubectl create -f "${LOCAL_JOB_OUT_DIR}/volcano_rendered.yaml" -o name)
 echo "Created: $VCJOB_FQN"
@@ -121,15 +123,10 @@ echo "Volcano Job name: ${VCJOB_NAME}"
 # Track pod creation immediately (busy cluster aware)
 echo "Waiting for loader pod to be scheduled..."
 POD_NAME=""
-DEADLINE=$((SECONDS + 600))  # 10 minutes max
 while [[ -z "${POD_NAME}" ]]; do
   POD_POD_NAME="$(kubectl -n "${VOLCANO_NAMESPACE}" get pods -l "volcano.sh/job-name=${VCJOB_NAME}" -o name 2>/dev/null || true)"
   POD_NAME="${POD_POD_NAME#*/}"
-  if [[ ${SECONDS} -ge ${DEADLINE} ]]; then
-    echo "Timed out waiting for pod creation for job ${JOB_NAME}" >&2
-    exit 1
-  fi
-  sleep 1
+  sleep 10
 done
 echo "Pod: ${POD_NAME}"
 

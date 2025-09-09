@@ -13,7 +13,7 @@
 set -eu -o pipefail # -o xtrace # fail if any command failes, log all commands, -o xtrace
 
 export USER_ALIAS=${USER%@*}
-export JOB_NAME=${JOB_NAME:-${USER_ALIAS}-devbox}
+export JOB_NAME=${USER_ALIAS}-${JOB_NAME:-devbox}
 export NODES=${NODES:-1}
 export GPUS_PER_NODE=${GPUS_PER_NODE:-8}
 export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"nvcr.io/nvidia/nemo:25.07"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
@@ -81,15 +81,10 @@ echo "Volcano Job name: ${VCJOB_NAME}"
 # Track pod creation immediately (busy cluster aware)
 echo "Waiting for loader pod to be scheduled..."
 POD_NAME=""
-DEADLINE=$((SECONDS + 600))  # 10 minutes max
 while [[ -z "${POD_NAME}" ]]; do
   POD_POD_NAME="$(kubectl -n "${VOLCANO_NAMESPACE}" get pods -l "volcano.sh/job-name=${VCJOB_NAME}" -o name 2>/dev/null || true)"
   POD_NAME="${POD_POD_NAME#*/}"
-  if [[ ${SECONDS} -ge ${DEADLINE} ]]; then
-    echo "Timed out waiting for pod creation for job ${JOB_NAME}" >&2
-    exit 1
-  fi
-  sleep 1
+  sleep 10
 done
 echo "Pod: ${POD_NAME}"
 

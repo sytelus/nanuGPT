@@ -11,12 +11,12 @@ set -euo pipefail
 : "${VOLCANO_NAMESPACE:?Set VOLCANO_NAMESPACE to your target namespace}"
 
 # Resource defaults (aligned with volcano_job.yaml usage)
-: "${GPUS_PER_NODE:=8}"
-: "${CPU_REQUESTS:=12}" # typical default 192
-: "${MEMORY_REQUESTS:=64Gi}" # typical default 2600Gi
-: "${RDMA_REQUESTS:=0}"
-: "${MEMORY_SIZE_LIMIT:=10Gi}" # typical default 100Gi
-: "${CONTAINER_IMAGE:=nvcr.io/nvidia/nemo:25.07}"
+GPUS_PER_NODE=0
+CPU_REQUESTS=12 # typical default 192
+MEMORY_REQUESTS=64Gi # typical default 2600Gi
+RDMA_REQUESTS=0
+MEMORY_SIZE_LIMIT=8Gi # typical default 100Gi
+CONTAINER_IMAGE=busybox:1.36
 
 ### --- Args ---
 LOCAL_PATH="${1:-}"
@@ -41,7 +41,7 @@ PVC_MOUNT="/mnt/pvc"
 PVC_TARGET_DIR="${PVC_MOUNT%/}/${REMOTE_PATH}"
 
 export USER_ALIAS=${USER%@*}
-JOB_NAME=${JOB_NAME:-${USER_ALIAS}-pvc-loader}
+JOB_NAME=${USER_ALIAS}-${JOB_NAME:-pvc-loader}
 
 echo "Namespace:            ${VOLCANO_NAMESPACE}"
 echo "PVC claim:            ${VOLCANO_DATA_PVC_NAME}"
@@ -68,7 +68,7 @@ cleanup() {
 trap cleanup EXIT
 
 # Create Volcano Job via stdin, capture name with -o name
-echo "Creating Volcano Job..."
+echo "Creating Volcano Job for PVC copy..."
 VCJOB_FQN="$(
 kubectl create -f - -n "${VOLCANO_NAMESPACE}" -o name <<YAML
 apiVersion: batch.volcano.sh/v1alpha1
@@ -155,15 +155,10 @@ echo "Volcano Job name: ${VCJOB_NAME}"
 # Track pod creation immediately (busy cluster aware)
 echo "Waiting for loader pod to be scheduled..."
 POD_NAME=""
-DEADLINE=$((SECONDS + 600))  # 10 minutes max
 while [[ -z "${POD_NAME}" ]]; do
   POD_POD_NAME="$(kubectl -n "${VOLCANO_NAMESPACE}" get pods -l "volcano.sh/job-name=${VCJOB_NAME}" -o name 2>/dev/null || true)"
   POD_NAME="${POD_POD_NAME#*/}"
-  if [[ ${SECONDS} -ge ${DEADLINE} ]]; then
-    echo "Timed out waiting for pod creation for job ${JOB_NAME}" >&2
-    exit 1
-  fi
-  sleep 1
+  sleep 10
 done
 echo "Pod: ${POD_NAME}"
 
