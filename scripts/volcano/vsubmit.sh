@@ -14,13 +14,13 @@ set -eu -o pipefail # -o xtrace # fail if any command failes, log all commands, 
 
 REQUIRED_VARS=("OUT_DIR") # out_dir specified where source code will be copied and job outputs will be stored, sypically mount shared to the cluster
 SOURCE_DIR=${SOURCE_DIR:-.} # where is source directory
-USER_NAME=${USER%@*}
-export JOB_NAME=${JOB_NAME:-${USER_NAME}-test-job}
+USER_ALIAS=${USER%@*}
+export JOB_NAME=${JOB_NAME:-${USER_ALIAS}-ok-to-kill-test-job}
 export START_COMMAND=${START_COMMAND:-"$@"} # use all args to this script as command we will execute
 export DATA_ROOT=${DATA_ROOT:-} # data directory to mount in container
 export NODES=${NODES:-1}
 export GPUS_PER_NODE=${GPUS_PER_NODE:-8}
-export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"nvcr.io/nvidia/pytorch:25.08-py3"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
+export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"nvcr.io/nvidia/nemo:25.07"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
 export ENV_SETUP_SCRIPT=${ENV_SETUP_SCRIPT:-} # script to setup environment for specific cluster, this runs before any code
 export VOLCANO_NAMESPACE=${VOLCANO_NAMESPACE:-} # namespace in volcano cluster
 export VOLCANO_DATA_PVC_NAME=${VOLCANO_DATA_PVC_NAME:-} # data PVC claim in volcano cluster
@@ -56,14 +56,14 @@ fi
 # directory where this script is running
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 
-USER_NAME=${USER%@*}
-JOB_NAME=${JOB_NAME:-${USER_NAME}-test-job}
+export USER_ALIAS=${USER%@*}
+JOB_NAME=${JOB_NAME:-${USER_ALIAS}-test-job}
 
 # number os workers = nodes - 1 (master node)
 export WORKERS=$(( NODES - 1 ))
 
 # create sub dir for this specific run in our dir
-export JOB_OUT_DIR=runs/${USER_NAME}/${JOB_NAME}/$(date +%Y-%m-%d_%H-%M-%S_%3N)
+export JOB_OUT_DIR=runs/${USER_ALIAS}/${JOB_NAME}-$(date +%Y-%m-%d_%H-%M-%S_%3N)
 LOCAL_JOB_OUT_DIR="${OUT_DIR}/${JOB_OUT_DIR}"
 mkdir -p "${LOCAL_JOB_OUT_DIR}"
 

@@ -3,6 +3,8 @@ kind: Job
 metadata:
   generateName: ${JOB_NAME}
   namespace: ${VOLCANO_NAMESPACE}
+  labels:
+    submitter: "${USER_ALIAS}"
 spec:
   queue: ${VOLCANO_NAMESPACE}
   minAvailable: ${NODES} # this is number of pods in k8s, one pod=one node in volcano
@@ -17,18 +19,6 @@ spec:
   # policies:
   #   - event: PodFailed
   #     action: RestartJob
-  rules:
-    - name: add-submitter-label
-      match:
-        any:
-          - resources:
-              kinds: ["Job"]
-              apiGroups: ["batch.volcano.sh"]
-      mutate:
-        patchStrategicMerge:
-          metadata:
-            labels:
-              submitter: "{{ request.userInfo.username }}"
   tasks:
     - name: master
       replicas: 1 # should be one for one job

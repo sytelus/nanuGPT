@@ -16,7 +16,7 @@ set -euo pipefail
 : "${MEMORY_REQUESTS:=64Gi}" # typical default 2600Gi
 : "${RDMA_REQUESTS:=0}"
 : "${MEMORY_SIZE_LIMIT:=10Gi}" # typical default 100Gi
-: "${CONTAINER_IMAGE:=nvcr.io/nvidia/pytorch:25.08-py3}"
+: "${CONTAINER_IMAGE:=nvcr.io/nvidia/nemo:25.07}"
 
 ### --- Args ---
 LOCAL_PATH="${1:-}"
@@ -40,8 +40,8 @@ fi
 PVC_MOUNT="/mnt/pvc"
 PVC_TARGET_DIR="${PVC_MOUNT%/}/${REMOTE_PATH}"
 
-USER_NAME=${USER%@*}
-JOB_NAME=${JOB_NAME:-${USER_NAME}-pvc-loader}
+export USER_ALIAS=${USER%@*}
+JOB_NAME=${JOB_NAME:-${USER_ALIAS}-pvc-loader}
 
 echo "Namespace:            ${VOLCANO_NAMESPACE}"
 echo "PVC claim:            ${VOLCANO_DATA_PVC_NAME}"
@@ -76,21 +76,11 @@ kind: Job
 metadata:
   generateName: ${JOB_NAME}
   namespace: ${VOLCANO_NAMESPACE}
+  labels:
+    submitter: "${USER_ALIAS}"
 spec:
   queue: ${VOLCANO_NAMESPACE}
   minAvailable: 1
-  rules:
-    - name: add-submitter-label
-      match:
-        any:
-          - resources:
-              kinds: ["Job"]
-              apiGroups: ["batch.volcano.sh"]
-      mutate:
-        patchStrategicMerge:
-          metadata:
-            labels:
-              submitter: "{{ request.userInfo.username }}"
   plugins:
     ssh: []        # passwordless SSH + /etc/volcano hostfiles
     svc: []        # headless Services when containerPorts exist

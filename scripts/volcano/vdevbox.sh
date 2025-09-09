@@ -12,11 +12,11 @@
 
 set -eu -o pipefail # -o xtrace # fail if any command failes, log all commands, -o xtrace
 
-USER_NAME=${USER%@*}
-export JOB_NAME=${JOB_NAME:-${USER_NAME}-devbox}
+export USER_ALIAS=${USER%@*}
+export JOB_NAME=${JOB_NAME:-${USER_ALIAS}-devbox}
 export NODES=${NODES:-1}
 export GPUS_PER_NODE=${GPUS_PER_NODE:-8}
-export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"nvcr.io/nvidia/pytorch:25.08-py3"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
+export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"nvcr.io/nvidia/nemo:25.07"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
 export VOLCANO_NAMESPACE=${VOLCANO_NAMESPACE:-} # namespace in volcano cluster
 export VOLCANO_DATA_PVC_NAME=${VOLCANO_DATA_PVC_NAME:-} # data PVC claim in volcano cluster
 export CONTAINER_PORT=${CONTAINER_PORT:-23456} # pytorch MASTER_PORT
