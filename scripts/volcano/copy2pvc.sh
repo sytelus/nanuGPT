@@ -12,10 +12,10 @@ set -euo pipefail
 
 # Resource defaults (aligned with volcano_job.yaml usage)
 : "${GPUS_PER_NODE:=8}"
-: "${CPU_REQUESTS:=192}"
-: "${MEMORY_REQUESTS:=2600Gi}"
+: "${CPU_REQUESTS:=1}" # typical default 192
+: "${MEMORY_REQUESTS:=2Gi}" # typical default 2600Gi
 : "${RDMA_REQUESTS:=0}"
-: "${MEMORY_SIZE_LIMIT:=100Gi}"
+: "${MEMORY_SIZE_LIMIT:=1Gi}" # typical default 100Gi
 : "${CONTAINER_IMAGE:=nvcr.io/nvidia/pytorch:25.08-py3}"
 
 ### --- Args ---
@@ -114,13 +114,13 @@ spec:
             - name: data
               persistentVolumeClaim:
                 claimName: ${VOLCANO_DATA_PVC_NAME}
-          tolerations:
-            - key: "rdma"
-              operator: "Exists"
-              effect: "NoSchedule"
-            - key: "nvidia.com/gpu"
-              operator: "Exists"
-              effect: "NoSchedule"
+          # tolerations:
+          #   - key: "rdma"
+          #     operator: "Exists"
+          #     effect: "NoSchedule"
+          #   - key: "nvidia.com/gpu"
+          #     operator: "Exists"
+          #     effect: "NoSchedule"
           affinity:
             podAntiAffinity:
               requiredDuringSchedulingIgnoredDuringExecution:
@@ -133,6 +133,7 @@ spec:
               image: ${CONTAINER_IMAGE}
               imagePullPolicy: IfNotPresent
               command: ["/bin/sh","-lc"]
+              # workingDir: ${PVC_MOUNT}
               args:
                 - |
                   set -eu -o pipefail -o xtrace # fail if any command failes, log all commands, -o xtrace
@@ -148,10 +149,10 @@ spec:
                   mountPath: ${PVC_MOUNT}
               resources:
                 requests: &requests
-                  nvidia.com/gpu: "${GPUS_PER_NODE}"
+                  # nvidia.com/gpu: "${GPUS_PER_NODE}"
+                  # rdma/rdma_shared_device_a: "${RDMA_REQUESTS}"
                   cpu: "${CPU_REQUESTS}"
                   memory: "${MEMORY_REQUESTS}"
-                  rdma/rdma_shared_device_a: "${RDMA_REQUESTS}"
                 limits: *requests
 YAML
 )"
