@@ -7,7 +7,6 @@ set -eu -o pipefail -o xtrace # fail if any command failes, log all commands, -o
 
 # need to declare separarely because we are using it as parameter to submit script
 export RUN_NAME=nanugpt-openwebtext
-export JOB_NAME="perf-gpt"
 
 # directory where this script is running
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"

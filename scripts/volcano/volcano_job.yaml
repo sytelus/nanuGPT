@@ -1,7 +1,7 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  generateName: ${JOB_NAME}
+  generateName: ${JOB_NAME_FULL}
   namespace: ${VOLCANO_NAMESPACE}
   labels:
     submitter: "${USER_ALIAS}"
@@ -28,7 +28,7 @@ spec:
       template:
         metadata:
           labels:
-            app: ${JOB_NAME}
+            app: ${JOB_NAME_FULL}
             role: master
         spec: &podspec
           schedulerName: volcano
@@ -53,7 +53,7 @@ spec:
               requiredDuringSchedulingIgnoredDuringExecution:
                 - labelSelector:
                     matchLabels:
-                      app: ${JOB_NAME}
+                      app: ${JOB_NAME_FULL}
                   topologyKey: kubernetes.io/hostname
           containers:
             - name: master
@@ -127,7 +127,7 @@ spec:
       template:
         metadata:
           labels:
-            app: ${JOB_NAME}
+            app: ${JOB_NAME_FULL}
             role: worker
         # Reuse the exact same pod spec (containers, resources, env, etc.)
         spec: *podspec

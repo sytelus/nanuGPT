@@ -15,7 +15,20 @@ set -eu -o pipefail # -o xtrace # fail if any command failes, log all commands, 
 REQUIRED_VARS=("OUT_DIR") # out_dir specified where source code will be copied and job outputs will be stored, sypically mount shared to the cluster
 SOURCE_DIR=${SOURCE_DIR:-.} # where is source directory
 USER_ALIAS=${USER%@*}
-export JOB_NAME=${JOB_NAME:-${USER_ALIAS}-ok-to-kill-test-job}
+
+# Validate PROJECT_NAME
+if [ -z "${JOB_NAME:-}" ]; then
+  cat >&2 <<'EOF'
+Please set JOB_NAME variable that will be used in your job names. You can do this by:
+
+ JOB_NAME='my-project' vsubmit.sh <args>
+
+NOTE: my-project must have alpha-numeric chars or - (no underscores or spaces)
+EOF
+  exit 1
+fi
+
+export JOB_NAME_FULL=${USER_ALIAS}-${JOB_NAME}
 export START_COMMAND=${START_COMMAND:-"$@"} # use all args to this script as command we will execute
 export DATA_ROOT=${DATA_ROOT:-} # data directory to mount in container
 export NODES=${NODES:-1}
@@ -48,22 +61,19 @@ for var in "${REQUIRED_VARS[@]}"; do
 done
 ### ---------- End check required environment variables
 
-if kubectl get vcjob "${JOB_NAME}" -n "${VOLCANO_NAMESPACE}" >/dev/null 2>&1; then
-  echo "Job ${JOB_NAME} already exists in ${VOLCANO_NAMESPACE}"
+if kubectl get vcjob "${JOB_NAME_FULL}" -n "${VOLCANO_NAMESPACE}" >/dev/null 2>&1; then
+  echo "Job ${JOB_NAME_FULL} already exists in ${VOLCANO_NAMESPACE}"
   exit 1
 fi
 
 # directory where this script is running
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 
-export USER_ALIAS=${USER%@*}
-JOB_NAME=${USER_ALIAS}-${JOB_NAME:-test-job}
-
 # number os workers = nodes - 1 (master node)
 export WORKERS=$(( NODES - 1 ))
 
 # create sub dir for this specific run in our dir
-export JOB_OUT_DIR=runs/${USER_ALIAS}/${JOB_NAME}-$(date +%Y-%m-%d_%H-%M-%S_%3N)
+export JOB_OUT_DIR=runs/${USER_ALIAS}/${JOB_NAME_FULL}-$(date +%Y-%m-%d_%H-%M-%S_%3N)
 LOCAL_JOB_OUT_DIR="${OUT_DIR}/${JOB_OUT_DIR}"
 rm -rf "${LOCAL_JOB_OUT_DIR}"
 mkdir -p "${LOCAL_JOB_OUT_DIR}"
