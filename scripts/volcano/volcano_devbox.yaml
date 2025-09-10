@@ -86,6 +86,14 @@ spec:
                   value: "${WANDB_API_KEY}"
                 - name: WANDB_HOST
                   value: "${WANDB_HOST}"
+                - name: CUDA_LAUNCH_BLOCKING
+                  value: "${CUDA_LAUNCH_BLOCKING}"
+                - name: TORCHINDUCTOR_COORDINATE_DESCENT_TUNING
+                  value: "${TORCHINDUCTOR_COORDINATE_DESCENT_TUNING}"
+                - name: TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS
+                  value: "${TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS}"
+                - name: TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS
+                  value: "${TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS}"
 
               command: ["/bin/bash","-lc"]
               args:

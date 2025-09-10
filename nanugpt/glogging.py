@@ -415,6 +415,17 @@ class Logger:
                         'torch/cudnn.benchmark': torch.backends.cudnn.benchmark, # type: ignore
                         'torch/cudnn.deterministic': torch.backends.cudnn.deterministic, # type: ignore
                         'torch/cudnn.version': torch.backends.cudnn.version(), # type: ignore
+                        'torch/coordinate_descent_tuning': torch._inductor.config.coordinate_descent_tuning, # type: ignore
+                        'torch/coordinate_descent_check_all_directions': torch._inductor.config.coordinate_descent_check_all_directions, # type: ignore
+                        'torch/coordinate_descent_radius': torch._inductor.config.coordinate_descent_radius, # type: ignore
+                        'torch/inductor_repro_level': torch._inductor.config.repro_level, # type: ignore
+                        'torch/inductor_fusion_strategy': torch._inductor.config.fusion_strategy, # type: ignore
+                        'torch/inductor_optimize_memory': torch._inductor.config.optimize_memory, # type: ignore
+                        'torch/inductor_enable_layout_optimization': torch._inductor.config.enable_layout_
+optimization, # type: ignore
+                        'torch/inductor_enable_custom_ops': torch._inductor.config.enable_custom_ops, # type: ignore
+                        'torch/inductor_fallback_random': torch._inductor.config.fallback_random, # type: ignore
+                        'torch/inductor_allow_inplace': torch._inductor.config.allow_inplace, # type: ignore
 
                         'env/RANK': os.environ.get('RANK', None),
                         'env/LOCAL_RANK': os.environ.get('LOCAL_RANK', None),
