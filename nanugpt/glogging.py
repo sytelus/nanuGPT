@@ -377,13 +377,6 @@ class Logger:
 
     def log_torch_info(self):
         self.summary({
-                        'cuda/nccl_available': torch.distributed.is_nccl_available(), # type: ignore
-                        'cuda/device_name': torch.cuda.get_device_name() if torch.cuda.is_available() else '<not_cuda>',
-                        'cuda/device_count': torch.cuda.device_count(),
-                        'cuda/cudnn.enabled': torch.backends.cudnn.enabled, # type: ignore
-                        'cuda/cudnn.benchmark': torch.backends.cudnn.benchmark, # type: ignore
-                        'cuda/cudnn.deterministic': torch.backends.cudnn.deterministic, # type: ignore
-                        'cuda/cudnn.version': torch.backends.cudnn.version(), # type: ignore
                         'cuda/CUDA_VISIBLE_DEVICES': os.environ.get('CUDA_VISIBLE_DEVICES', None),
                         'cuda/device_capability': torch.cuda.get_device_capability() if torch.cuda.is_available() else None,
                         'cuda/current_device': torch.cuda.current_device() if torch.cuda.is_available() else None,
@@ -398,7 +391,6 @@ class Logger:
     def log_sys_info(self):
         self.summary({
                         'sys/python_version': f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}',
-                        'sys/torch_version': torch.__version__,
                         'sys/is_anomaly_enabled': torch.is_anomaly_enabled(),
                         'sys/memory_gb': psutil.virtual_memory().available / (1024.0 ** 3),
                         'sys/cpu_count': psutil.cpu_count(),
@@ -410,6 +402,20 @@ class Logger:
                         'sys/cpu_name': os.popen('wmic cpu get name').read().strip().split('\n')[1] if os.name == 'nt' else os.popen('lscpu | grep "Model name"').read().strip().split(':')[1].strip(),
                         'sys/utils.free_disk_space': utils.free_disk_space(),
 
+                        'torch/torch_version': torch.__version__,
+                        'torch/cudnn_sdp_enabled': torch.backends.cuda.cudnn_sdp_enabled() if torch.cuda.is_available() else '<not_cuda>',
+                        'torch/flash_sdp_enabled': torch.backends.cuda.flash_sdp_enabled() if torch.cuda.is_available() else '<not_cuda>',
+                        'torch/mem_efficient_sdp_enabled': torch.backends.cuda.mem_efficient_sdp_enabled() if torch.cuda.is_available() else '<not_cuda>',
+                        'torch/cuda_version':  torch.version.cuda if torch.cuda.is_available() else '<not_cuda>',
+                        'torch/math_sdp_enabled': torch.backends.cuda.math_sdp_enabled() if torch.cuda.is_available() else '<not_cuda>',
+                        'torch/nccl_available': torch.distributed.is_nccl_available(), # type: ignore
+                        'torch/device_name': torch.cuda.get_device_name() if torch.cuda.is_available() else '<not_cuda>',
+                        'torch/device_count': torch.cuda.device_count(),
+                        'torch/cudnn.enabled': torch.backends.cudnn.enabled, # type: ignore
+                        'torch/cudnn.benchmark': torch.backends.cudnn.benchmark, # type: ignore
+                        'torch/cudnn.deterministic': torch.backends.cudnn.deterministic, # type: ignore
+                        'torch/cudnn.version': torch.backends.cudnn.version(), # type: ignore
+
                         'env/RANK': os.environ.get('RANK', None),
                         'env/LOCAL_RANK': os.environ.get('LOCAL_RANK', None),
                         'env/WORLD_SIZE': os.environ.get('WORLD_SIZE', None),
@@ -419,10 +425,20 @@ class Logger:
                         'env/CUDA_HOME': os.environ.get('CUDA_HOME', None),
                         'env/PYTORCH_CUDA_ALLOC_CONF': os.environ.get('PYTORCH_CUDA_ALLOC_CONF', None),
                         'env/CUDA_VISIBLE_DEVICES': os.environ.get('CUDA_VISIBLE_DEVICES', None),
+                        'env/CUDA_LAUNCH_BLOCKING': os.environ.get('CUDA_LAUNCH_BLOCKING', None),
+                        'env/NCCL_DEBUG': os.environ.get('NCCL_DEBUG', None),
+                        'env/NCCL_IB_DISABLE': os.environ.get('NCCL_IB_DISABLE', None),
+                        'env/NCCL_P2P_LEVEL': os.environ.get('NCCL_P2P_LEVEL', None),
+                        'env/TORCH_USE_CUDA_DSA': os.environ.get('TORCH_USE_CUDA_DSA', None),
+                        'env/PYTHONUNBUFFERED': os.environ.get('PYTHONUNBUFFERED', None),
+                        'env/CUDA_DEVICE_ORDER': os.environ.get('CUDA_DEVICE_ORDER', None),
+                        'env/NCCL_IB_TIMEOUT': os.environ.get('NCCL_IB_TIMEOUT', None),
+                        'env/UCX_NET_DEVICES': os.environ.get('UCX_NET_DEVICES', None),
 
-                        # TODO: importlib.metadata doesn't work in Python 3.8 so disabling for now
-                        # 'flash_attn_ver': str(utils.get_package_ver('flash_attn')),
-                        # 'transformers_ver': str(utils.get_package_ver('transformers')),
+
+                        'flash_attn_ver': str(utils.get_package_ver('flash_attn')),
+                        'transformer_engine_ver': str(utils.get_package_ver('transformer_engine')),
+                        'transformers_ver': str(utils.get_package_ver('transformers')),
                         })
 
     def quite(self, except_keys:Optional[Union[str, Iterable[str]]]):

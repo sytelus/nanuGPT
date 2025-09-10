@@ -803,3 +803,20 @@ def file_size(filepath:str)->int:
 
 def ram_size()->int:
     return psutil.virtual_memory().total
+
+def transformer_engine_version()->Optional[str]:
+    te_spec = importlib.util.find_spec("transformer_engine")
+    if te_spec is not None:
+        import transformer_engine # type: ignore
+        te_version = getattr(transformer_engine, "__version__", "present (no __version__ attr)")
+        return str(te_version)
+    else:
+        return None
+
+def tri_dao_flash_version()->Optional[str]:
+    fa_spec = importlib.util.find_spec("flash_attn")
+    if fa_spec is not None:
+        import importlib.metadata as md  # requires Python 3.8+
+        return md.version("flash-attn")
+    else:
+        return None
