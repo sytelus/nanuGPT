@@ -37,8 +37,8 @@ def estimate_loss(model:torch.nn.Module,
             #with amp_ctx:
             _, loss, correct = model(x, y, return_logits=False)
             n_samples = len(y)
-            loss_sum += loss.item() * n_samples # loss is average so we need to multiply by n_samples to get total loss over batch
-            correct_sum += correct.item()
+            loss_sum += loss.detach().item() * n_samples # loss is average so we need to multiply by n_samples to get total loss over batch
+            correct_sum += correct.detach().item()
             preds_count += len(y)
             sample_count += n_samples
     iter_count = i+1
@@ -212,6 +212,9 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         step_sample_count, step_token_count = 0, 0
         loss_sum, correct_sum, step_preds_count = 0., 0, 0
         metrics = {} # add metrics here if any
+        # Accumulate metrics on device to avoid per-microstep host syncs
+        loss_sum_t = torch.zeros((), device=device)
+        correct_sum_t = torch.zeros((), device=device)
 
         model.train()
 
@@ -235,8 +238,9 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
             with amp_ctx:
                 _, loss, correct = model(x, y, return_logits=False)
-                loss_sum += loss.item() * n_samples
-                correct_sum += correct.item()
+                # Accumulate on device; detach to avoid tracking grads
+                loss_sum_t += loss.detach() * n_samples
+                correct_sum_t += correct.detach()
                 step_preds_count += len(y)
 
                 # Scale the loss to account for gradient accumulation
@@ -265,6 +269,10 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         if torch_info.is_cuda:
             torch.cuda.synchronize()
         fwd_bwd_interval = timeit.default_timer() - step_start_time
+
+        # Materialize device accumulators once per step
+        loss_sum = loss_sum_t.item()
+        correct_sum = correct_sum_t.item()
 
         # gather matrics from all ranks
         if torch_info.is_distributed:
