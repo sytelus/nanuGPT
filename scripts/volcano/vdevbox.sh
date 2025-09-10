@@ -30,7 +30,7 @@ for arg in "$@"; do
     # CPU only devbox
     export JOB_NAME=${USER_ALIAS}-${JOB_NAME:-devbox-cpu}
     export GPUS_PER_NODE=${GPUS_PER_NODE:-0}
-    export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"busybox:1.36"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
+    export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"joelewhite/az-cli-ubuntu:latest"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
 
     export MEMORY_SIZE_LIMIT=${MEMORY_SIZE_LIMIT:-8Gi}
     export CPU_REQUESTS=${CPU_REQUESTS:-12}
