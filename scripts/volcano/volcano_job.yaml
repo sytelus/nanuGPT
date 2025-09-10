@@ -93,28 +93,19 @@ spec:
                   value: "${INSTALL_PACKAGE}"
                 - name: UPDATE_PYTHONPATH
                   value: "${UPDATE_PYTHONPATH}"
-                - name: WANDB_API_KEY
-                  value: "${WANDB_API_KEY}"
-                - name: WANDB_HOST
-                  value: "${WANDB_HOST}"
                 - name: JOB_OUT_DIR
                   value: "${JOB_OUT_DIR}"
-                - name: CUDA_LAUNCH_BLOCKING
-                  value: "${CUDA_LAUNCH_BLOCKING}"
-                - name: TORCHINDUCTOR_COORDINATE_DESCENT_TUNING
-                  value: "${TORCHINDUCTOR_COORDINATE_DESCENT_TUNING}"
-                - name: TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS
-                  value: "${TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS}"
-                - name: TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS
-                  value: "${TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS}"
 
 
               command: ["/bin/bash","-lc"]
               args:
                 - |
                   set -eu -o pipefail -o xtrace # fail if any command failes, log all commands, -o xtrace
-                  nvidia-smi
-                  ls -la
+                  # nvidia-smi
+                  # ls -la
+
+                  # this will setup other env vars in container
+                  $ENV_VARS
 
                   export REMOTE_JOB_OUT_DIR="/data/${JOB_OUT_DIR}"
                   cd ${REMOTE_JOB_OUT_DIR:-}  # :- is used to prevent envsubst avoid replacing this variable

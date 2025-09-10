@@ -65,6 +65,7 @@ export WORKERS=$(( NODES - 1 ))
 # create sub dir for this specific run in our dir
 export JOB_OUT_DIR=runs/${USER_ALIAS}/${JOB_NAME}-$(date +%Y-%m-%d_%H-%M-%S_%3N)
 LOCAL_JOB_OUT_DIR="${OUT_DIR}/${JOB_OUT_DIR}"
+rm -rf "${LOCAL_JOB_OUT_DIR}"
 mkdir -p "${LOCAL_JOB_OUT_DIR}"
 
 # output core variables so user can see what is being used
@@ -91,11 +92,13 @@ rm -rf "${TARGET_SOURCE_DIR}"
 mkdir -p "${TARGET_SOURCE_DIR}"
 pushd "${SOURCE_DIR}"
 # if all commited changes then get latest head and create archive, else copy except .git folder
-if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
-    git archive --format=tar HEAD | tar -x -C "${TARGET_SOURCE_DIR}"
-else
+# if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+#     echo "Copying source from git repo using archive..."
+#     git archive --format=tar HEAD | tar -x -C "${TARGET_SOURCE_DIR}"
+# else
+    echo "Copying source from working dir..."
     rsync -a --exclude='.git' ./ "${TARGET_SOURCE_DIR}"
-fi
+#fi
 popd
 
 # copy volcano scripts to job out dir so we can use it in cluster
@@ -106,12 +109,36 @@ mkdir -p "${VOLCANO_SCRIPT_DIR}"
 cp "${SCRIPT_DIR}/"*.sh "${VOLCANO_SCRIPT_DIR}/"
 chmod +x "${VOLCANO_SCRIPT_DIR}/"*.sh
 
+export ENV_VARS=""
+make_env_vars() {
+    local env_vars_val="export"
+    local var val
+    for var in "$@"; do
+        # Check if variable is set
+        if [ -v "$var" ]; then
+            # Safely expand its value
+            val=${!var}
+            # Append to ENV_VARS
+            env_vars_val+=" $var=\"${val}\""
+        fi
+    done
+    # Export ENV_VARS itself
+    export ENV_VARS=${env_vars_val}
+}
+# make ENV_VARS variable that will be script to setup env in container
+make_env_vars CUDA_LAUNCH_BLOCKING TORCHINDUCTOR_COORDINATE_DESCENT_TUNING TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS \
+    WANDB_API_KEY WANDB_HOST
+echo "ENV_VARS to be setup in container:"
+echo "--------------------------------"
+echo "$ENV_VARS"
+echo "--------------------------------"
+
 envsubst < "${SCRIPT_DIR}/volcano_job.yaml" > "${LOCAL_JOB_OUT_DIR}/volcano_rendered.yaml"
 
 # now that direcoty is ready, we need to copy this to pvc available to cluster
 echo "Copying source and scripts from ${LOCAL_JOB_OUT_DIR} to PVC ${VOLCANO_DATA_PVC_NAME}..."
 JOB_NAME=pvc-copy-${JOB_NAME} bash ${SCRIPT_DIR}/copy2pvc.sh ${LOCAL_JOB_OUT_DIR} ${JOB_OUT_DIR}
-echo "Copy complete."
+echo "Copy to pvc complete."
 
 VCJOB_FQN=$(kubectl create -f "${LOCAL_JOB_OUT_DIR}/volcano_rendered.yaml" -o name)
 echo "Created: $VCJOB_FQN"

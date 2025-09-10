@@ -466,6 +466,9 @@ class Logger:
                         'env/OMPI_MCA_pml': os.environ.get('OMPI_MCA_pml', None),
                         'env/OMPI_MCA_btl': os.environ.get('OMPI_MCA_btl', None),
                         'env/OMPI_MCA_COLL_HCOLL_ENABLE': os.environ.get('OMPI_MCA_COLL_HCOLL_ENABLE', None),
+                        'env/TORCHINDUCTOR_COORDINATE_DESCENT_TUNING': os.environ.get('TORCHINDUCTOR_COORDINATE_DESCENT_TUNING', None),
+                        'env/TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS': os.environ.get('TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS', None),
+                        'env/TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS': os.environ.get('TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS', None),
 
                         'flash_attn_ver': str(utils.get_package_ver('flash_attn')),
                         'transformer_engine_ver': str(utils.get_package_ver('transformer_engine')),

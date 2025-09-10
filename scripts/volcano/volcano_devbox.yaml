@@ -82,24 +82,16 @@ spec:
                   value: "${NCCL_IB_DISABLE}"
                 - name: PYTHONUNBUFFERED
                   value: "${PYTHONUNBUFFERED}"
-                - name: WANDB_API_KEY
-                  value: "${WANDB_API_KEY}"
-                - name: WANDB_HOST
-                  value: "${WANDB_HOST}"
-                - name: CUDA_LAUNCH_BLOCKING
-                  value: "${CUDA_LAUNCH_BLOCKING}"
-                - name: TORCHINDUCTOR_COORDINATE_DESCENT_TUNING
-                  value: "${TORCHINDUCTOR_COORDINATE_DESCENT_TUNING}"
-                - name: TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS
-                  value: "${TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS}"
-                - name: TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS
-                  value: "${TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS}"
 
               command: ["/bin/bash","-lc"]
               args:
                 - |
                   # set -eu -o pipefail -o xtrace # fail if any command failes, log all commands, -o xtrace
                   # nvidia-smi
+
+                  # this will setup other env vars in container
+                  ${ENV_VARS}
+
                   sleep infinity
 
               resources:

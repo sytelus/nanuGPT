@@ -77,6 +77,30 @@ trap cleanup EXIT
 # number os workers = nodes - 1 (master node)
 export WORKERS=$(( NODES - 1 ))
 
+export ENV_VARS=""
+make_env_vars() {
+    local env_vars_val="export"
+    local var val
+    for var in "$@"; do
+        # Check if variable is set
+        if [ -v "$var" ]; then
+            # Safely expand its value
+            val=${!var}
+            # Append to ENV_VARS
+            env_vars_val+=" $var=\"${val}\""
+        fi
+    done
+    # Export ENV_VARS itself
+    export ENV_VARS=${env_vars_val}
+}
+# make ENV_VARS variable that will be script to setup env in container
+make_env_vars CUDA_LAUNCH_BLOCKING TORCHINDUCTOR_COORDINATE_DESCENT_TUNING TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS \
+    WANDB_API_KEY WANDB_HOST
+echo "ENV_VARS to be setup in container:"
+echo "--------------------------------"
+echo "$ENV_VARS"
+echo "--------------------------------"
+
 # output core variables so user can see what is being used
 echo "CONTAINER_IMAGE_PATH: ${CONTAINER_IMAGE_PATH:-<not set>}"
 echo "ENV_SETUP_SCRIPT: ${ENV_SETUP_SCRIPT:-<not set>}"
