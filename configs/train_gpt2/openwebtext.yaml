@@ -8,6 +8,10 @@ data:
     tokenized_train_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/train.bin'
     tokenized_val_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/val.bin'
 
+# training:
+#   device_batch_size: 60 # B200x8
+
+
 # optimizer:
 #   module_kwargs:
 #     learning_rate: 15.0E-4 # LR found by LRRT
