@@ -39,7 +39,7 @@ for arg in "$@"; do
   else
     export JOB_NAME=${USER_ALIAS}-${JOB_NAME:-devbox}
     export GPUS_PER_NODE=${GPUS_PER_NODE:-8}
-    export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"nvcr.io/nvidia/pytorch:25.05-py3"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
+    export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"nvcr.io/nvidia/pytorch:25.08-py3"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
 
     export MEMORY_SIZE_LIMIT=${MEMORY_SIZE_LIMIT:-100Gi}
     export CPU_REQUESTS=${CPU_REQUESTS:-192}
