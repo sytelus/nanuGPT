@@ -122,6 +122,9 @@ make_env_vars() {
             env_vars_val+=" $var=\"${val}\""
         fi
     done
+    if [[ "${env_vars_val}" == "export" ]]; then
+      env_vars_val=""
+    fi
     # Export ENV_VARS itself
     export ENV_VARS=${env_vars_val}
 }
