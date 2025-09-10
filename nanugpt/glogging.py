@@ -421,8 +421,7 @@ class Logger:
                         'torch/inductor_repro_level': torch._inductor.config.repro_level, # type: ignore
                         'torch/inductor_fusion_strategy': torch._inductor.config.fusion_strategy, # type: ignore
                         'torch/inductor_optimize_memory': torch._inductor.config.optimize_memory, # type: ignore
-                        'torch/inductor_enable_layout_optimization': torch._inductor.config.enable_layout_
-optimization, # type: ignore
+                        'torch/inductor_enable_layout_optimization': torch._inductor.config.enable_layout_optimization, # type: ignore
                         'torch/inductor_enable_custom_ops': torch._inductor.config.enable_custom_ops, # type: ignore
                         'torch/inductor_fallback_random': torch._inductor.config.fallback_random, # type: ignore
                         'torch/inductor_allow_inplace': torch._inductor.config.allow_inplace, # type: ignore
