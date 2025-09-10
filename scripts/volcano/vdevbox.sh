@@ -13,26 +13,40 @@
 set -eu -o pipefail # -o xtrace # fail if any command failes, log all commands, -o xtrace
 
 export USER_ALIAS=${USER%@*}
-export JOB_NAME=${USER_ALIAS}-${JOB_NAME:-devbox}
 export NODES=${NODES:-1}
-export GPUS_PER_NODE=${GPUS_PER_NODE:-8}
-export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"nvcr.io/nvidia/nemo:25.07"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
 export VOLCANO_NAMESPACE=${VOLCANO_NAMESPACE:-} # namespace in volcano cluster
 export VOLCANO_DATA_PVC_NAME=${VOLCANO_DATA_PVC_NAME:-} # data PVC claim in volcano cluster
-export CONTAINER_PORT=${CONTAINER_PORT:-23456} # pytorch MASTER_PORT
 export WANDB_API_KEY=${WANDB_API_KEY:-}
 export WANDB_HOST=${WANDB_HOST:-}
+export PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}
 
+export CONTAINER_PORT=${CONTAINER_PORT:-23456} # pytorch MASTER_PORT
 export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
 export NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-0}
-export PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
 
-export MEMORY_SIZE_LIMIT=${MEMORY_SIZE_LIMIT:-100Gi}
-export CPU_REQUESTS=${CPU_REQUESTS:-192}
-export MEMORY_REQUESTS=${MEMORY_REQUESTS:-2600Gi}
-export RDMA_REQUESTS=${RDMA_REQUESTS:-1}
+for arg in "$@"; do
+  if [[ "$arg" == "--cpu" ]]; then
+    # CPU only devbox
+    export JOB_NAME=${USER_ALIAS}-${JOB_NAME:-devbox-cpu}
+    export GPUS_PER_NODE=${GPUS_PER_NODE:-0}
+    export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"busybox:1.36"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
 
+    export MEMORY_SIZE_LIMIT=${MEMORY_SIZE_LIMIT:-8Gi}
+    export CPU_REQUESTS=${CPU_REQUESTS:-12}
+    export MEMORY_REQUESTS=${MEMORY_REQUESTS:-64Gi}
+    export RDMA_REQUESTS=${RDMA_REQUESTS:-0}
+  else
+    export JOB_NAME=${USER_ALIAS}-${JOB_NAME:-devbox}
+    export GPUS_PER_NODE=${GPUS_PER_NODE:-8}
+    export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"nvcr.io/nvidia/nemo:25.07"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
+
+    export MEMORY_SIZE_LIMIT=${MEMORY_SIZE_LIMIT:-100Gi}
+    export CPU_REQUESTS=${CPU_REQUESTS:-192}
+    export MEMORY_REQUESTS=${MEMORY_REQUESTS:-2600Gi}
+    export RDMA_REQUESTS=${RDMA_REQUESTS:-1}
+  fi
+done
 
 if kubectl get vcjob "${JOB_NAME}" -n "${VOLCANO_NAMESPACE}" >/dev/null 2>&1; then
   echo "Job ${JOB_NAME} already exists in ${VOLCANO_NAMESPACE}"
