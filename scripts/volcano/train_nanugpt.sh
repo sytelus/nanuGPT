@@ -15,4 +15,4 @@ SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 NODES=1 \
 OUT_DIR=/data/shitals \
 DATA_ROOT=/data/shitals/data \
-bash ${SCRIPT_DIR}/vsubmit.sh train.py configs/train_gpt2/openwebtext_tokens10b_keller_adamw.yaml --general.project_name nanugpt-openwebtext --general.run_name ${RUN_NAME} $@
+bash ${SCRIPT_DIR}/vsubmit.sh train.py configs/train_gpt2/openwebtext.yaml --general.project_name nanugpt-openwebtext --general.run_name ${RUN_NAME} $@
