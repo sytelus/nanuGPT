@@ -434,7 +434,28 @@ class Logger:
                         'env/CUDA_DEVICE_ORDER': os.environ.get('CUDA_DEVICE_ORDER', None),
                         'env/NCCL_IB_TIMEOUT': os.environ.get('NCCL_IB_TIMEOUT', None),
                         'env/UCX_NET_DEVICES': os.environ.get('UCX_NET_DEVICES', None),
+                        'env/NCCL_SOCKET_IFNAME': os.environ.get('NCCL_SOCKET_IFNAME', None),
+                        'env/NCCL_IB_HCA': os.environ.get('NCCL_IB_HCA', None),
+                        'env/NCCL_IGNORE_CPU_AFFINITY': os.environ.get('NCCL_IGNORE_CPU_AFFINITY', None),
+                        'env/NCCL_PROTO': os.environ.get('NCCL_PROTO', None),
+                        'env/UCX_IB_PCI_RELAXED_ORDERING': os.environ.get('UCX_IB_PCI_RELAXED_ORDERING', None),
+                        'env/UCX_VFS_ENABLE': os.environ.get('UCX_VFS_ENABLE', None),
 
+                        'env/NCCL_NVLS_ENABLE': os.environ.get('NCCL_NVLS_ENABLE', None),
+                        'env/NVTE_ASYNC_AMAX_REDUCTION': os.environ.get('NVTE_ASYNC_AMAX_REDUCTION', None),
+
+                        'env/CUDA_DEVICE_MAX_CONNECTIONS': os.environ.get('CUDA_DEVICE_MAX_CONNECTIONS', None),
+                        'env/TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC': os.environ.get('TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC', None),
+
+                        'env/NCCL_IB_PCI_RELAXED_ORDERING': os.environ.get('NCCL_IB_PCI_RELAXED_ORDERING', None),
+                        'env/SHARP_COLL_ENABLE_PCI_RELAXED_ORDERING': os.environ.get('SHARP_COLL_ENABLE_PCI_RELAXED_ORDERING', None),
+
+                        'env/NVTE_FWD_LAYERNORM_SM_MARGIN': os.environ.get('NVTE_FWD_LAYERNORM_SM_MARGIN', None),
+                        'env/NVTE_BWD_LAYERNORM_SM_MARGIN': os.environ.get('NVTE_BWD_LAYERNORM_SM_MARGIN', None),
+
+                        'env/OMPI_MCA_pml': os.environ.get('OMPI_MCA_pml', None),
+                        'env/OMPI_MCA_btl': os.environ.get('OMPI_MCA_btl', None),
+                        'env/OMPI_MCA_COLL_HCOLL_ENABLE': os.environ.get('OMPI_MCA_COLL_HCOLL_ENABLE', None),
 
                         'flash_attn_ver': str(utils.get_package_ver('flash_attn')),
                         'transformer_engine_ver': str(utils.get_package_ver('transformer_engine')),
