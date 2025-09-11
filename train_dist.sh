@@ -28,29 +28,7 @@ fi
 
 # if DEBUG_WITH_CUDA_GDB is set then run command under cuda-gdb
 if [ -n "${DEBUG_WITH_CUDA_GDB:-}" ]; then
-  export CUDA_LAUNCH_BLOCKING=1
-  export TORCH_COMPILE_DEBUG=1
-  #export TORCH_LOGS=output_code
-  export TORCHINDUCTOR_UNIQUE_KERNEL_NAMES=1
-
-  # Tiny wrapper so rank 0 is debugged, others just exec the program
-  cat >/tmp/worker_cmd.sh <<'EOS'
-#!/usr/bin/env bash
-set -euo pipefail
-
-# switch to current working directory
-cd "$(pwd)"
-
-if [[ "${LOCAL_RANK:-0}" == "0" ]]; then
-  exec cuda-gdb -ex 'set pagination off' -ex 'set cuda api_failures stop' -ex 'run' --args python -X faulthandler ${START_COMMAND}
-else
-  exec python -X faulthandler -u ${START_COMMAND}
-fi
-EOS
-
-  chmod +x /tmp/worker_cmd.sh
-
-  torchrun --nproc_per_node=${NPROC_PER_NODE} --nnodes=${NODES} --node_rank=${RANK} --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT} --no_python /tmp/worker_cmd.sh
+  torchrun --nproc_per_node=${NPROC_PER_NODE} --nnodes=${NODES} --node_rank=${RANK} --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT} --no_python scripts/misc/cude_gdb_worker.sh
 else
   torchrun --nproc_per_node=${NPROC_PER_NODE} --nnodes=${NODES} --node_rank=${RANK} --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT} ${START_COMMAND}
 fi
