@@ -37,6 +37,10 @@ if [ -n "${DEBUG_WITH_CUDA_GDB:-}" ]; then
   cat >/tmp/worker_cmd.sh <<'EOS'
 #!/usr/bin/env bash
 set -euo pipefail
+
+# switch to current working directory
+cd "$(pwd)"
+
 if [[ "${LOCAL_RANK:-0}" == "0" ]]; then
   CUDA_GDB_PRE="-ex 'set pagination off' -ex 'set cuda break_on_launch application' -ex 'set cuda api_failures stop'" \
   exec cuda-gdb ${CUDA_GDB_PRE} --args ${START_COMMAND}
