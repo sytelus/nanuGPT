@@ -1,25 +1,30 @@
 #! /bin/bash
-
-####################################################################################################
-# This script submits a job to volcano cluster
-# It copies the source directory to a shared location, substitutes placeholders in yaml config and
-# submits the job to the cluster.
-
-# Invoke this script as:
-# ./scripts/volcano/volcano_submit.sh my_train.py some_args
-####################################################################################################
-
-
 set -eu -o pipefail # -o xtrace # fail if any command failes, log all commands, -o xtrace
+
+####################################################################################################
+# This script takes node(s) from cluster and gives user an interactive bash shell.
+#
+# Invoke this script as:
+# ----------------------
+# vdevbox.sh # gets 1 node GPU devbox
+# vdevbox.sh --cpu # gets 1 node CPU only devbox
+#
+# Useful variables:
+# -----------------
+# NODES - number of nodes to use, default 1
+# GPUS_PER_NODE - number of gpus per node, default 8
+# CONTAINER_IMAGE_PATH - container image to use, default nvcr.io/nvidia/pytorch:25.08-py3
+# VOLCANO_NAMESPACE - namespace in volcano cluster
+# VOLCANO_DATA_PVC_NAME - data PVC claim in volcano cluster
+####################################################################################################
 
 export USER_ALIAS=${USER%@*}
 export NODES=${NODES:-1}
 export VOLCANO_NAMESPACE=${VOLCANO_NAMESPACE:-} # namespace in volcano cluster
 export VOLCANO_DATA_PVC_NAME=${VOLCANO_DATA_PVC_NAME:-} # data PVC claim in volcano cluster
-export WANDB_API_KEY=${WANDB_API_KEY:-}
-export WANDB_HOST=${WANDB_HOST:-}
-export PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}
+export TRANSFER_VARS=${TRANSFER_VARS:-} # space separated list of additional env vars to transfer to container
 
+export PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}
 export CONTAINER_PORT=${CONTAINER_PORT:-23456} # pytorch MASTER_PORT
 export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
 export NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-0}
@@ -97,7 +102,7 @@ make_env_vars() {
     export ENV_VARS=${env_vars_val}
 }
 # make ENV_VARS variable that will be script to setup env in container
-make_env_vars CUDA_LAUNCH_BLOCKING TORCHINDUCTOR_COORDINATE_DESCENT_TUNING TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS \
+make_env_vars ${TRANSFER_VARS} CUDA_LAUNCH_BLOCKING TORCHINDUCTOR_COORDINATE_DESCENT_TUNING TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS \
     WANDB_API_KEY WANDB_HOST
 echo "ENV_VARS to be setup in container:"
 echo "--------------------------------"
@@ -131,7 +136,15 @@ echo "Pod: ${POD_NAME}"
 
 # Wait until the pod is Ready
 echo "Waiting for pod to be Ready..."
-kubectl -n "${VOLCANO_NAMESPACE}" wait --for=condition=Ready "${POD_POD_NAME}" --timeout=10m
+if ! kubectl -n "${VOLCANO_NAMESPACE}" wait --for=condition=Ready "${POD_POD_NAME}" --timeout=10m; then
+  if ! kubectl -n "${VOLCANO_NAMESPACE}" get pod "${POD_NAME}" -o jsonpath='{.status.containerStatuses[0].state.running}' 2>/dev/null | grep -q 'true'; then
+    echo "Pod ${POD_NAME} is not running. Dumping pod status:"
+    kubectl -n "${VOLCANO_NAMESPACE}" describe pod "${POD_NAME}" || true
+    echo "Dumping pod events:"
+    kubectl -n "${VOLCANO_NAMESPACE}" get events --sort-by=.lastTimestamp --field-selector involvedObject.name="${POD_NAME}" || true
+  fi
+  exit 1
+fi
 
 echo
 echo "=== Loader pod initial logs ==="

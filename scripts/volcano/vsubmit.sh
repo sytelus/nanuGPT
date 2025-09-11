@@ -6,6 +6,12 @@ set -eu -o pipefail # -o xtrace # fail if any command failes, log all commands, 
 # It copies the source directory to cluster, installs the directory as editable package and
 # runs the specified command.
 #
+# Invoke this script as:
+# ----------------------
+# JOB_NAME='my-project' NODES=2 \
+# TRANSFER_VARS="DATA_ROOT WANDB_API_KEY WANDB_HOST" \
+# vsubmit.sh my_train.py some_args
+#
 # Useful variables:
 # -----------------
 # JOB_NAME - must be set by user, used in job name
@@ -22,11 +28,6 @@ set -eu -o pipefail # -o xtrace # fail if any command failes, log all commands, 
 # ENV_SETUP_SCRIPT - script to setup environment before running command
 # VOLCANO_NAMESPACE - namespace in volcano cluster
 # VOLCANO_DATA_PVC_NAME - data PVC claim in volcano cluster
-#
-# Invoke this script as:
-# JOB_NAME='my-project' NODES=2 \
-# TRANSFER_VARS="DATA_ROOT WANDB_API_KEY WANDB_HOST" \
-# vsubmit.sh my_train.py some_args
 ####################################################################################################
 
 
