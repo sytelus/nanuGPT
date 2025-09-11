@@ -45,12 +45,12 @@ else
     # CPU only devbox
     export JOB_NAME=${USER_ALIAS}-devbox-cpu
     export GPUS_PER_NODE=${GPUS_PER_NODE:-0}
-      export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"joelewhite/az-cli-ubuntu:latest"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
+    export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"joelewhite/az-cli-ubuntu:latest"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
 
-      export MEMORY_SIZE_LIMIT=${MEMORY_SIZE_LIMIT:-8Gi}
-      export CPU_REQUESTS=${CPU_REQUESTS:-12}
-      export MEMORY_REQUESTS=${MEMORY_REQUESTS:-64Gi}
-      export RDMA_REQUESTS=${RDMA_REQUESTS:-0}
+    export MEMORY_SIZE_LIMIT=${MEMORY_SIZE_LIMIT:-8Gi}
+    export CPU_REQUESTS=${CPU_REQUESTS:-12}
+    export MEMORY_REQUESTS=${MEMORY_REQUESTS:-64Gi}
+    export RDMA_REQUESTS=${RDMA_REQUESTS:-0}
   else
     echo "Usage: $0 [--cpu]" >&2
     exit 1
@@ -61,6 +61,18 @@ if kubectl get vcjob "${JOB_NAME}" -n "${VOLCANO_NAMESPACE}" >/dev/null 2>&1; th
   echo "Job ${JOB_NAME} already exists in ${VOLCANO_NAMESPACE}"
   exit 1
 fi
+
+echo "Using:"
+echo "  JOB_NAME: ${JOB_NAME}"
+echo "  NODES: ${NODES}"
+echo "  GPUS_PER_NODE: ${GPUS_PER_NODE}"
+echo "  CONTAINER_IMAGE_PATH: ${CONTAINER_IMAGE_PATH}"
+echo "  VOLCANO_NAMESPACE: ${VOLCANO_NAMESPACE:-<not set>}"
+echo "  VOLCANO_DATA_PVC_NAME: ${VOLCANO_DATA_PVC_NAME:-<not set>}"
+echo "  CPU_REQUESTS: ${CPU_REQUESTS}"
+echo "  MEMORY_REQUESTS: ${MEMORY_REQUESTS}"
+echo "  RDMA_REQUESTS: ${RDMA_REQUESTS}"
+echo "  MEMORY_SIZE_LIMIT: ${MEMORY_SIZE_LIMIT}"
 
 # directory where this script is running
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"

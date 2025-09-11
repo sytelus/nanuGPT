@@ -37,10 +37,12 @@ if [[ "${LOCAL_RANK:-0}" == "0" ]]; then
     exec cuda-gdb -q \
         -ex "set pagination off" \
         -ex "set cuda break_on_launch none" \
-        -ex "set cuda api_failures ignore" \
-        -ex "set cuda memcheck on" \
+        -ex "set cuda api_failures stop" \
         -ex "handle SIGTERM nostop noprint ignore" \
         -ex "handle SIGHUP nostop noprint ignore" \
+        -ex set cuda memcheck off \
+        -ex set cuda kernel_events none \
+        -ex set cuda context_events none \
         -ex "run" \
         --args bash -lc "exec ${CMD}"
 else
