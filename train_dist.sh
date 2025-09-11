@@ -19,7 +19,6 @@ export NODES=${NODES:-1}
 export RANK=${RANK:-0}
 export MASTER_ADDR=${MASTER_ADDR:-"localhost"}
 export MASTER_PORT=${MASTER_PORT:-23456} # can be any free port
-export JOB_OUT_DIR=${OUT_DIR}/${JOB_NAME_FULL} # output dir for this job
 export START_COMMAND=${START_COMMAND:-"$@"} # use all args to this script as command we will execute
 if [ -z "$START_COMMAND" ]; then
   echo "No command to run. Invoke this script as:"
