@@ -7,8 +7,6 @@ from functools import partial
 import torch
 import torch.nn as nn
 
-from xformers.ops import SwiGLU
-
 from flash_attn import flash_attn_func # type: ignore
 
 from nanugpt.models.fused_rotary_embedding import apply_rotary_emb_func
@@ -155,8 +153,8 @@ class Llama(nn.Module):
                 torch.nn.init.zeros_(module.bias)
         # GPT-NeoX
         for name, p in module.named_parameters():
-            if (name == "proj.weight" and isinstance(module, LLaMAMLP)) or (name == "w3.weight" and isinstance(module, SwiGLU) or (name=="proj.weight" and isinstance(module, CausalSelfAttention))):  #if use xformer swiglu, fc2 layer will be renamed to w3
-                nn.init.normal_(p, mean=0.0, std=1 / math.sqrt(self.config.n_embd)  /  n_layer)
+            if name == "proj.weight" and isinstance(module, (LLaMAMLP, CausalSelfAttention)):
+                nn.init.normal_(p, mean=0.0, std=1 / math.sqrt(self.config.n_embd) / n_layer)
 
 
     def reset_cache(self) -> None:
@@ -419,17 +417,16 @@ class GptNeoxMLP(nn.Module):
 class LLaMAMLP(nn.Module):
     def __init__(self, config: LlamaConfig) -> None:
         super().__init__()
-        # self.fc_1 = nn.Linear(config.n_embd, config.intermediate_size, bias=config.bias)
-        # self.fc_2 = nn.Linear(config.n_embd, config.intermediate_size, bias=config.bias)
-        # self.proj = nn.Linear(config.intermediate_size, config.n_embd, bias=config.bias)
-        self.swiglu = SwiGLU(config.n_embd,config.intermediate_size, bias=False, _pack_weights=False) # type: ignore
+        self.fc_1 = nn.Linear(config.n_embd, config.intermediate_size, bias=config.bias)  # type: ignore
+        self.fc_2 = nn.Linear(config.n_embd, config.intermediate_size, bias=config.bias)  # type: ignore
+        self.proj = nn.Linear(config.intermediate_size, config.n_embd, bias=config.bias)  # type: ignore
+        # self.swiglu = SwiGLU(config.n_embd,config.intermediate_size, bias=False, _pack_weights=False) # type: ignore
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x_fc_1 = self.fc_1(x)
-        # x_fc_2 = self.fc_2(x)
-        # x = torch.nn.functional.silu(x_fc_1) * x_fc_2
-        # return self.proj(x)
-        return self.swiglu(x)
-
+        x_fc_1 = self.fc_1(x)
+        x_fc_2 = self.fc_2(x)
+        x = torch.nn.functional.silu(x_fc_1) * x_fc_2
+        return self.proj(x)
+        # return self.swiglu(x)
 
 def build_rope_cache(
     seq_len: int, n_elem: int, dtype: torch.dtype, device: torch.device, base: int = 10000, condense_ratio: int = 1

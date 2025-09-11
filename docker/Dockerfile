@@ -25,12 +25,7 @@ RUN apt-get update && \
 # Upgrade pip tooling
 RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel packaging
 
-# Important: ensure torch/compute wheels resolve correctly for CUDA in this base image.
-# xFormers wheels for CUDA are typically hosted on the PyTorch index; adjust CUDA version if needed.
-ARG PYTORCH_CUDA_INDEX_URL=https://download.pytorch.org/whl/cu124
-
 # Core Python deps for this repo (from pyproject.toml) + extras used by the codebase
-# - xformers (SwiGLU used by models)
 # - flash-attn (used by TinyLlama & LLaMA variants)
 # - numpy/scipy/pandas (referenced by utilities and analysis helpers)
 RUN --mount=type=cache,target=/root/.cache/pip \
@@ -49,7 +44,6 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       numpy \
       pandas \
       scipy && \
-    pip install --no-cache-dir --extra-index-url ${PYTORCH_CUDA_INDEX_URL} xformers && \
     pip install --no-cache-dir flash-attn --no-build-isolation
 
 # Optional: environment quality-of-life defaults
@@ -70,4 +64,3 @@ print('Is CUDA available:', torch.cuda.is_available())
 PY
 
 CMD ["bash"]
-
