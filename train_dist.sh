@@ -42,10 +42,9 @@ set -euo pipefail
 cd "$(pwd)"
 
 if [[ "${LOCAL_RANK:-0}" == "0" ]]; then
-  CUDA_GDB_PRE="-ex 'set pagination off' -ex 'set cuda break_on_launch application' -ex 'set cuda api_failures stop'" \
-  exec cuda-gdb ${CUDA_GDB_PRE} --args ${START_COMMAND}
+  exec cuda-gdb -ex 'set pagination off' -ex 'set cuda break_on_launch application' -ex 'set cuda api_failures stop' --args ${START_COMMAND}
 else
-  exec ${START_COMMAND}
+  exec python -X faulthandler -u ${START_COMMAND}
 fi
 EOS
 
