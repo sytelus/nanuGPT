@@ -30,10 +30,21 @@ export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
 export NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-0}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
 
+# default GPU devbox vars
+export JOB_NAME=${USER_ALIAS}-devbox
+export GPUS_PER_NODE=${GPUS_PER_NODE:-8}
+export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"nvcr.io/nvidia/pytorch:25.08-py3"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
+
+export MEMORY_SIZE_LIMIT=${MEMORY_SIZE_LIMIT:-100Gi}
+export CPU_REQUESTS=${CPU_REQUESTS:-192}
+export MEMORY_REQUESTS=${MEMORY_REQUESTS:-2600Gi}
+export RDMA_REQUESTS=${RDMA_REQUESTS:-1}
+
+# setup CPU only devbox if --cpu arg is passed
 for arg in "$@"; do
   if [[ "$arg" == "--cpu" ]]; then
     # CPU only devbox
-    export JOB_NAME=${USER_ALIAS}-${JOB_NAME:-devbox-cpu}
+    export JOB_NAME=${USER_ALIAS}-devbox-cpu
     export GPUS_PER_NODE=${GPUS_PER_NODE:-0}
     export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"joelewhite/az-cli-ubuntu:latest"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
 
@@ -41,15 +52,6 @@ for arg in "$@"; do
     export CPU_REQUESTS=${CPU_REQUESTS:-12}
     export MEMORY_REQUESTS=${MEMORY_REQUESTS:-64Gi}
     export RDMA_REQUESTS=${RDMA_REQUESTS:-0}
-  else
-    export JOB_NAME=${USER_ALIAS}-${JOB_NAME:-devbox}
-    export GPUS_PER_NODE=${GPUS_PER_NODE:-8}
-    export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"nvcr.io/nvidia/pytorch:25.08-py3"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
-
-    export MEMORY_SIZE_LIMIT=${MEMORY_SIZE_LIMIT:-100Gi}
-    export CPU_REQUESTS=${CPU_REQUESTS:-192}
-    export MEMORY_REQUESTS=${MEMORY_REQUESTS:-2600Gi}
-    export RDMA_REQUESTS=${RDMA_REQUESTS:-1}
   fi
 done
 
