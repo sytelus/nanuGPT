@@ -62,18 +62,6 @@ if kubectl get vcjob "${JOB_NAME}" -n "${VOLCANO_NAMESPACE}" >/dev/null 2>&1; th
   exit 1
 fi
 
-echo "Using:"
-echo "  JOB_NAME: ${JOB_NAME}"
-echo "  NODES: ${NODES}"
-echo "  GPUS_PER_NODE: ${GPUS_PER_NODE}"
-echo "  CONTAINER_IMAGE_PATH: ${CONTAINER_IMAGE_PATH}"
-echo "  VOLCANO_NAMESPACE: ${VOLCANO_NAMESPACE:-<not set>}"
-echo "  VOLCANO_DATA_PVC_NAME: ${VOLCANO_DATA_PVC_NAME:-<not set>}"
-echo "  CPU_REQUESTS: ${CPU_REQUESTS}"
-echo "  MEMORY_REQUESTS: ${MEMORY_REQUESTS}"
-echo "  RDMA_REQUESTS: ${RDMA_REQUESTS}"
-echo "  MEMORY_SIZE_LIMIT: ${MEMORY_SIZE_LIMIT}"
-
 # directory where this script is running
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 
@@ -125,11 +113,17 @@ echo "--------------------------------"
 echo "$ENV_VARS"
 echo "--------------------------------"
 
-# output core variables so user can see what is being used
-echo "CONTAINER_IMAGE_PATH: ${CONTAINER_IMAGE_PATH:-<not set>}"
-echo "ENV_SETUP_SCRIPT: ${ENV_SETUP_SCRIPT:-<not set>}"
-echo "NODES: ${NODES:-<not set>}"
-echo "GPUS_PER_NODE: ${GPUS_PER_NODE:-<not set>}"
+echo "Using:"
+echo "  JOB_NAME: ${JOB_NAME}"
+echo "  NODES: ${NODES}"
+echo "  GPUS_PER_NODE: ${GPUS_PER_NODE}"
+echo "  CONTAINER_IMAGE_PATH: ${CONTAINER_IMAGE_PATH}"
+echo "  VOLCANO_NAMESPACE: ${VOLCANO_NAMESPACE:-<not set>}"
+echo "  VOLCANO_DATA_PVC_NAME: ${VOLCANO_DATA_PVC_NAME:-<not set>}"
+echo "  CPU_REQUESTS: ${CPU_REQUESTS}"
+echo "  MEMORY_REQUESTS: ${MEMORY_REQUESTS}"
+echo "  RDMA_REQUESTS: ${RDMA_REQUESTS}"
+echo "  MEMORY_SIZE_LIMIT: ${MEMORY_SIZE_LIMIT}"
 
 envsubst < "${SCRIPT_DIR}/volcano_devbox.yaml" > "${TMP_DIR}/volcano_rendered.yaml"
 
