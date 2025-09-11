@@ -32,8 +32,8 @@ def estimate_loss(model:torch.nn.Module,
         for i, (x, y) in enumerate(data_loader):
             if i >= eval_iters / torch_info.world_size:
                 break
-            x, y = x.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else x.to(device), \
-                y.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else y.to(device)
+            x, y = x.to(device, non_blocking=True) if torch_info.is_cuda else x.to(device), \
+                y.to(device, non_blocking=True) if torch_info.is_cuda else y.to(device)
             #with amp_ctx:
             _, loss, correct = model(x, y, return_logits=False)
             n_samples = len(y)
@@ -220,8 +220,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
         # grad accumulations
         for micro_step in range(grad_acc_steps):
-            x, y = x.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else x.to(device), \
-                y.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else y.to(device)
+            x, y = x.to(device, non_blocking=True) if torch_info.is_cuda else x.to(device), \
+                y.to(device, non_blocking=True) if torch_info.is_cuda else y.to(device)
 
             if torch_info.is_distributed:
                 # Instead of model.no_sync(), we do Karpathy's hack
