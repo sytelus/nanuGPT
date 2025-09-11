@@ -40,6 +40,19 @@ if [ "$#" -eq 0 ]; then
   export CPU_REQUESTS=${CPU_REQUESTS:-192}
   export MEMORY_REQUESTS=${MEMORY_REQUESTS:-2600Gi}
   export RDMA_REQUESTS=${RDMA_REQUESTS:-1}
+
+  export TOLERENCE_YAML='tolerations:
+            - key: "nvidia.com/gpu"
+              operator: "Exists"
+              effect: "NoSchedule"
+'
+  # if RDMA_REQUESTS is 1 then add nvidia gpu toleration as well
+  if [[ "${RDMA_REQUESTS}" -eq 1 ]]; then
+    TOLERENCE_YAML+='
+            - key: "rdma"
+              operator: "Exists"
+              effect: "NoSchedule"
+'
 else
   if [[ "$1" == "--cpu" ]]; then
     # CPU only devbox
@@ -51,6 +64,8 @@ else
     export CPU_REQUESTS=${CPU_REQUESTS:-12}
     export MEMORY_REQUESTS=${MEMORY_REQUESTS:-64Gi}
     export RDMA_REQUESTS=${RDMA_REQUESTS:-0}
+
+    export TOLERENCE_YAML=''
   else
     echo "Usage: $0 [--cpu]" >&2
     exit 1

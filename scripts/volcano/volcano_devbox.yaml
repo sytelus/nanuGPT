@@ -41,13 +41,9 @@ spec:
             - name: data
               persistentVolumeClaim:
                claimName: ${VOLCANO_DATA_PVC_NAME}
-          tolerations:
-            - key: "rdma"
-              operator: "Exists"
-              effect: "NoSchedule"
-            - key: "nvidia.com/gpu"
-              operator: "Exists"
-              effect: "NoSchedule"
+
+          ${TOLERENCE_YAML}
+
           affinity:
             podAntiAffinity:
               requiredDuringSchedulingIgnoredDuringExecution:
