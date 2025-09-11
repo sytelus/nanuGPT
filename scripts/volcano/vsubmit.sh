@@ -1,44 +1,64 @@
 #! /bin/bash
-
-####################################################################################################
-# This script submits a job to volcano cluster
-# It copies the source directory to a shared location, substitutes placeholders in yaml config and
-# submits the job to the cluster.
-
-# Invoke this script as:
-# ./scripts/volcano/volcano_submit.sh my_train.py some_args
-####################################################################################################
-
-
 set -eu -o pipefail # -o xtrace # fail if any command failes, log all commands, -o xtrace
 
-REQUIRED_VARS=("OUT_DIR") # out_dir specified where source code will be copied and job outputs will be stored, sypically mount shared to the cluster
+####################################################################################################
+# This script submits a job to volcano cluster.
+# It copies the source directory to cluster, installs the directory as editable package and
+# runs the specified command.
+#
+# Useful variables:
+# -----------------
+# JOB_NAME - must be set by user, used in job name
+# OUT_DIR - output dir on cluster, default /data/<user>
+# INSTALL_PACKAGE - if 1 (default) then pip install -e . the source dir before running command
+# UPDATE_PYTHONPATH - if 1 then add source dir to PYTHONPATH (ignored if INSTALL_PACKAGE=1)
+# TRANSFER_VARS - space separated list of names for env vars to transfer to container
+#                 (e.g. DATA_ROOT WANDB_API_KEY WANDB_HOST)
+#                 All these vars will be set on cluster to same value in current environment
+# START_COMMAND - command to run in container, default all args to this script
+# NODES - number of nodes to use, default 1
+# GPUS_PER_NODE - number of gpus per node, default 8
+# CONTAINER_IMAGE_PATH - container image to use, default nvcr.io/nvidia/pytorch:25.08-py3
+# ENV_SETUP_SCRIPT - script to setup environment before running command
+# VOLCANO_NAMESPACE - namespace in volcano cluster
+# VOLCANO_DATA_PVC_NAME - data PVC claim in volcano cluster
+#
+# Invoke this script as:
+# JOB_NAME='my-project' NODES=2 \
+# TRANSFER_VARS="DATA_ROOT WANDB_API_KEY WANDB_HOST" \
+# vsubmit.sh my_train.py some_args
+####################################################################################################
+
+
 SOURCE_DIR=${SOURCE_DIR:-.} # where is source directory
 USER_ALIAS=${USER%@*}
 
-# Validate PROJECT_NAME
+OUT_DIR=${OUT_DIR:-/data/${USER_ALIAS}} # base output directory where we will create sub dir for this run
+echo "Job output will be at '${OUT_DIR}' on cluster. If you don't want this then set OUT_DIR env var."
+
+# Validate JOB_NAME
 if [ -z "${JOB_NAME:-}" ]; then
   cat >&2 <<'EOF'
-Please set JOB_NAME variable that will be used in your job names. You can do this by:
 
- JOB_NAME='my-project' vsubmit.sh <args>
+You must set JOB_NAME variable that will be used in your job names. You can do this by:
+
+ JOB_NAME='my-project' vsubmit.sh <command_to_run_with_args>
 
 NOTE: my-project must have alpha-numeric chars or - (no underscores or spaces)
+
 EOF
   exit 1
 fi
 
 export JOB_NAME_FULL=${USER_ALIAS}-${JOB_NAME}
+export TRANSFER_VARS=${TRANSFER_VARS:-} # space separated list of additional env vars to transfer to container
 export START_COMMAND=${START_COMMAND:-"$@"} # use all args to this script as command we will execute
-export DATA_ROOT=${DATA_ROOT:-} # data directory to mount in container
 export NODES=${NODES:-1}
 export GPUS_PER_NODE=${GPUS_PER_NODE:-8}
 export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"nvcr.io/nvidia/pytorch:25.08-py3"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
 export ENV_SETUP_SCRIPT=${ENV_SETUP_SCRIPT:-} # script to setup environment for specific cluster, this runs before any code
 export VOLCANO_NAMESPACE=${VOLCANO_NAMESPACE:-} # namespace in volcano cluster
 export VOLCANO_DATA_PVC_NAME=${VOLCANO_DATA_PVC_NAME:-} # data PVC claim in volcano cluster
-export WANDB_API_KEY=${WANDB_API_KEY:-}
-export WANDB_HOST=${WANDB_HOST:-}
 
 export INSTALL_PACKAGE=${INSTALL_PACKAGE:-1} # assume source directory is package and first do pip install -e .
 export UPDATE_PYTHONPATH=${UPDATE_PYTHONPATH:-0} # add source dir to PYTHONPATH (ignored if INSTALL_PACKAGE=1)
@@ -55,11 +75,11 @@ export CPU_REQUESTS=${CPU_REQUESTS:-192}
 export MEMORY_REQUESTS=${MEMORY_REQUESTS:-2600Gi}
 export RDMA_REQUESTS=${RDMA_REQUESTS:-1}
 
-### ---------- Check required environment variables
-for var in "${REQUIRED_VARS[@]}"; do
-    [ -z "${!var}" ] && { echo "Error: Required environment variable '$var' is not set." >&2; exit 1; }
-done
-### ---------- End check required environment variables
+# validate START_COMMAND is not empty
+if [ -z "${START_COMMAND}" ]; then
+  echo "Error: You must specify command to run on cluster as argument to this script or set START_COMMAND env var.\nFor example: JOB_NAME='my-project' vsubmit.sh <command_to_run_with_args>"
+  exit 1
+fi
 
 if kubectl get vcjob "${JOB_NAME_FULL}" -n "${VOLCANO_NAMESPACE}" >/dev/null 2>&1; then
   echo "Job ${JOB_NAME_FULL} already exists in ${VOLCANO_NAMESPACE}"
@@ -83,11 +103,12 @@ echo "SOURCE_DIR: $(realpath ${SOURCE_DIR:-<not set>})"
 echo "START_COMMAND: ${START_COMMAND:-<not set>}"
 echo "JOB_OUT_DIR: ${JOB_OUT_DIR:-<not set>}"
 echo "LOCAL_JOB_OUT_DIR: ${LOCAL_JOB_OUT_DIR:-<not set>}"
-echo "DATA_ROOT: ${DATA_ROOT:-<not set>}"
 echo "CONTAINER_IMAGE_PATH: ${CONTAINER_IMAGE_PATH:-<not set>}"
 echo "ENV_SETUP_SCRIPT: ${ENV_SETUP_SCRIPT:-<not set>}"
 echo "NODES: ${NODES:-<not set>}"
 echo "GPUS_PER_NODE: ${GPUS_PER_NODE:-<not set>}"
+echo "INSTALL_PACKAGE: ${INSTALL_PACKAGE:-<not set>}"
+echo "UPDATE_PYTHONPATH: ${UPDATE_PYTHONPATH:-<not set>}"
 
 # some clusters may need additional env vars in which case specify script that sets them
 if [ ! -z "${ENV_SETUP_SCRIPT}" ]; then
@@ -139,8 +160,7 @@ make_env_vars() {
     export ENV_VARS=${env_vars_val}
 }
 # make ENV_VARS variable that will be script to setup env in container
-make_env_vars CUDA_LAUNCH_BLOCKING TORCHINDUCTOR_COORDINATE_DESCENT_TUNING TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS \
-    WANDB_API_KEY WANDB_HOST
+make_env_vars ${TRANSFER_VARS} CUDA_LAUNCH_BLOCKING TORCHINDUCTOR_COORDINATE_DESCENT_TUNING TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS
 echo "ENV_VARS to be setup in container:"
 echo "--------------------------------"
 echo "$ENV_VARS"
