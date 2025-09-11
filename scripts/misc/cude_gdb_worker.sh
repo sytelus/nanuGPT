@@ -36,7 +36,9 @@ if [[ "${LOCAL_RANK:-0}" == "0" ]]; then
     # Rank 0 under cuda-gdb; ignore early TERM so we can hit breakpoints
     exec cuda-gdb -q \
         -ex "set pagination off" \
-        -ex "set cuda api_failures stop" \
+        -ex "set cuda break_on_launch none" \
+        -ex "set cuda api_failures ignore" \
+        -ex "set cuda memcheck on" \
         -ex "handle SIGTERM nostop noprint ignore" \
         -ex "handle SIGHUP nostop noprint ignore" \
         -ex "run" \
