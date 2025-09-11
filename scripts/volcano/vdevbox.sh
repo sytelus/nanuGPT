@@ -53,6 +53,7 @@ if [ "$#" -eq 0 ]; then
               operator: "Exists"
               effect: "NoSchedule"
 '
+  fi
 else
   if [[ "$1" == "--cpu" ]]; then
     # CPU only devbox
