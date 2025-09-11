@@ -31,7 +31,6 @@ export NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-0}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
 
 if [ "$#" -eq 0 ]; then
-  echo "GPU devbox with ${GPUS_PER_NODE} GPUs"
   # default GPU devbox vars
   export JOB_NAME=${USER_ALIAS}-devbox
   export GPUS_PER_NODE=${GPUS_PER_NODE:-8}
