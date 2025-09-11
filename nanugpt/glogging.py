@@ -469,6 +469,7 @@ class Logger:
                         'env/TORCHINDUCTOR_COORDINATE_DESCENT_TUNING': os.environ.get('TORCHINDUCTOR_COORDINATE_DESCENT_TUNING', None),
                         'env/TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS': os.environ.get('TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS', None),
                         'env/TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS': os.environ.get('TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS', None),
+                        'env/TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC': os.environ.get('TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC', None),
 
                         'flash_attn_ver': str(utils.get_package_ver('flash_attn')),
                         'transformer_engine_ver': str(utils.get_package_ver('transformer_engine')),

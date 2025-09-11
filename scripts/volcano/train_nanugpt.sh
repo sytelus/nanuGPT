@@ -6,7 +6,7 @@ set -eu -o pipefail # fail if any command failes, log all commands, -o xtrace
 # setup below values
 
 # can't inline these vars because we are using it as parameter to submit script
-export RUN_NAME=nanugpt-openwebtext
+export RUN_NAME=nanugpt-openwebtext-b60
 export JOB_NAME=gpt-std
 
 # directory where this script is running
