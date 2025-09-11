@@ -54,7 +54,7 @@ if [ "$#" -eq 0 ]; then
               effect: "NoSchedule"
 '
   fi
-  export RDMA_YAML='rdma/rdma_shared_device_a: "${RDMA_REQUESTS}"'
+  export RDMA_YAML="rdma/rdma_shared_device_a: \"${RDMA_REQUESTS}\""
 else
   if [[ "$1" == "--cpu" ]]; then
     # CPU only devbox
