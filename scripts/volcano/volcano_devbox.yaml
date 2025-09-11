@@ -92,6 +92,10 @@ spec:
                   # this will setup other env vars in container
                   ${ENV_VARS}
 
+                  # move to user-specific devbox directory on volume mounted as data
+                  mkdir -p /data/${USER_ALIAS}/devbox
+                  cd /data/${USER_ALIAS}/devbox
+
                   sleep infinity
 
               resources:
