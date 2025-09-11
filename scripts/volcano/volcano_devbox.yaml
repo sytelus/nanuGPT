@@ -99,7 +99,7 @@ spec:
                   nvidia.com/gpu: "${GPUS_PER_NODE}"
                   cpu: "${CPU_REQUESTS}"
                   memory: "${MEMORY_REQUESTS}"
-                  rdma/rdma_shared_device_a: "${RDMA_REQUESTS}"
+                  ${RDMA_YAML}
                 limits: *requests
 
     - name: worker
