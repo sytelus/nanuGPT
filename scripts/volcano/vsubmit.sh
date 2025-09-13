@@ -203,7 +203,7 @@ echo "Pod: ${POD_NAME}"
 
 # Wait until the pod is Ready
 echo "Waiting for pod to be Ready..."
-kubectl -n "${VOLCANO_NAMESPACE}" wait --for=condition=Ready "${POD_POD_NAME}" --timeout=10m
+kubectl -n "${VOLCANO_NAMESPACE}" wait --for=condition=Ready "${POD_POD_NAME}" --timeout=100m
 
 # Tail logs from a specific container (e.g., "trainer") in all pods of this job
 for P in $(kubectl get pods -l volcano.sh/job-name="$VCJOB_NAME" -o name); do
