@@ -19,4 +19,4 @@ export DATA_ROOT=/data/shitals/data
 export TRANSFER_VARS="DATA_ROOT WANDB_API_KEY WANDB_HOST"
 
 NODES=1 \
-bash ${SCRIPT_DIR}/vsubmit.sh train.py configs/train_gpt2/openwebtext.yaml --general.project_name nanugpt-openwebtext --general.run_name ${RUN_NAME} $@
+bash ${SCRIPT_DIR}/vsubmit.sh train.py configs/train_gpt2/openwebtext.yaml --general.project_name nanugpt-openwebtext --general.run_name ${RUN_NAME} --logging.enable_wandb false $@

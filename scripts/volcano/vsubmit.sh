@@ -129,7 +129,7 @@ pushd "${SOURCE_DIR}"
 #     git archive --format=tar HEAD | tar -x -C "${TARGET_SOURCE_DIR}"
 # else
     echo "Copying source from working dir..."
-    rsync -a --exclude='.git' ./ "${TARGET_SOURCE_DIR}"
+    rsync --delete-after --filter=":e- .gitignore" --filter="- .git/" -a ./ "${TARGET_SOURCE_DIR}"
 #fi
 popd
 
