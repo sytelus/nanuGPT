@@ -63,7 +63,7 @@ data:
 
 training:
   device_batch_size: 12 # default 12, GH200: 72
-  max_steps: 600000    # for OpenWebText/9B tokens
+  max_steps: 600000    # for OpenWebText/9B dataset tokens, 294.5B training tokens
   enable_train_log: true
   log_every: 20
   grad_clip: 1.0 # disabled if 0.0
