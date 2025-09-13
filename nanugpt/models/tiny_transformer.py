@@ -67,7 +67,7 @@ class TinyTransformer(torch.nn.Module):
     def forward(self, inputs: Tensor,
                 labels: Optional[torch.Tensor] = None,
                 return_logits: bool = True,
-                ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]: # logits, loss, num_correct, num_labels
+                ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[int]]: # logits, loss, num_correct
 
         # inputs: (batch_size, context_len)
 

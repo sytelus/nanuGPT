@@ -168,7 +168,7 @@ class Llama(nn.Module):
         self, idx: torch.Tensor, max_seq_length: Optional[int] = None, input_pos: Optional[torch.Tensor] = None,
         labels: Optional[torch.Tensor] = None,
         return_logits: bool = True,
-    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]: # logits, loss, num_correct, num_labels
+    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[int]]: # logits, loss, num_correct
 
         B, T = idx.size()
         use_kv_cache = input_pos is not None

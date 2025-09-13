@@ -102,7 +102,6 @@ class MLP(nn.Module):
         return x
 
 class Block(nn.Module):
-
     def __init__(self, config:GPTConfig):
         super().__init__()
         self.attn = CausalSelfAttention(config)
@@ -134,7 +133,7 @@ class GPT(nn.Module):
                 labels: Optional[torch.Tensor] = None,
                 return_logits: bool = True,
                 only_last=False,
-    )-> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]: # logits, loss, num_correct, num_labels
+    )-> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[int]]: # logits, loss, num_correct
         b, t = idx.size()
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
         pos = torch.arange(0, t, dtype=torch.long, device=idx.device) # shape (t)

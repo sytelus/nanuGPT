@@ -38,7 +38,7 @@ def estimate_loss(model:torch.nn.Module,
             _, loss, correct = model(x, y, return_logits=False)
             n_samples = len(y)
             loss_sum += loss.detach().item() * n_samples # loss is average so we need to multiply by n_samples to get total loss over batch
-            correct_sum += correct.detach().item()
+            correct_sum += correct
             preds_count += len(y)
             sample_count += n_samples
     iter_count = i+1
@@ -214,7 +214,6 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         metrics = {} # add metrics here if any
         # Accumulate metrics on device to avoid per-microstep host syncs
         loss_sum_t = torch.zeros((), device=device)
-        correct_sum_t = torch.zeros((), device=device)
 
         model.train()
 
@@ -240,7 +239,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
                 _, loss, correct = model(x, y, return_logits=False)
                 # Accumulate on device; detach to avoid tracking grads
                 loss_sum_t += loss.detach() * n_samples
-                correct_sum_t += correct.detach()
+                correct_sum += correct
                 step_preds_count += len(y)
 
                 # Scale the loss to account for gradient accumulation
@@ -272,14 +271,13 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
         # Materialize device accumulators once per step
         loss_sum = loss_sum_t.item()
-        correct_sum = correct_sum_t.item()
 
         # gather matrics from all ranks
         if torch_info.is_distributed:
             # dist.barrier() # not needed as reduce will sync all processes
             # reduce tensors to global_rank 0 to get numbers from all ranks
             fp32_dist = torch.tensor([loss_sum, fwd_bwd_interval, pre_clip_norm,
-                                      correct_sum, step_preds_count, step_sample_count, step_token_count], dtype=torch.float32, device=device)
+                                      float(correct_sum), step_preds_count, step_sample_count, step_token_count], dtype=torch.float32, device=device)
             dist.reduce(fp32_dist, dst=0, op=dist.ReduceOp.SUM)
             loss_sum,fwd_bwd_interval_sum, pre_clip_norm_sum, \
             correct_sum, step_preds_count, step_sample_count, step_token_count = tuple(fp32_dist.tolist())

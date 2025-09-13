@@ -9,7 +9,7 @@ _eos_token_id: int = -1
 
 def get_loss(model_output: Tensor,
              labels: Tensor,
-            ) -> Tuple[Tensor, Tensor]:
+            ) -> Tuple[Tensor, int]:
     r"""
     Compute cross entropy loss (only on answer tokens) and count how many documents
     have all tokens predicted correctly.
@@ -99,14 +99,14 @@ def get_loss(model_output: Tensor,
     # A document is correct if the number of correct tokens equals the total token count in that document.
     # (Note: Documents with zero answer tokens do not appear in unique_groups and hence are not counted.)
     correct_docs = (group_correct_sum == group_counts)
-    num_correct_docs = correct_docs.sum()  # Total count of correct documents
+    num_correct_docs = correct_docs.sum().detach().item()  # Total count of correct documents
 
     return loss, num_correct_docs
 
 def get_loss_factory(
              eq_token_id: int,
              pad_token_id: int,
-             eos_token_id: int,)->Callable[[Tensor, Tensor], Tuple[Tensor, Tensor]]:
+             eos_token_id: int,)->Callable[[Tensor, Tensor], Tuple[Tensor, int]]:
     global _eq_token_id, _pad_token_id, _eos_token_id
 
     _eq_token_id, _pad_token_id, _eos_token_id = eq_token_id, pad_token_id, eos_token_id

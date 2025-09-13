@@ -255,7 +255,7 @@ class GPT(nn.Module):
                 labels: Optional[torch.Tensor] = None,
                 return_logits: bool = True,
                 only_last=False,
-    )-> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]: # logits, loss, num_correct, num_labels
+    )-> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[int]]: # logits, loss, num_correct
 
         device = idx.device
         batch_size, seq_len = idx.size()
