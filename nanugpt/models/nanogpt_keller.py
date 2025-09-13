@@ -157,7 +157,9 @@ class GPT(nn.Module):
             assert self.get_loss is not None, "Loss function is not defined"
             loss, correct = self.get_loss(logits, labels)
             # keeping logits around may unnecessarily consume a lot of memory  (atleast 1GB for 124M params)
-            return logits if return_logits else None, loss, correct
+            if return_logits:
+                return logits, None, None
+            return None, loss, correct
 
         return logits, None, None
 

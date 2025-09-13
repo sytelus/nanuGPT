@@ -2,7 +2,7 @@
 general:
   project_name: 'train_gpt2'
   run_name: '_time:' # default run name is timestamp
-  run_description: null
+  run_description: ''
   out_dir: '$OUT_DIR/$project_name/$run_name'
   device_type: 'cuda'            # auto select if blank or cpu, cuda
   distributed_backend: 'nccl'       # nccl, gloo, mpi, horovod)

@@ -6,9 +6,11 @@ set -eu -o pipefail # fail if any command failes, log all commands, -o xtrace
 # setup below values
 
 # can't inline these vars because we are using it as parameter to submit script
-export RUN_NAME=owt-10k-baseline-b64g512warm700-keller-model-scaler
-export RUN_DESC="with global bz=512, local bz=64 over nanogpt default hparams except 3X LR and WSD scheduler, keller model+scaler"
+export RUN_NAME=owt-10k-baseline-b60g480
+export RUN_DESC="with global bz=480, local bz=60 over nanogpt default hparams"
 export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=1
+# do not optimize scaler outputs on compile, will cause graph break warnings
+export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=0
 
 export JOB_NAME=gpt-std
 
