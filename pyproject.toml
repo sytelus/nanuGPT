@@ -27,7 +27,6 @@ classifiers = [
 keywords = ["gpt", "nanogpt", "tinystories", "grokking", "openwebtext", "pretraining"]
 dependencies = [
     "einops",
-    "tiktoken",
     "wandb",
     "mlflow",
     "sentencepiece",
