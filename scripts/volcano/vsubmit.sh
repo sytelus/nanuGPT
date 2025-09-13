@@ -56,6 +56,7 @@ export TRANSFER_VARS=${TRANSFER_VARS:-} # space separated list of additional env
 export START_COMMAND=${START_COMMAND:-"$@"} # use all args to this script as command we will execute
 export NODES=${NODES:-1}
 export GPUS_PER_NODE=${GPUS_PER_NODE:-8}
+export NPROC_PER_NODE=${NPROC_PER_NODE:-${GPUS_PER_NODE}} # by default use all gpus on node
 export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"nvcr.io/nvidia/pytorch:25.08-py3"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
 export ENV_SETUP_SCRIPT=${ENV_SETUP_SCRIPT:-} # script to setup environment for specific cluster, this runs before any code
 export VOLCANO_NAMESPACE=${VOLCANO_NAMESPACE:-} # namespace in volcano cluster
@@ -75,6 +76,12 @@ export MEMORY_SIZE_LIMIT=${MEMORY_SIZE_LIMIT:-100Gi}
 export CPU_REQUESTS=${CPU_REQUESTS:-192}
 export MEMORY_REQUESTS=${MEMORY_REQUESTS:-2600Gi}
 export RDMA_REQUESTS=${RDMA_REQUESTS:-1}
+
+# good defaults for Pytorch
+# avoid OOM errors by allowing segments to expand
+export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
+# turn on heavy optimizations in torchinductor
+export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=${TORCHINDUCTOR_COORDINATE_DESCENT_TUNING:-1}
 
 # validate START_COMMAND is not empty
 if [ -z "${START_COMMAND}" ]; then
@@ -161,7 +168,10 @@ make_env_vars() {
     export ENV_VARS=${env_vars_val}
 }
 # make ENV_VARS variable that will be script to setup env in container
-make_env_vars ${TRANSFER_VARS} CUDA_LAUNCH_BLOCKING TORCHINDUCTOR_COORDINATE_DESCENT_TUNING TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS
+make_env_vars ${TRANSFER_VARS} CUDA_LAUNCH_BLOCKING TORCHINDUCTOR_COORDINATE_DESCENT_TUNING \
+  TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS \
+  PYTORCH_CUDA_ALLOC_CONF TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC
+
 echo "ENV_VARS to be setup in container:"
 echo "--------------------------------"
 echo "$ENV_VARS"

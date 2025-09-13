@@ -69,7 +69,7 @@ spec:
                   containerPort: ${CONTAINER_PORT}   # pytorch MASTER_PORT; svc plugin creates DNS
               env:
                 - name: NPROC_PER_NODE
-                  value: "${GPUS_PER_NODE}"             # spawn one worker per GPU on each node
+                  value: "${NPROC_PER_NODE}"             # spawn one worker per GPU on each node
                 - name: GPUS_PER_NODE
                   value: "${GPUS_PER_NODE}"
                 - name: NODES
