@@ -15,4 +15,4 @@ SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 # RESERVATION=<my_reservation> \
 # DATA_ROOT="/mnt/path/to/data" \
 # OUT_DIR=<my_out_dir> \
-NODES=4 bash ${SCRIPT_DIR}/sbatch_ex.sh train.py configs/train_gpt2/openwebtext.yaml --general.project_name ${JOB_NAME} $@
+NODES=1 bash ${SCRIPT_DIR}/scripts/slurm/sbatch_ex.sh train.py configs/train_gpt2/openwebtext_tokens10b_keller_adamw.yaml --general.project_name ${JOB_NAME} $@

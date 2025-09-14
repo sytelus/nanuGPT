@@ -1,17 +1,25 @@
 #! /bin/bash
 set -eu -o pipefail # -o xtrace # fail if any command failes, log all commands, -o xtrace
 
-# simpler command
-# torchrun --standalone --nproc_per_node=$(python -c "import torch; print(torch.cuda.device_count())") nanugpt/train.py configs/train_gpt2/tinyshakespeare.yaml
-
 export OUT_DIR=${OUT_DIR:-/data/${USER}} # base output directory where we will create sub dir for this run
 
-# make sure OUT_DIR exists already or exit
-if [ ! -d "$OUT_DIR" ]; then
-  echo "Output directory $OUT_DIR does not exist. Please create it first or set OUT_DIR env var to an existing directory."
+# make sure OUT_DIR is set (it doesn't need to exist yet)
+if [ -z "${OUT_DIR:-}" ]; then
+  echo "Please set OUT_DIR env var to point to directory where output will be stored."
   exit 1
 else
-  echo "Output directory is $OUT_DIR"
+  echo "OUT_DIR is $OUT_DIR"
+fi
+
+# check DATA_ROOT is set and exists
+if [ -z "${DATA_ROOT:-}" ]; then
+  echo "Please set DATA_ROOT env var to point to directory where data is stored."
+  exit 1
+elif [ ! -d "$DATA_ROOT" ]; then
+  echo "DATA_ROOT directory $DATA_ROOT does not exist. Please create it first or set DATA_ROOT env var to an existing directory."
+  exit 1
+else
+  echo "DATA_ROOT is $DATA_ROOT"
 fi
 
 export NPROC_PER_NODE=${NPROC_PER_NODE:-$(python -c "import torch; print(torch.cuda.device_count())")}

@@ -10,7 +10,7 @@ python scripts/datasets/tinystories/tinystories2arrow.py
 # tokenize using GPT2 tokenizer
 python tokenize_dataset.py configs/tokenize/tinystories_tiktoken_gpt2.yaml
 
-# run training using GPT2 124M model
+# run training using GPT2 124M model on single GPU
 python train.py configs/train_gpt2/tinystories.yaml
 
 # generate completitions for the prompt

@@ -82,22 +82,36 @@ Above will train model using all the works of Shakespear as data in 5 minutes on
 
 ## Using Multi GPUs
 
-To run on multiple GPUs, instead of `python` use `torchrun` like this:
+### Local Node
+
+To run on multiple GPUs on local node, instead of `python` you can use `torchrun` like this:
 
 ```bash
 torchrun --nproc_per_node=8 --standalone train.py configs/train_gpt2/tinyshakespeare.yaml
 ```
 
+### Slurm Cluster
+
 If you are working in slurm environment, you can also run multinode job like this:
 
 ```bash
-NODES=4 DATA_ROOT=<my_data_dir> OUT_DIR=<my_output_dir> JOB_NAME=<my_job> \
-bash ./scripts/slurm/sbatch_ex.sh train.py configs/train_gpt2/openwebtext.yaml
+NODES=1 DATA_ROOT=<my_data_dir> OUT_DIR=<my_output_dir> JOB_NAME=<my_job> \
+bash ./scripts/slurm/sbatch_ex.sh train.py configs/train_gpt2/openwebtext_classic.yaml
+
+# also see script slurm_owt10b_baseline.sh for more robustness and flexibility
 ```
 
 Above command uses Nvidia NGC image by default, mounts directory specified in `DATA_ROOT` and `OUT_DIR` on the container, creates job sub directory with datatime and then launches specified command line using python for each worker process (default 8 processes for 8 GPUs per node) in each node.
 
 Please see `sbatch_ex.sh` for various options offered by this script.
+
+### Volcano Cluster
+
+For Volcano/k8s infrastructure, you can launch multigpu job like this:
+
+```bash
+bash volcano_karpathy_owt10b.sh
+```
 
 ## Using Other Datasets
 
@@ -114,6 +128,21 @@ Please see `sbatch_ex.sh` for various options offered by this script.
 ### Config
 
 All config files can be found in `configs/` and things are self-explanatory. Sometime you might notice the top line with `__include__:` to specify the base config that you can inherit from. This is a custom feature implemented in this repo so we can share the base config across many experiments. The `base_config.yaml` serves as defaults that can be overriden in your yaml.
+
+#### Various Available Configs
+
+| Config                   | Description                                 |
+|:-------------------------|:--------------------------------------------|
+| configs/train_gpt2/openwebtext_classic.yaml | NanoGPT 124M params 295B tokens run using original hyper params by Karpathy |
+| configs/train_gpt2/openwebtext_tokens10b_classic.yaml | 124M params 10B tokens run using original NanoGPT hyper params by Karpathy |
+| configs/train_gpt2/openwebtext_tokens10b_karpathy_llmc.yaml | 124M params 10B tokens run using llm.c hyper params by Karpathy |
+| configs/train_gpt2/openwebtext_tokens10b_keller_adamw.yaml | 124M params 10B tokens run using AdamW+WSD hyper params by Keller Jordan |
+| configs/train_gpt2/tinyshakespeare.yaml | Training using TinyShakespeare dataset |
+| configs/train_gpt2/tinystories.yaml | Training using Tinystories dataset |
+| configs/train_gpt2/wikitext103.yaml | Training using WikiText-103 dataset |
+| configs/grokking/baseline.yaml | Reproduces grokking paper results  |
+| configs/grokking/prime50k.yaml | Grokking experiment with larger prime for more data  |
+| configs/grokking/prime223.yaml | Grokking experiment that runs much faster than original paper |
 
 ### Tokenization
 

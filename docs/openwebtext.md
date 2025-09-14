@@ -9,11 +9,22 @@ python scripts/datasets/openwebtext/download.py
 # tokenize input file using byte tokenizer
 python tokenize_dataset.py configs/tokenize/openwebtext_tiktoken_gpt2.yaml
 
-# training using GPT2 124M model
-python train.py configs/train_gpt2/openwebtext.yaml
+# training using GPT2 124M model on single GPU
+# with Karpathy's original NanoGPT configuration
+python train.py configs/train_gpt2/openwebtext_classic.yaml
+
+# training using GPT2 124M model with 10B tokens of OpenWebText dataset
+# with Keller Jorden's model+WSD schedule+AdamW+3X LR configuration
+# on slurm infra
+bash volcano_karpathy_owt10b.sh
+
+# training using GPT2 124M model with 10B tokens of OpenWebText dataset
+# with Karpathy's llm.c configuration
+# on slurm infra
+bash slurm_owt10b_baseline.sh
 
 # generate completitions for the prompt
-python generate.py configs/train_gpt2/openwebtext.yaml
+python generate.py configs/train_gpt2/openwebtext_classic.yaml
 ```
 
 ![Training and Validation Loss](results/openwebtext/loss-log_step.png)
@@ -46,7 +57,7 @@ Karpathy's original GPT2-124M run does 600,000 steps on a global batch of 480 wi
 For quick experiment, try 10B tokens instead of 295B tokens.
 
 ```bash
-python train.py configs/train_gpt2/openwebtext_tokens10b.yaml
+python train.py configs/train_gpt2/openwebtext_tokens10b_classic.yaml
 ```
 
 Baseline based on Karpathy's config (before v0.3.8):

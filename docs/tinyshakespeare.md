@@ -10,7 +10,7 @@ wget -P $DATA_ROOT/datasets/tinyshakespeare https://raw.githubusercontent.com/ka
 # tokenize input file using byte tokenizer
 python tokenize_dataset.py configs/tokenize/tinyshakespeare_byte.yaml
 
-# run training using GPT2 124M model
+# run training using GPT2 124M model on single GPU
 python train.py configs/train_gpt2/tinyshakespeare.yaml
 
 # generate completitions for the prompt
