@@ -2,6 +2,7 @@
 
 set -eu -o pipefail # fail if any command failes, log all commands, -o xtrace
 
+# Runs Karpathy's llm.c run for 10.7B tokens.
 # run this from project root
 # setup below values
 
