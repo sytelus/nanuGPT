@@ -41,7 +41,6 @@ scheduler:
   module_kwargs:
     warmup_iters: 256
     cooldown_iters: 2048
-    const_lr: 18.0E-4
 
 eval:
   # karpathy's eval config

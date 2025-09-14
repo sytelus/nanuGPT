@@ -52,7 +52,7 @@ training:
 #   module_kwargs:
 #     warmup_iters: 256
 #     cooldown_iters: 2048
-#     const_lr: 18.0E-4
+#     # plateau lr is taken from optimizer.module_kwargs.learning_rate
 
 eval:
   eval_every: 250

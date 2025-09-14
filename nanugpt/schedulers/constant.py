@@ -6,13 +6,11 @@ from torch.optim.lr_scheduler import LRScheduler
 from nanugpt import glogging as logging
 
 class ConstantWithCooldownScheduler(LRScheduler):
-    def __init__(self, optimizer, const_lr:float,
+    def __init__(self, optimizer,
                  warmup_iters: Optional[int], max_iters: Optional[int],
-                 cooldown_iters: Optional[int], cooldown_frac:Optional[float],
+                 cooldown_iters: Optional[int], cooldown_frac: Optional[float],
                  end_factor: float,
                  last_epoch=-1):
-
-        self.const_lr = const_lr
 
         self.warmup_iters = warmup_iters
         self.end_factor = end_factor
@@ -33,12 +31,12 @@ class ConstantWithCooldownScheduler(LRScheduler):
         # get initial LR set in each group in optimizer
         init_lrs = np.fromiter((group['initial_lr'] for group in self.optimizer.param_groups), dtype=np.float32)
 
-         # linear warmup for warmup_iters steps
+        # linear warmup for warmup_iters steps
         if self.warmup_iters is not None and self.last_epoch < self.warmup_iters:
             return (init_lrs * self.last_epoch / self.warmup_iters).tolist()
 
         # if we ran past max_iters, return min LR
-        if self.max_iters is not None and self.last_epoch >= self.max_iters: # return min LR
+        if self.max_iters is not None and self.last_epoch >= self.max_iters:  # return min LR
             return (init_lrs * self.end_factor).tolist()
 
         # if within cooldown, return linear decay down to min learning rate
@@ -47,17 +45,16 @@ class ConstantWithCooldownScheduler(LRScheduler):
             decay_ratio = (self.max_iters - self.last_epoch - 1) / self.cooldown_iters
             return ((init_lrs - min_lr) * decay_ratio + min_lr).tolist()
 
-        # in between, use constant learning rate
-        return np.full_like(init_lrs, self.const_lr).tolist()
+        # in between, use constant learning rate equal to initial lr
+        return init_lrs.tolist()
 
 
-def get_scheduler(optimizer, const_lr:float,
+def get_scheduler(optimizer,
                   warmup_iters: Optional[int], max_iters: Optional[int],
-                  cooldown_iters: Optional[int], cooldown_frac:Optional[float],
-                  end_factor:float):
+                  cooldown_iters: Optional[int], cooldown_frac: Optional[float],
+                  end_factor: float):
     return ConstantWithCooldownScheduler(
             optimizer=optimizer,
-            const_lr=const_lr,
             warmup_iters=warmup_iters,
             max_iters=max_iters,
             cooldown_iters=cooldown_iters,
