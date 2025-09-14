@@ -41,6 +41,12 @@ if [ "$#" -eq 0 ]; then
   export MEMORY_REQUESTS=${MEMORY_REQUESTS:-2600Gi}
   export RDMA_REQUESTS=${RDMA_REQUESTS:-1}
 
+  # good defaults for Pytorch
+  # avoid OOM errors by allowing segments to expand
+  export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
+  # turn on heavy optimizations in torchinductor
+  export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=${TORCHINDUCTOR_COORDINATE_DESCENT_TUNING:-1}
+
   export TOLERENCE_YAML='tolerations:
             - key: "nvidia.com/gpu"
               operator: "Exists"
@@ -124,8 +130,10 @@ make_env_vars() {
     export ENV_VARS=${env_vars_val}
 }
 # make ENV_VARS variable that will be script to setup env in container
-make_env_vars ${TRANSFER_VARS} CUDA_LAUNCH_BLOCKING TORCHINDUCTOR_COORDINATE_DESCENT_TUNING TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS \
-    WANDB_API_KEY WANDB_HOST
+make_env_vars ${TRANSFER_VARS} CUDA_LAUNCH_BLOCKING TORCHINDUCTOR_COORDINATE_DESCENT_TUNING \
+  TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS \
+  PYTORCH_CUDA_ALLOC_CONF TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS
+
 echo "ENV_VARS to be setup in container:"
 echo "--------------------------------"
 echo "$ENV_VARS"
@@ -164,7 +172,7 @@ echo "Pod: ${POD_NAME}"
 
 # Wait until the pod is Ready
 echo "Waiting for pod to be Ready..."
-if ! kubectl -n "${VOLCANO_NAMESPACE}" wait --for=condition=Ready "${POD_POD_NAME}" --timeout=10m; then
+if ! kubectl -n "${VOLCANO_NAMESPACE}" wait --for=condition=Ready "${POD_POD_NAME}" --timeout=100m; then
   if ! kubectl -n "${VOLCANO_NAMESPACE}" get pod "${POD_NAME}" -o jsonpath='{.status.containerStatuses[0].state.running}' 2>/dev/null | grep -q 'true'; then
     echo "Pod ${POD_NAME} is not running. Dumping pod status:"
     kubectl -n "${VOLCANO_NAMESPACE}" describe pod "${POD_NAME}" || true
