@@ -1,5 +1,7 @@
 __include__: ['base_config.yaml']
 
+# Reproduces Karthay's original nanogpt run
+
 general:
   project_name: 'gpt2_owt'
 

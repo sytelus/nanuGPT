@@ -1,3 +1,6 @@
+# Reproduces Keller Jorden's run with AdamW, model treaks, scaler, LE and WSD schedule for 10.7B tokens.
+# This does not include every twek he made for the record.
+
 # Config translated from Keller Jordon's adamw record run
 # https://github.com/KellerJordan/modded-nanogpt/blob/09a49d4af4804af92d14216b43136f5510a8fba8/run.sh
 
@@ -27,7 +30,7 @@ scaler:
 
 training:
   device_batch_size: 64
-  max_steps: 9536
+  max_steps: 9536 # 4999610368 tokens, for 10.6666B tokens, use 20345
   global_batch_size: 512
 
 optimizer:
@@ -43,7 +46,7 @@ scheduler:
     cooldown_iters: 0.4  # CAUSION: many old runs uses constant 2048 incorrectly
 
 eval:
-  # karpathy's eval config
+  # we use karpathy's eval config for comparable numbers
   eval_every: 250
   eval_iters: 1600 # 200*8 workers
   save_checkpoint: true

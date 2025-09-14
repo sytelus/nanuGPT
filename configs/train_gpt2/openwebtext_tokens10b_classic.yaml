@@ -1,6 +1,6 @@
 __include__: ['base_config.yaml']
 
-# config for training GPT2 on OpenWebText with steps to match 10B tokens and
+# Reproduces Karthay's original nanogpt run but for 10.7B tokens
 # eval settings same as Karpathy's llm.c with no checkpointing
 
 general:
@@ -12,18 +12,6 @@ data:
     tokenized_val_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/val.bin'
     eval_batch_size: 32 # same as llm.c
 
-# model:
-#   module: 'nanugpt.models.nanogpt_keller.get_model'
-#   module_kwargs:
-#     n_layer: 12
-#     n_embd: 768
-#     n_head: 12
-#     context_length: 1024
-
-# scaler:
-#   module: 'nanugpt.scalers.keller_scaler.get_scaler'
-#   module_kwargs: {}
-
 training:
   device_batch_size: 60 # default is 12 to match original nanogpt, should be 32 to match llm.c, can fit 60 on 192GB
   # some runs uses 23148 with 480 global batch size yielding 11.3777
@@ -31,28 +19,6 @@ training:
   # for 512 global batch size, use 20345 to match 10.6666B tokens
   max_steps: 21701
   global_batch_size: 480 # original nanogpt 480, llm.c 512
-
-# # keller AdamW setting
-# optimizer:
-#   module: 'nanugpt.optimizers.adamw_nanogpt.get_optim'
-#   module_kwargs:
-#     learning_rate: 18.0E-4 # default 6.0E-4, GH200 12.0E-4
-#     zero_stage: 0 # 0: off, 1: shard optimizer
-
-# # llm.c linear
-# scheduler:
-#   module: 'nanugpt.schedulers.linear.get_scheduler'
-#   module_kwargs:
-#     warmup_iters: 700
-#     end_factor: 1.0E-3
-
-# # keller WSD
-# scheduler:
-#   module: 'nanugpt.schedulers.constant.get_scheduler'
-#   module_kwargs:
-#     warmup_iters: 256
-#     cooldown_iters: 2048
-#     # plateau lr is taken from optimizer.module_kwargs.learning_rate
 
 eval:
   eval_every: 250

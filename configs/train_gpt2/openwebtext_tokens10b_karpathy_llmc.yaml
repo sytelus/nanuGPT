@@ -1,11 +1,11 @@
 __include__: ['base_config.yaml']
 
+# Reproduces Karthay's original llm.c python run but for 10.7B tokens
+
 # Config from Karpathy's llm.c:
 # https://github.com/karpathy/llm.c/discussions/481
 # https://github.com/karpathy/llm.c/blob/7ecd8906afe6ed7a2b2cdb731c042f26d525b820/scripts/run_gpt2_124M.sh
 
-# CAUSION: below config doesn't reflect same LR as in above URL (1E-3 vs 6E-4) so below config produces
-# MUCH lower final loss than official run.
 
 general:
   project_name: 'gpt2_owt'
@@ -30,7 +30,7 @@ scheduler:
   module: 'nanugpt.schedulers.linear.get_scheduler'
   module_kwargs:
     warmup_iters: 700
-    end_factor: 1.0E-3 # CAUSION: this is different from Karpathy's 6E-4 in llm.c
+    end_factor: 1.0E-3 # original code decays to 0, we decay to 6E-7
 
 eval:
   eval_every: 250
