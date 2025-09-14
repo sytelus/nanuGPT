@@ -401,6 +401,10 @@ class Logger:
                         'sys/cpu_count_physical': psutil.cpu_count(logical=False),
                         'sys/cpu_name': os.popen('wmic cpu get name').read().strip().split('\n')[1] if os.name == 'nt' else os.popen('lscpu | grep "Model name"').read().strip().split(':')[1].strip(),
                         'sys/utils.free_disk_space': utils.free_disk_space(),
+                        'sys/command_line': utils.get_command_line(),
+                        'sys/code_dir': utils.get_code_dir(),
+                        'sys/working_dir': os.getcwd(),
+                        'sys/is_debugging': utils.is_debugging(),
 
                         'torch/torch_version': torch.__version__,
                         'torch/cudnn_sdp_enabled': torch.backends.cuda.cudnn_sdp_enabled() if torch.cuda.is_available() else '<not_cuda>',
@@ -450,6 +454,8 @@ class Logger:
                         'env/NCCL_PROTO': os.environ.get('NCCL_PROTO', None),
                         'env/UCX_IB_PCI_RELAXED_ORDERING': os.environ.get('UCX_IB_PCI_RELAXED_ORDERING', None),
                         'env/UCX_VFS_ENABLE': os.environ.get('UCX_VFS_ENABLE', None),
+                        'env/virtual_env': os.environ.get('VIRTUAL_ENV', None),
+                        'env/conda_env': os.environ.get('CONDA_DEFAULT_ENV', None),
 
                         'env/NCCL_NVLS_ENABLE': os.environ.get('NCCL_NVLS_ENABLE', None),
                         'env/NVTE_ASYNC_AMAX_REDUCTION': os.environ.get('NVTE_ASYNC_AMAX_REDUCTION', None),

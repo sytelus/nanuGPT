@@ -829,3 +829,9 @@ def safe_flot_item(x:torch.Tensor)->float:
 @torch._dynamo.disable
 def safe_int_item(x:torch.Tensor)->int:
     return int(x.detach().item())
+
+def get_code_dir()->str:
+    return full_path('.', create=False)
+
+def get_command_line()->str:
+    return ' '.join(sys.argv)

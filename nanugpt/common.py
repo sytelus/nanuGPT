@@ -67,6 +67,8 @@ def setup_logger(config:Optional[Mapping]=None, logger:Optional[logging.Logger]=
 
     logger.log_sys_info()
     logger.log_config(config)
+    logger.log_artifact(name='code', type='code', file_or_dir=utils.get_code_dir(),
+                                desc_markdown='Training code directory')
 
     return logger
 
@@ -127,6 +129,3 @@ def get_model_sizes()->Mapping[str, int]:
     with open(utils.full_path('nanugpt/assets/model_sizes.json'), mode='r', encoding='utf-8') as f:
         d = json.load(f)
     return d
-
-
-
