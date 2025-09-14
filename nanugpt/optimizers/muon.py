@@ -13,6 +13,8 @@ def get_optim(model,
               adam_eps=1e-10,
               hidden_matrix_params_lr=0.05,
               hidden_matrix_momentum=0.95,
+              expect_embeddings: bool = True,
+              expect_layers: bool = True,
               ):
 
     assigned = set()  # track parameters already assigned to a group (by id)
@@ -25,8 +27,10 @@ def get_optim(model,
 
     # Embedding params: collect from all nn.Embedding modules; avoid duplicates and tied head weight
     embed_params = []
+    embed_modules_found = 0
     for module in model.modules():
         if isinstance(module, nn.Embedding):
+            embed_modules_found += 1
             for p in module.parameters(recurse=False):
                 if p.ndim >= 1 and id(p) not in assigned:  # embeddings usually have a single weight tensor
                     embed_params.append(p)
@@ -34,8 +38,10 @@ def get_optim(model,
 
     # Hidden matrix params: parameters within Block modules having ndim >= 2
     hidden_matrix_params = []
+    block_modules_found = 0
     for module in model.modules():
         if module.__class__.__name__ == layer_class_name:
+            block_modules_found += 1
             for p in module.parameters(recurse=True):
                 if p.ndim >= 2 and id(p) not in assigned:
                     hidden_matrix_params.append(p)
@@ -47,6 +53,20 @@ def get_optim(model,
         if p.ndim < 2 and id(p) not in assigned:
             scalar_params.append(p)
             assigned.add(id(p))
+
+    # Expectations and validation
+    if expect_embeddings and len(embed_params) == 0:
+        raise RuntimeError(
+            f"Muon optimizer expected to find embedding parameters (nn.Embedding), "
+            f"but none were found. embed_modules_found={embed_modules_found}. "
+            f"If your model uses a different embedding type or name, set expect_embeddings=False."
+        )
+    if expect_layers and len(hidden_matrix_params) == 0:
+        raise RuntimeError(
+            f"Muon optimizer expected to find transformer blocks with class name '{layer_class_name}' "
+            f"containing matrix parameters (ndim>=2), but none were found. block_modules_found={block_modules_found}. "
+            f"If your blocks have a different class name, pass layer_class_name accordingly or set expect_layers=False."
+        )
 
     # Initialize the optimizer groups
     adam_groups = []
@@ -65,6 +85,27 @@ def get_optim(model,
                           momentum=hidden_matrix_momentum,
                           use_muon=True)
         param_groups = [*param_groups, muon_group]
+
+    # Debug summaries for visibility
+    def _numel(params):
+        return int(sum(p.numel() for p in params))
+
+    logging.summary({
+        'muon/embedding_modules': embed_modules_found,
+        'muon/block_modules': block_modules_found,
+        'muon/head_params_tensors': len(head_params),
+        'muon/embed_params_tensors': len(embed_params),
+        'muon/scalar_params_tensors': len(scalar_params),
+        'muon/hidden_matrix_params_tensors': len(hidden_matrix_params),
+        'muon/head_params': _numel(head_params),
+        'muon/embed_params': _numel(embed_params),
+        'muon/scalar_params': _numel(scalar_params),
+        'muon/hidden_matrix_params': _numel(hidden_matrix_params),
+        'muon/param_groups_adam': len(adam_groups),
+        'muon/param_groups_muon': 1 if hidden_matrix_params else 0,
+        'muon/expect_embeddings': expect_embeddings,
+        'muon/expect_layers': expect_layers,
+    })
 
     optimizer = MuonWithAuxAdam(param_groups)
     return optimizer
