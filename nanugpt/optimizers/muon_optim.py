@@ -172,6 +172,9 @@ class MuonWithAuxAdam(torch.optim.Optimizer):
                 # defaults
                 group["lr"] = group.get("lr", 0.02)
                 group["momentum"] = group.get("momentum", 0.95)
+                group["min_momentum"] = group.get("min_momentum", None)
+                group["max_momentum"] = group.get("max_momentum", None)
+                group["momentum_warmup"] = group.get("momentum_warmup", None)
                 group["weight_decay"] = group.get("weight_decay", 0)
                 assert set(group.keys()) == set(["params", "lr", "momentum", "weight_decay", "use_muon"])
             else:
@@ -194,6 +197,13 @@ class MuonWithAuxAdam(torch.optim.Optimizer):
         for group in self.param_groups:
             if group["use_muon"]:
                 params = group["params"]
+
+                # momentum warmup for muon
+                if group["min_momentum"] is not None and group["max_momentum"] is not None and group["momentum_warmup"] is not None:
+                    step = self.state[params[0]].get("step", 0)  # use step of first param as proxy for group step
+                    frac = min(step / group["momentum_warmup"], 1)
+                    group["momentum"] = (1 - frac) * group["min_momentum"] + frac * group["max_momentum"]
+
                 params_pad = params + [torch.empty_like(params[-1])] * (dist.get_world_size() - len(params) % dist.get_world_size())
                 for base_i in range(len(params))[::dist.get_world_size()]:
                     if base_i + dist.get_rank() < len(params):
@@ -204,6 +214,8 @@ class MuonWithAuxAdam(torch.optim.Optimizer):
                         state = self.state[p]
                         if len(state) == 0:
                             state["momentum_buffer"] = torch.zeros_like(p)
+                            state["step"] = 0
+                        state["step"] += 1
                         update = muon_update(p.grad, state["momentum_buffer"], beta=group["momentum"])
                         p.mul_(1 - group["lr"] * group["weight_decay"])
                         p.add_(update.reshape(p.shape), alpha=-group["lr"])

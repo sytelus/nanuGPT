@@ -11,8 +11,10 @@ def get_optim(model,
               scalar_params_lr=0.04,
               adam_betas=(0.8, 0.95),
               adam_eps=1e-10,
-              hidden_matrix_params_lr=0.05,
-              hidden_matrix_momentum=0.95,
+              muon_lr=0.05,
+              muon_momentum_min=0.85,
+              muon_momentum_max=0.95,
+              muon_momentum_warmup=300,  # number of muon steps to warmup momentum from min to max
               expect_embeddings: bool = True,
               expect_layers: bool = True,
               ):
@@ -81,9 +83,12 @@ def get_optim(model,
     param_groups = adam_groups
     if hidden_matrix_params:
         muon_group = dict(params=hidden_matrix_params,
-                          lr=hidden_matrix_params_lr,
-                          momentum=hidden_matrix_momentum,
-                          use_muon=True)
+                            lr=muon_lr,
+                            momentum=muon_momentum_max,
+                            min_momentum=muon_momentum_min,
+                            max_momentum=muon_momentum_max,
+                            momentum_warmup=muon_momentum_warmup,
+                            use_muon=True)
         param_groups = [*param_groups, muon_group]
 
     # Debug summaries for visibility

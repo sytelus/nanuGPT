@@ -1,0 +1,63 @@
+# Reproduces Keller Jorden's run with AdamW, model treaks, scaler, LE and WSD schedule for 10.7B tokens.
+# This does not include every twek he made for the record.
+
+# Config translated from Keller Jordon's adamw record run
+# https://github.com/KellerJordan/modded-nanogpt/blob/09a49d4af4804af92d14216b43136f5510a8fba8/run.sh
+
+__include__: ['base_config.yaml']
+
+general:
+  project_name: 'gpt2_owt'
+  run_name: 'keller_model_adamw_wsd'
+
+data:
+  module_kwargs:
+    tokenized_train_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/train.bin'
+    tokenized_val_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/val.bin'
+    eval_batch_size: '_copy: /training/device_batch_size'
+
+model:
+  module: 'nanugpt.models.nanogpt_keller.get_model'
+  module_kwargs:
+    n_layer: 12
+    n_embd: 768
+    n_head: 12
+    context_length: 1024
+
+scaler:
+  module: 'nanugpt.scalers.keller_scaler.get_scaler'
+  module_kwargs: {}
+
+training:
+  device_batch_size: 64
+  max_steps: 20345 # 9536 for 4999610368 tokens, 20345 for 10.6666B tokens
+  global_batch_size: 512
+
+optimizer:
+  module: 'nanugpt.optimizers.muon.get_optim'
+  # module_kwargs:
+  #   learning_rate: 18.0E-4 # default 6.0E-4, GH200 12.0E-4
+  #   zero_stage: 0 # 0: off, 1: shard optimizer
+
+scheduler:
+  module: 'nanugpt.schedulers.constant.get_scheduler'
+  module_kwargs:
+    warmup_iters: 256
+    cooldown_iters: 0.4  # CAUSION: many old runs uses constant 2048 incorrectly
+
+eval:
+  # we use karpathy's eval config for comparable numbers
+  eval_every: 250
+  eval_iters: 1600 # 200*8 workers
+  save_checkpoint: true
+  checkoint_after: 0 # starts saving checkpoint after these steps
+  checkpoint_every_hr: 200 # take checkpoint every this hours
+  checkpoint_keep_best: false # keep only the best checkpoint, otherwise keep all with  _{step}.pt
+
+  # Keller's original eval config
+  # eval_every: 128
+  # eval_iters: 20 # number of samples to evaluate for dataset
+  # save_checkpoint: true
+  # checkoint_after: 0 # starts saving checkpoint after these steps
+  # checkpoint_every_hr: 2 # take checkpoint every this hours
+  # checkpoint_keep_best: false # keep only the best checkpoint, otherwise keep all with  _{step}.pt
