@@ -1,5 +1,7 @@
 from typing import Tuple, Mapping, Callable
 
+from nanugpt import utils
+
 import torch
 
 def get_loss(model_output, labels)->Tuple[torch.Tensor, int]:
@@ -16,7 +18,7 @@ def get_loss(model_output, labels)->Tuple[torch.Tensor, int]:
     # PyTorch default is -100. The negative index is used to ignore the loss for padding tokens.
     loss = torch.nn.functional.cross_entropy(preds, targets, ignore_index=-1)
     # dim=-1 means we take the max along the last dimension, which is the vocab_size, so max is taken over the vocab
-    correct = (torch.argmax(preds, dim=-1) == targets).sum().detach().item()
+    correct = utils.safe_int_item((torch.argmax(preds, dim=-1) == targets).sum())
 
     return loss, correct # total num of predictions
 

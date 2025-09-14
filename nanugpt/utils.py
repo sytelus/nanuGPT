@@ -820,3 +820,12 @@ def tri_dao_flash_version()->Optional[str]:
         return md.version("flash-attn")
     else:
         return None
+
+# below functions are needed because of torch dynamo bug
+# https://discuss.pytorch.org/t/coordinate-descent-tuning-errors-out-with-torch-acceleratorerror-cuda-error-invalid-argument/223000/
+@torch._dynamo.disable
+def safe_flot_item(x:torch.Tensor)->float:
+    return float(x.detach().item())
+@torch._dynamo.disable
+def safe_int_item(x:torch.Tensor)->int:
+    return int(x.detach().item())

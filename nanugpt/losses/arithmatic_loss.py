@@ -1,3 +1,4 @@
+from nanugpt import utils
 import torch
 import torch.nn.functional as F
 from torch import Tensor
@@ -99,7 +100,7 @@ def get_loss(model_output: Tensor,
     # A document is correct if the number of correct tokens equals the total token count in that document.
     # (Note: Documents with zero answer tokens do not appear in unique_groups and hence are not counted.)
     correct_docs = (group_correct_sum == group_counts)
-    num_correct_docs = correct_docs.sum().detach().item()  # Total count of correct documents
+    num_correct_docs = utils.safe_int_item(correct_docs.sum())  # Total count of correct documents
 
     return loss, num_correct_docs
 
