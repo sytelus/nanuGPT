@@ -67,8 +67,6 @@ def setup_logger(config:Optional[Mapping]=None, logger:Optional[logging.Logger]=
 
     logger.log_sys_info()
     logger.log_config(config)
-    logger.log_artifact(name='code', type='code', file_or_dir=utils.get_code_dir(),
-                                desc_markdown='Training code directory')
 
     return logger
 
@@ -129,3 +127,33 @@ def get_model_sizes()->Mapping[str, int]:
     with open(utils.full_path('nanugpt/assets/model_sizes.json'), mode='r', encoding='utf-8') as f:
         d = json.load(f)
     return d
+
+def save_artifacts(out_dir:str, config:Mapping, logger:logging.Logger)->None:
+    # save ccode dir
+    logger.log_artifact(name='code', type='code', file_or_dir=utils.get_code_dir(),
+                                desc_markdown='Training code directory')
+
+    # save env vars
+    # write all env vars to env.yaml in out_dir
+    env_filepath = os.path.join(out_dir, "env.yaml")
+    utils.save_env_vars(env_filepath)
+    logger.log_artifact(name='env', type='yaml', file_or_dir=env_filepath,
+                        desc_markdown="Environment variables at the start of the run")
+
+    # attach config as artifact
+    config_filepath = os.path.join(out_dir, "config_saved.yaml")
+    utils.save_yaml(config, config_filepath)
+    logger.log_artifact(name='config', type='yaml', file_or_dir=config_filepath,
+                        desc_markdown="Configuration file at the start of the run")
+
+    # save command line in shell script and attach as artifact
+    cmd_filepath = os.path.join(out_dir, "command_line.sh")
+    with open(cmd_filepath, 'w', encoding='utf-8') as f:
+        f.write("#!/bin/bash\n")
+        f.write(f"# Command line: {' '.join(utils.get_command_line())}\n")
+        f.write(f"# Working directory: {os.getcwd()}\n")
+        f.write("\n")
+        f.write(' '.join(utils.get_command_line()) + '\n')
+    os.chmod(cmd_filepath, 0o755) # make it executable
+    logger.log_artifact(name='command_line', type='script', file_or_dir=cmd_filepath,
+                        desc_markdown="Command line used to start the run")

@@ -461,6 +461,11 @@ def load_yaml(filepath:str)->Any:
     with open(full_path(filepath), 'r', encoding='utf-8') as f:
         return yaml.load(f, Loader=yaml.FullLoader)
 
+def save_env_vars(yaml_filepath: str) -> None:
+    # Sort keys for deterministic output
+    env_dict = OrderedDict(sorted(os.environ.items(), key=lambda kv: kv[0]))
+    save_yaml(env_dict, yaml_filepath)
+
 def dedup_list(l: List) -> List:
     return list(OrderedDict.fromkeys(l))
 

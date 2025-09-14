@@ -191,6 +191,10 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         out_dir = utils.full_path(out_dir, create=True)
         logger.summary({'run/out_dir': out_dir})
 
+    # attach this file as an artifact in the logger
+    if torch_info.is_master:
+        common.save_artifacts(out_dir, config, logger)
+
     if torch_info.is_cuda:
         torch.cuda.synchronize()
     step, eval_count, total_samples, total_tokens = 0, 0, 0, 0
