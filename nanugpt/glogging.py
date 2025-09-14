@@ -471,8 +471,8 @@ class Logger:
                         'env/TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS': os.environ.get('TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS', None),
                         'env/TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC': os.environ.get('TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC', None),
                         'env/TORCH_COMPILE_DEBUG': os.environ.get('TORCH_COMPILE_DEBUG', None),
+                        'env/TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS': os.environ.get('TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS', None),
                         'env/TORCHINDUCTOR_UNIQUE_KERNEL_NAMES': os.environ.get('TORCHINDUCTOR_UNIQUE_KERNEL_NAMES', None),
-
 
                         'flash_attn_ver': str(utils.get_package_ver('flash_attn')),
                         'transformer_engine_ver': str(utils.get_package_ver('transformer_engine')),
