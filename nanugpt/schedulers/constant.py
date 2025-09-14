@@ -31,6 +31,13 @@ class ConstantWithCooldownScheduler(LRScheduler):
         # get initial LR set in each group in optimizer
         init_lrs = np.fromiter((group['initial_lr'] for group in self.optimizer.param_groups), dtype=np.float32)
 
+        # if within cooldown, return linear decay down to min learning rate
+        # prioritize cooldown over warmup if both are specified
+        if self.cooldown_iters is not None and self.max_iters is not None and self.last_epoch > (self.max_iters - self.cooldown_iters):
+            min_lr = init_lrs * self.end_factor
+            decay_ratio = (self.max_iters - self.last_epoch - 1) / self.cooldown_iters
+            return ((init_lrs - min_lr) * decay_ratio + min_lr).tolist()
+
         # linear warmup for warmup_iters steps
         if self.warmup_iters is not None and self.last_epoch < self.warmup_iters:
             return (init_lrs * self.last_epoch / self.warmup_iters).tolist()
@@ -38,12 +45,6 @@ class ConstantWithCooldownScheduler(LRScheduler):
         # if we ran past max_iters, return min LR
         if self.max_iters is not None and self.last_epoch >= self.max_iters:  # return min LR
             return (init_lrs * self.end_factor).tolist()
-
-        # if within cooldown, return linear decay down to min learning rate
-        if self.cooldown_iters is not None and self.max_iters is not None and self.last_epoch > (self.max_iters - self.cooldown_iters):
-            min_lr = init_lrs * self.end_factor
-            decay_ratio = (self.max_iters - self.last_epoch - 1) / self.cooldown_iters
-            return ((init_lrs - min_lr) * decay_ratio + min_lr).tolist()
 
         # in between, use constant learning rate equal to initial lr
         return init_lrs.tolist()
