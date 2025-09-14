@@ -53,7 +53,16 @@ fi
 
 export JOB_NAME_FULL=${USER_ALIAS}-${JOB_NAME}
 export TRANSFER_VARS=${TRANSFER_VARS:-} # space separated list of additional env vars to transfer to container
-export START_COMMAND=${START_COMMAND:-"$@"} # use all args to this script as command we will execute
+# Build START_COMMAND by shell-escaping each original arg, preserving spaces/quotes
+if [[ -z "${START_COMMAND:-}" ]]; then
+  START_COMMAND=""
+  for arg in "$@"; do
+    printf -v _q '%q' "$arg"
+    START_COMMAND+=" ${_q}"
+  done
+  START_COMMAND="${START_COMMAND# }"
+fi
+export START_COMMAND # used later in the rendered YAML
 export NODES=${NODES:-1}
 export GPUS_PER_NODE=${GPUS_PER_NODE:-8}
 export NPROC_PER_NODE=${NPROC_PER_NODE:-${GPUS_PER_NODE}} # by default use all gpus on node
@@ -211,5 +220,4 @@ for P in $(kubectl get pods -l volcano.sh/job-name="$VCJOB_NAME" -o name); do
   kubectl logs -f "$P" &
 done
 wait
-
 

@@ -48,4 +48,7 @@ fi
 # build the torchrun command
 # RANK variable is set by Pytorch plugin and its actually one per node (i.e. node index), as opposed to global rank of worker which torchrun will reset to
 TORCH_RUN_ARGS="--nproc_per_node=${NPROC_PER_NODE} --nnodes=${NODES} --node_rank=${RANK} --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT}"
-eval "OUT_DIR=\"${JOB_OUT_DIR}\" torchrun ${TORCH_RUN_ARGS} ${START_COMMAND}"
+
+# Reconstruct original argv from START_COMMAND (shell-escaped tokens) and exec torchrun
+eval "set -- ${START_COMMAND}"
+OUT_DIR="${JOB_OUT_DIR}" exec torchrun ${TORCH_RUN_ARGS} "$@"
