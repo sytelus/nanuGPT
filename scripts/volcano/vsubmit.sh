@@ -32,7 +32,7 @@ set -eu -o pipefail # -o xtrace # fail if any command failes, log all commands, 
 
 
 SOURCE_DIR=${SOURCE_DIR:-.} # where is source directory
-USER_ALIAS=${USER%@*}
+export USER_ALIAS=${USER%@*}
 
 OUT_DIR=${OUT_DIR:-/data/${USER_ALIAS}} # base output directory where we will create sub dir for this run
 echo "Job output will be at '${OUT_DIR}' on cluster. If you don't want this then set OUT_DIR env var."
@@ -220,4 +220,3 @@ for P in $(kubectl get pods -l volcano.sh/job-name="$VCJOB_NAME" -o name); do
   kubectl logs -f "$P" &
 done
 wait
-

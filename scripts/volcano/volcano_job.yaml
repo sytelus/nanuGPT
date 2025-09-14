@@ -84,7 +84,8 @@ spec:
                   value: "${PYTHONUNBUFFERED}"
 
                 - name: START_COMMAND
-                  value: "${START_COMMAND}"
+                  value: |-
+                    ${START_COMMAND}
                 - name: ENV_SETUP_SCRIPT
                   value: "${ENV_SETUP_SCRIPT}"
                 - name: INSTALL_PACKAGE

@@ -5,7 +5,7 @@ __include__: ['base_config.yaml']
 
 general:
   project_name: 'gpt2_owt'
-  run_name: 'keller_jordan_adamw'
+  run_name: 'keller_model_adamw_wsd'
 
 data:
   module_kwargs:
@@ -40,7 +40,7 @@ scheduler:
   module: 'nanugpt.schedulers.constant.get_scheduler'
   module_kwargs:
     warmup_iters: 256
-    cooldown_iters: 2048
+    cooldown_iters: 0.4  # CAUSION: many old runs uses constant 2048 incorrectly
 
 eval:
   # karpathy's eval config

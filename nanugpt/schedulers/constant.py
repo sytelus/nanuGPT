@@ -50,9 +50,9 @@ class ConstantWithCooldownScheduler(LRScheduler):
 
 
 def get_scheduler(optimizer,
-                  warmup_iters: Optional[int], max_iters: Optional[int],
-                  cooldown_iters: Optional[int], cooldown_frac: Optional[float],
-                  end_factor: float):
+                  warmup_iters: Optional[int]=None, max_iters: Optional[int]=None,
+                  cooldown_iters: Optional[int]=None, cooldown_frac: Optional[float]=None,
+                  end_factor: float=1.0):
     return ConstantWithCooldownScheduler(
             optimizer=optimizer,
             warmup_iters=warmup_iters,
