@@ -30,7 +30,7 @@ scaler:
 
 training:
   device_batch_size: 64
-  max_steps: 9536 # 4999610368 tokens, for 10.6666B tokens, use 20345
+  max_steps: 20345 # 9536 for 4999610368 tokens, 20345 for 10.6666B tokens
   global_batch_size: 512
 
 optimizer:
