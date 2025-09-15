@@ -8,7 +8,7 @@ set -eu -o pipefail # fail if any command failes, log all commands, -o xtrace
 # setup below values
 
 # can't inline these vars because we are using it as parameter to submit script
-export RUN_NAME=owt-10k-keller-adamw
+export RUN_NAME=owt-10b-keller-adamw
 export RUN_DESC="Baseline: Keller Model+Scaler+WSD+Muon 10.666B tokens with cooldown_frac fix"
 export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=1
 # do not optimize scaler outputs on compile, will cause graph break warnings
