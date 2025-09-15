@@ -24,7 +24,7 @@ export DATA_ROOT=/data/shitals/data
 export TRANSFER_VARS="DATA_ROOT WANDB_API_KEY WANDB_HOST"
 
 NODES=1 \
-bash "${SCRIPT_DIR}/scripts/volcano/vsubmit.sh" train.py configs/train_gpt2/openwebtext_tokens10b_keller_muon.yaml \
+bash "${SCRIPT_DIR}/scripts/volcano/vsubmit.sh" train.py configs/train_gpt2/openwebtext_tokens10b_keller_adamw.yaml \
     --general.project_name nanugpt-owt10k \
     --general.run_name "${RUN_NAME}" \
     --general.run_description "${RUN_DESC}"
