@@ -286,8 +286,24 @@ class Logger:
 
         if not _except_handler_installed:
             def handle_execpt(original_handler, logger:'Logger', exc_type, exc_value, exc_traceback):
+                # Log the exception with full traceback
                 msg = utils.get_exception_str(exc_type, exc_value, exc_traceback)
                 logger.error(msg)
+
+                # If wandb is enabled for this master logger, prefix the run name to indicate failure.
+                try:
+                    if logger.enable_wandb and logger._wandb_logger is not None:
+                        current_name = getattr(logger._wandb_logger, 'name', None)
+                        if isinstance(current_name, str) and not current_name.startswith('[failed]'):
+                            logger._wandb_logger.name = f"[failed] {current_name}"
+                except Exception as e:
+                    # Best-effort: do not let renaming errors mask the original exception
+                    try:
+                        logger.warn({'wandb_rename_failed': str(e)}, py_logger_only=True)
+                    except Exception:
+                        pass
+
+                # Delegate to the original excepthook
                 if original_handler is not None:
                     original_handler(exc_type, exc_value, exc_traceback)
 
@@ -542,4 +558,3 @@ class Logger:
         if self._py_logger is not None:
             for handler in self._py_logger.handlers:
                 handler.flush()
-

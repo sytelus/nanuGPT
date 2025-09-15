@@ -35,13 +35,13 @@ training:
 
 optimizer:
   module: 'nanugpt.optimizers.muon.get_optim'
-  # module_kwargs:
-  #   learning_rate: 18.0E-4 # default 6.0E-4, GH200 12.0E-4
-  #   zero_stage: 0 # 0: off, 1: shard optimizer
+  module_kwargs:
+    _inherit: false
 
 scheduler:
   module: 'nanugpt.schedulers.constant.get_scheduler'
   module_kwargs:
+    _inherit: false
     warmup_iters: 256
     cooldown_frac: 0.4  # CAUSION: many old runs uses constant 2048 incorrectly
 
