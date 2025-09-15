@@ -7,11 +7,11 @@ from nanugpt import glogging as logging
 def get_optim(model,
               layer_class_name='Block',
               head_name='lm_head',
-              head_params_lr=0.22,
+              head_params_lr=0.008,
               embed_params_lr=0.6,
               scalar_params_lr=0.04,
               adam_betas=(0.8, 0.95),
-              adam_eps=1e-10,
+              adam_eps=1.0e-8, # 1e-8 is PyTorch default
               muon_lr=0.05,
               muon_momentum_min=0.85,
               muon_momentum_max=0.95,

@@ -18,7 +18,7 @@ from nanugpt import common
 @dataclass
 class GPTConfig:
     block_size: int = 1024
-    vocab_size: int = 50304 # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
+    vocab_size: int = 50304 # GPT-2 vocab_size of 50257 in Keller's version, padded up to nearest multiple of 64 for efficiency
     n_layer: int = 12
     n_head: int = 12
     n_embd: int = 768
@@ -107,6 +107,8 @@ class Block(nn.Module):
         self.attn = CausalSelfAttention(config)
         self.mlp = MLP(config)
         # Use register_buffer to avoid torch Dynamo error 'float' does not have the attribute 'meta'
+        # Keller's version:
+        # self.attn_scale = (1 / math.sqrt(2 * config.n_layer))
         self.register_buffer('attn_scale', torch.tensor(1 / math.sqrt(2 * config.n_layer)))
 
     def forward(self, x):
@@ -126,7 +128,9 @@ class GPT(nn.Module):
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
+        # Keller's original version has weight tying commented so they can be optimized at different rates
+        # More importantly, weight tying cannot be used with Muon because it optimizes head and embedding weights at different rates
+        # self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
     def forward(self,
                 idx:torch.Tensor,
@@ -157,9 +161,9 @@ class GPT(nn.Module):
             assert self.get_loss is not None, "Loss function is not defined"
             loss, correct = self.get_loss(logits, labels)
             # keeping logits around may unnecessarily consume a lot of memory  (atleast 1GB for 124M params)
-            if return_logits:
-                return logits, None, None
-            return None, loss, correct
+            if not return_logits:
+                logits = None
+            return logits, loss, correct
 
         return logits, None, None
 
