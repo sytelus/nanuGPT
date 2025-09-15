@@ -17,6 +17,8 @@ def get_optim(model,
               muon_momentum_warmup=300,  # number of muon steps to warmup momentum from min to max
               expect_embeddings: bool = True,
               expect_layers: bool = True,
+              # accept all other args
+              **kwargs
               ):
 
     assigned = set()  # track parameters already assigned to a group (by id)
