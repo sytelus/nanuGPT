@@ -9,7 +9,7 @@ set -eu -o pipefail # fail if any command failes, log all commands, -o xtrace
 
 # can't inline these vars because we are using it as parameter to submit script
 export RUN_NAME=owt-10k-keller-muon
-export RUN_DESC="Baseline: Keller Model+Scaler+WSD+Muon 10.666B tokens"
+export RUN_DESC="Baseline: Keller Model+Scaler+WSD+Muon 10.666B tokens with Muon"
 export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=1
 # do not optimize scaler outputs on compile, will cause graph break warnings
 export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1

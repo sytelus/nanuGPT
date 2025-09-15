@@ -21,10 +21,13 @@ def get_optim(model,
               **kwargs
               ):
 
+    # If wrapped with DistributedDataParallel, unwrap one level to the underlying module
+    root_model = model.module if isinstance(model, nn.parallel.DistributedDataParallel) else model
+
     assigned = set()  # track parameters already assigned to a group (by id)
 
     # Head params (typically tied to token embeddings in GPT); ensure unique assignment
-    head_module = getattr(model, head_name)
+    head_module = getattr(root_model, head_name)
     head_weight = head_module.weight
     head_params = [head_weight]
     assigned.add(id(head_weight))
@@ -32,7 +35,7 @@ def get_optim(model,
     # Embedding params: collect from all nn.Embedding modules; avoid duplicates and tied head weight
     embed_params = []
     embed_modules_found = 0
-    for module in model.modules():
+    for module in root_model.modules():
         if isinstance(module, nn.Embedding):
             embed_modules_found += 1
             for p in module.parameters(recurse=False):
@@ -43,7 +46,7 @@ def get_optim(model,
     # Hidden matrix params: parameters within Block modules having ndim >= 2
     hidden_matrix_params = []
     block_modules_found = 0
-    for module in model.modules():
+    for module in root_model.modules():
         if module.__class__.__name__ == layer_class_name:
             block_modules_found += 1
             for p in module.parameters(recurse=True):
@@ -53,7 +56,7 @@ def get_optim(model,
 
     # Scalar params: any remaining parameters with ndim < 2
     scalar_params = []
-    for p in model.parameters():
+    for p in root_model.parameters():
         if p.ndim < 2 and id(p) not in assigned:
             scalar_params.append(p)
             assigned.add(id(p))
