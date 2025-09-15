@@ -293,13 +293,32 @@ class Logger:
                 # If wandb is enabled for this master logger, prefix the run name to indicate failure.
                 try:
                     if logger.enable_wandb and logger._wandb_logger is not None:
+                        # Prefix run name once
                         current_name = getattr(logger._wandb_logger, 'name', None)
                         if isinstance(current_name, str) and not current_name.startswith('[failed]'):
                             logger._wandb_logger.name = f"[failed] {current_name}"
+
+                        # Add a 'failed' tag for filtering
+                        try:
+                            current_tags = list(getattr(logger._wandb_logger, 'tags', []) or [])
+                        except Exception:
+                            current_tags = []
+                        if 'failed' not in current_tags:
+                            current_tags.append('failed')
+                            try:
+                                logger._wandb_logger.tags = current_tags
+                            except Exception as e_tags:
+                                logger.warn({'wandb_add_tag_failed': str(e_tags)}, py_logger_only=True)
+
+                        # Mark failure in summary for dashboards
+                        try:
+                            logger.summary({'run/failed': 1})
+                        except Exception as e_summary:
+                            logger.warn({'wandb_summary_failed': str(e_summary)}, py_logger_only=True)
                 except Exception as e:
-                    # Best-effort: do not let renaming errors mask the original exception
+                    # Best-effort: do not let logging errors mask the original exception
                     try:
-                        logger.warn({'wandb_rename_failed': str(e)}, py_logger_only=True)
+                        logger.warn({'wandb_failure_mark_failed': str(e)}, py_logger_only=True)
                     except Exception:
                         pass
 

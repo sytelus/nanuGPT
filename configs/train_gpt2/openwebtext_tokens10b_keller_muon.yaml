@@ -35,13 +35,13 @@ training:
 
 optimizer:
   module: 'nanugpt.optimizers.muon.get_optim'
-  module_kwargs:
-    _inherit: false
+  _inherit: false
+  module_kwargs: {}
 
 scheduler:
   module: 'nanugpt.schedulers.constant.get_scheduler'
+  _inherit: false
   module_kwargs:
-    _inherit: false
     warmup_iters: 256
     cooldown_frac: 0.4  # CAUSION: many old runs uses constant 2048 incorrectly
 

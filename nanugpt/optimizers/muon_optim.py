@@ -200,10 +200,10 @@ class MuonWithAuxAdam(torch.optim.Optimizer):
                 params = group["params"]
 
                 # momentum warmup for muon
-                if group["min_momentum"] is not None and group["max_momentum"] is not None and group["momentum_warmup"] is not None:
-                    step = self.state[params[0]].get("step", 0)  # use step of first param as proxy for group step
-                    frac = min(step / group["momentum_warmup"], 1)
-                    group["momentum"] = (1 - frac) * group["min_momentum"] + frac * group["max_momentum"]
+                # if group["min_momentum"] is not None and group["max_momentum"] is not None and group["momentum_warmup"] is not None:
+                #     step = self.state[params[0]].get("step", 0)  # use step of first param as proxy for group step
+                #     frac = min(step / group["momentum_warmup"], 1)
+                #     group["momentum"] = (1 - frac) * group["min_momentum"] + frac * group["max_momentum"]
 
                 params_pad = params + [torch.empty_like(params[-1])] * (dist.get_world_size() - len(params) % dist.get_world_size())
                 for base_i in range(len(params))[::dist.get_world_size()]:
