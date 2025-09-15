@@ -8,7 +8,7 @@ __include__: ['base_config.yaml']
 
 general:
   project_name: 'gpt2_owt'
-  run_name: 'keller_model_adamw_wsd'
+  run_name: 'keller_model_muon'
 
 data:
   module_kwargs:

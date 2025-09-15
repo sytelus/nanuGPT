@@ -8,10 +8,10 @@ set -eu -o pipefail # fail if any command failes, log all commands, -o xtrace
 # setup below values
 
 # can't inline these vars because we are using it as parameter to submit script
-export RUN_NAME=owt-10b-keller-muon
-export RUN_DESC="Baseline: Keller Model+Scaler+WSD+Muon 10.666B tokens with Muon"
-# export RUN_NAME=owt-160b-keller-muon
-# export RUN_DESC="Baseline: Keller Model+Scaler+WSD+Muon 160B tokens with Muon"
+# export RUN_NAME=owt-10b-keller-muon
+# export RUN_DESC="Baseline: Keller Model+Scaler+WSD+Muon 10.666B tokens with Muon"
+export RUN_NAME=owt-160b-keller-muon
+export RUN_DESC="Baseline: Keller Model+Scaler+WSD+Muon 160B tokens with Muon"
 export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=1
 # do not optimize scaler outputs on compile, will cause graph break warnings
 export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1
@@ -25,9 +25,10 @@ export OUT_DIR=/data/shitals
 export DATA_ROOT=/data/shitals/data
 export TRANSFER_VARS="DATA_ROOT WANDB_API_KEY WANDB_HOST"
 
+# for 160B use --training.max_steps 325520 \
+
 NODES=1 \
 bash "${SCRIPT_DIR}/scripts/volcano/vsubmit.sh" train.py configs/train_gpt2/openwebtext_tokens10b_keller_muon.yaml \
     --general.project_name nanugpt-owt10k \
-#    --training.max_steps 325520 \
     --general.run_name "${RUN_NAME}" \
     --general.run_description "${RUN_DESC}"
