@@ -1,6 +1,7 @@
 import torch.nn as nn
+import torch.distributed as dist
 
-from nanugpt.optimizers.muon_optim import MuonWithAuxAdam
+from nanugpt.optimizers.muon_optim import MuonWithAuxAdam, SingleDeviceMuonWithAuxAdam
 from nanugpt import glogging as logging
 
 def get_optim(model,
@@ -62,9 +63,12 @@ def get_optim(model,
             assigned.add(id(p))
 
     # Expectations and validation
-    if expect_embeddings and len(embed_params) == 0:
+    # Allow tied embeddings (e.g., embedding weight == head weight). In that case,
+    # embed_params may be empty even though an nn.Embedding exists. Only require
+    # that at least one embedding module is present when expect_embeddings=True.
+    if expect_embeddings and embed_modules_found == 0:
         raise RuntimeError(
-            f"Muon optimizer expected to find embedding parameters (nn.Embedding), "
+            f"Muon optimizer expected to find at least one nn.Embedding module, "
             f"but none were found. embed_modules_found={embed_modules_found}. "
             f"If your model uses a different embedding type or name, set expect_embeddings=False."
         )
@@ -85,15 +89,18 @@ def get_optim(model,
         adam_groups.append(dict(params=scalar_params, lr=scalar_params_lr))
     adam_groups = [dict(**g, betas=adam_betas, eps=adam_eps, use_muon=False) for g in adam_groups]
 
+    # Decide DDP vs single-device early to shape muon group keys
+    use_ddp = isinstance(model, nn.parallel.DistributedDataParallel) or (dist.is_available() and dist.is_initialized())
+
     param_groups = adam_groups
     if hidden_matrix_params:
         muon_group = dict(params=hidden_matrix_params,
-                            lr=muon_lr,
-                            momentum=muon_momentum_max,
-                            min_momentum=muon_momentum_min,
-                            max_momentum=muon_momentum_max,
-                            momentum_warmup=muon_momentum_warmup,
-                            use_muon=True)
+                          lr=muon_lr,
+                          momentum=muon_momentum_max,
+                          min_momentum=muon_momentum_min,
+                          max_momentum=muon_momentum_max,
+                          momentum_warmup=muon_momentum_warmup,
+                          use_muon=True)
         param_groups = [*param_groups, muon_group]
 
     # Debug summaries for visibility
@@ -117,5 +124,9 @@ def get_optim(model,
         'muon/expect_layers': expect_layers,
     })
 
-    optimizer = MuonWithAuxAdam(param_groups)
+    # Pick distributed or single-device variant based on DDP/is_initialized
+    OptimCls = MuonWithAuxAdam if use_ddp else SingleDeviceMuonWithAuxAdam
+    logging.info({'muon/optimizer_class': OptimCls.__name__, 'muon/use_ddp': use_ddp})
+    logging.summary({'muon/optimizer_class': OptimCls.__name__, 'muon/use_ddp': use_ddp})
+    optimizer = OptimCls(param_groups)
     return optimizer
