@@ -98,7 +98,7 @@ from rich.logging import RichHandler
 import logging
 
 # Hugging Face datasets / Arrow
-from datasets import load_dataset, Dataset, DatasetDict
+from datasets import load_dataset, load_dataset_builder, Dataset, DatasetDict
 import pyarrow as pa
 import pyarrow.dataset as pads
 from nanugpt import utils
@@ -122,7 +122,7 @@ class Config:
     out_dir: Optional[str] = None
     dataset_name: str = "gsm8k"
     dataset_config: str = "main"
-    splits: Tuple[str, ...] = ("train", "test")
+    splits: Optional[Tuple[str, ...]] = None  # if None, auto-detect all dataset splits
     max_workers: int = 8
     request_timeout_s: Optional[int] = None
     network_max_retries: int = 8
@@ -676,6 +676,18 @@ class Runner:
         self.start_time = time.time()
         self.print_lock = asyncio.Lock()
 
+        if not self.cfg.splits:
+            builder = load_dataset_builder(
+                self.cfg.dataset_name,
+                self.cfg.dataset_config if self.cfg.dataset_config else None,
+            )
+            available_splits = [str(name) for name in builder.info.splits.keys()]
+            if not available_splits:
+                raise ValueError(f"Dataset {self.cfg.dataset_name!r} has no available splits to process.")
+            self.cfg.splits = tuple(available_splits)
+
+        self.splits = tuple(self.cfg.splits)
+
         # cache dirs
         if not cfg.out_dir or not str(cfg.out_dir).strip():
             base_out = os.environ.get("OUT_DIR", os.path.expanduser("~/out_dir"))
@@ -706,6 +718,7 @@ class Runner:
                       logging.FileHandler(log_path, encoding="utf-8")]
         )
         self.log = logging.getLogger("gsm8k-graphs")
+        self.log.info("Splits to process: %s", ", ".join(self.splits))
 
         # progress counters
         self.total = 0
@@ -1121,7 +1134,7 @@ class Runner:
 
         # Load original splits to align (for reproducibility)
         result_rows = []
-        for split in self.cfg.splits:
+        for split in self.splits:
             split_dir = self._split_dir(split)
             files = [os.path.join(split_dir, fn) for fn in os.listdir(split_dir) if fn.endswith(".json")]
             for p in sorted(files):
@@ -1206,7 +1219,7 @@ class Runner:
             sys.exit(2)
 
         # Process each split
-        for split in self.cfg.splits:
+        for split in self.splits:
             await self.process_split(split)
 
         # Build Arrow dataset at the end as a convenience
@@ -1226,7 +1239,8 @@ def parse_args(argv: Optional[List[str]] = None) -> Config:
                    help="Output directory (cache + logs + arrow). If not set, uses $OUT_DIR or ~/out_dir, with subdir 'gsm8k_graphs'.")
     p.add_argument("--dataset", type=str, default=None, help="Hugging Face dataset name (default: gsm8k).")
     p.add_argument("--config", type=str, default=None, help="Dataset config (default: main).")
-    p.add_argument("--splits", type=str, nargs="+", default=None, help="Splits to process (default: train test).")
+    p.add_argument("--splits", type=str, nargs="+", default=None,
+                   help="Splits to process. If omitted, all dataset splits are used.")
     p.add_argument("--max-workers", type=int, default=None, help="Max concurrent API calls.")
     p.add_argument("--timeout", type=int, default=None, help="Per-request timeout (seconds).")
     p.add_argument("--net-retries", type=int, default=None, help="Max network retries.")
