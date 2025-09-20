@@ -140,28 +140,18 @@ class Config:
 # Azure OpenAI client (async)
 # -----------------------------
 
-# Support both AsyncAzureOpenAI (preferred) and fallback to AsyncOpenAI if import names differ.
-try:
-    from openai import AsyncAzureOpenAI as _ClientClass
-except Exception:
-    try:
-        from openai import AsyncOpenAI as _ClientClass
-    except Exception as e:
-        raise RuntimeError(
-            "Could not import AsyncAzureOpenAI or AsyncOpenAI from openai. "
-            "Please `pip install -U openai`."
-        ) from e
+from openai import AsyncAzureOpenAI
 
 
 class AOAI:
     """Thin async wrapper over OpenAI Python lib configured for Azure endpoints."""
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
-        # Some library builds infer config from env, but we pass explicitly for clarity.
-        self.client = _ClientClass(
+        # Configure Azure client explicitly for clarity.
+        self.client = AsyncAzureOpenAI(
             api_key=cfg.api_key,
-            azure_endpoint=cfg.azure_endpoint if hasattr(_ClientClass, "__name__") and "Azure" in _ClientClass.__name__ else None,
-            # If not Azure class, still pass endpoint via base_url if supported
+            azure_endpoint=cfg.azure_endpoint,
+            api_version=cfg.api_version,
         )
         self.deployment = cfg.deployment
         self.api_version = cfg.api_version
@@ -183,19 +173,10 @@ class AOAI:
         if seed is not None:
             kwargs["seed"] = seed
 
-        # For Azure we must pass api_version and may need to rely on environment.
-        # Newer libs read OPENAI_API_VERSION; to be safe we include in header param if supported.
-        try:
-            resp = await asyncio.wait_for(
-                self.client.chat.completions.create(**kwargs),
-                timeout=timeout_s
-            )
-        except TypeError:
-            # Older libs may need additional named args; try with api_version explicitly
-            resp = await asyncio.wait_for(
-                self.client.chat.completions.create(api_version=self.api_version, **kwargs),
-                timeout=timeout_s
-            )
+        resp = await asyncio.wait_for(
+            self.client.chat.completions.create(**kwargs),
+            timeout=timeout_s
+        )
         return resp.to_dict_recursive() if hasattr(resp, "to_dict_recursive") else resp
 
 
