@@ -911,6 +911,10 @@ class Runner:
         self.log = logging.getLogger("gsm8k-graphs")
         self.log.info("Splits to process: %s", ", ".join(self.splits))
 
+        # Silence noisy network libraries while the dashboard handles live updates.
+        for noisy in ("httpx", "openai", "openai._client", "openai._http"):
+            logging.getLogger(noisy).setLevel(logging.WARNING)
+
         # progress counters
         self.total = 0
         self.done = 0
