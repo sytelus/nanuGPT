@@ -177,6 +177,15 @@ RNG_SEED = None  # set to int for reproducibility; None mixes in system entropy
 
 # ------------------------------ Data models ------------------------------
 
+
+@dataclass
+class ChatResult:
+    content: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
 @dataclass(frozen=True)
 class GSMItem:
     id: int
@@ -198,6 +207,7 @@ class AttemptResult:
     # Combine phase
     combined_problem: Optional[str] = None
     combine_error: Optional[str] = None
+    combine_completion_tokens: int = 0
 
     # Solve phase
     solver_output: Optional[str] = None
@@ -205,6 +215,7 @@ class AttemptResult:
     solver_answer_fraction: Optional[Fraction] = None
     expected_answer_raw: Optional[str] = None
     expected_answer_fraction: Optional[Fraction] = None
+    solve_completion_tokens: int = 0
 
     # Outcome
     success: bool = False
@@ -542,7 +553,8 @@ class AOAIClient:
         messages: List[Dict[str, str]],
         temperature: Optional[float] = None,
         max_completion_tokens: Optional[int] = None,
-    ) -> str:
+        on_retry: Optional[Callable[[int, Exception], None]] = None,
+    ) -> ChatResult:
         """
         Call Azure OpenAI Chat Completions with robust retries.
         Returns the content string.
@@ -560,11 +572,30 @@ class AOAIClient:
                     kwargs["max_completion_tokens"] = max_completion_tokens
                 resp = self.client.chat.completions.create(**kwargs)
                 content = resp.choices[0].message.content or ""
-                return content.strip()
+                usage = getattr(resp, "usage", None)
+                prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+                completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+                total_tokens = getattr(usage, "total_tokens", 0) or 0
+                return ChatResult(
+                    content=content.strip(),
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                )
             except Exception as e:
                 attempt += 1
                 if attempt > self.max_retries:
+                    if on_retry is not None:
+                        try:
+                            on_retry(attempt, e)
+                        except Exception:
+                            pass
                     raise
+                if on_retry is not None:
+                    try:
+                        on_retry(attempt, e)
+                    except Exception:
+                        pass
                 # Exponential backoff with jitter
                 sleep_s = (self.backoff_base ** (attempt - 1)) + random.uniform(*self.backoff_jitter)
                 time.sleep(min(60.0, sleep_s))
@@ -619,6 +650,7 @@ class WorkerStat:
     successes: int = 0
     failures: int = 0
     retries: int = 0
+    completion_tokens: int = 0
     status: str = "Idle"
     last_event: str = ""
     last_duration: float = 0.0
@@ -639,12 +671,14 @@ class SharedState:
     successes: int = 0
     failures: int = 0
     retries: int = 0
+    completion_tokens_total: int = 0
     start_time: float = dataclasses.field(default_factory=time.time)
     stop_event: threading.Event = dataclasses.field(default_factory=threading.Event)
     lock: threading.Lock = dataclasses.field(default_factory=threading.Lock)
     io_lock: threading.Lock = dataclasses.field(default_factory=threading.Lock)
     last_event: str = ""
     last_error: Optional[str] = None
+    dashboard_event: threading.Event = dataclasses.field(default_factory=threading.Event)
     # Per-worker stats
     worker_stats: Dict[int, WorkerStat] = dataclasses.field(default_factory=dict)
 
@@ -664,6 +698,10 @@ def read_seen_triples(path: Path) -> set:
 def append_seen_triple(path: Path, triple: Tuple[int, int, int]) -> None:
     with path.open("a", encoding="utf-8") as f:
         f.write(f"{triple[0]},{triple[1]},{triple[2]}\n")
+
+
+def notify_dashboard(state: SharedState) -> None:
+    state.dashboard_event.set()
 
 
 _CURRENT_TRIPLE_SENTINEL = object()
@@ -693,6 +731,7 @@ def update_worker_status(
             stat.last_update = now
         else:
             stat.last_update = time.time()
+    notify_dashboard(state)
 
 
 def pick_random_triple(n: int, rng: random.Random) -> Tuple[int, int, int]:
@@ -720,6 +759,8 @@ def do_attempt(
     progress_cb: Optional[Callable[[str], None]] = None,
     combine_chat_kwargs: Optional[Dict[str, Any]] = None,
     solve_chat_kwargs: Optional[Dict[str, Any]] = None,
+    combine_retry_cb: Optional[Callable[[int, Exception], None]] = None,
+    solve_retry_cb: Optional[Callable[[int, Exception], None]] = None,
 ) -> AttemptResult:
     t0 = time.time()
     idA, idB, idC = triple
@@ -739,8 +780,11 @@ def do_attempt(
 
     try:
         chat_kwargs = dict(combine_chat_kwargs or {})
-        combined = client.chat(messages, **chat_kwargs)
-        res.combined_problem = combined.strip()
+        if combine_retry_cb is not None:
+            chat_kwargs.setdefault("on_retry", combine_retry_cb)
+        combined_res = client.chat(messages, **chat_kwargs)
+        res.combined_problem = combined_res.content
+        res.combine_completion_tokens = combined_res.completion_tokens
     except Exception as e:
         res.combine_error = f"combine_error: {type(e).__name__}: {e}"
         res.reason = "combine_call_failed"
@@ -763,8 +807,11 @@ def do_attempt(
     ]
     try:
         solve_kwargs = dict(solve_chat_kwargs or {})
-        solver_text = client.chat(messages, **solve_kwargs)
-        res.solver_output = solver_text
+        if solve_retry_cb is not None:
+            solve_kwargs.setdefault("on_retry", solve_retry_cb)
+        solver_res = client.chat(messages, **solve_kwargs)
+        res.solver_output = solver_res.content
+        res.solve_completion_tokens = solver_res.completion_tokens
     except Exception as e:
         res.reason = f"solve_call_failed: {type(e).__name__}: {e}"
         res.elapsed_s = time.time() - t0
@@ -814,6 +861,8 @@ def writer_success(paths: Paths, res: AttemptResult, lock: threading.Lock) -> No
         "expected_answer_raw": res.expected_answer_raw,
         "expected_answer_fraction": f"{res.expected_answer_fraction.numerator}/{res.expected_answer_fraction.denominator}",
         "elapsed_s": round(res.elapsed_s, 3),
+        "combine_completion_tokens": res.combine_completion_tokens,
+        "solve_completion_tokens": res.solve_completion_tokens,
     }
     with lock:
         append_jsonl(paths.success_train, out_row)
@@ -842,6 +891,8 @@ def writer_fail(paths: Paths, res: AttemptResult, lock: threading.Lock) -> None:
                                      if res.expected_answer_fraction else None),
         "reason": res.reason,
         "elapsed_s": round(res.elapsed_s, 3),
+        "combine_completion_tokens": res.combine_completion_tokens,
+        "solve_completion_tokens": res.solve_completion_tokens,
     }
     with lock:
         append_jsonl(paths.fail_train, row)
@@ -944,6 +995,23 @@ def worker_loop(
                     current_triple=triple,
                 )
 
+        def make_retry_cb(stage_label: str) -> Callable[[int, Exception], None]:
+            def _cb(attempt_no: int, error: Exception) -> None:
+                message = (
+                    f"worker {wid}: {stage_label} retry attempt {attempt_no} due to {type(error).__name__}: {error}"
+                )
+                with state.lock:
+                    state.retries += 1
+                    state.last_event = message
+                    stat = state.worker_stats.setdefault(wid, WorkerStat())
+                    stat.retries += 1
+                    stat.last_event = message
+                    stat.status = f"{stage_label} retry"
+                    stat.last_update = time.time()
+                    stat.current_triple = triple
+                notify_dashboard(state)
+            return _cb
+
         attempt_started = time.time()
         try:
             res = do_attempt(
@@ -953,6 +1021,8 @@ def worker_loop(
                 progress_cb=stage_cb,
                 combine_chat_kwargs=combine_chat_kwargs,
                 solve_chat_kwargs=solve_chat_kwargs,
+                combine_retry_cb=make_retry_cb("Combining"),
+                solve_retry_cb=make_retry_cb("Solving"),
             )
         except Exception as e:
             res = AttemptResult(
@@ -970,6 +1040,8 @@ def worker_loop(
 
         stage_cb("validate")
 
+        attempt_tokens = res.combine_completion_tokens + res.solve_completion_tokens
+
         if res.success:
             with state.lock:
                 state.successes += 1
@@ -978,6 +1050,7 @@ def worker_loop(
                     f"(triple {res.triple_ids})"
                 )
                 state.last_event = last_event
+                state.completion_tokens_total += attempt_tokens
                 stat = state.worker_stats.setdefault(wid, WorkerStat())
                 stat.successes += 1
                 stat.attempts += 1
@@ -987,7 +1060,9 @@ def worker_loop(
                 stat.last_update = time.time()
                 stat.stage_started_at = stat.last_update
                 stat.current_triple = None
+                stat.completion_tokens += attempt_tokens
             writer_success(paths, res, state.io_lock)
+            notify_dashboard(state)
         else:
             failure_detail = summarize_failure(res)
             with state.lock:
@@ -997,6 +1072,7 @@ def worker_loop(
                 )
                 state.last_event = last_event
                 state.last_error = failure_detail
+                state.completion_tokens_total += attempt_tokens
                 stat = state.worker_stats.setdefault(wid, WorkerStat())
                 stat.failures += 1
                 stat.attempts += 1
@@ -1007,13 +1083,16 @@ def worker_loop(
                 stat.stage_started_at = stat.last_update
                 stat.current_triple = None
                 stat.last_error = failure_detail
+                stat.completion_tokens += attempt_tokens
             writer_fail(paths, res, state.io_lock)
+            notify_dashboard(state)
 
         if state.stop_event.is_set():
             break
         with state.lock:
             if state.successes >= state.target_success:
                 state.stop_event.set()
+                notify_dashboard(state)
                 break
 
     update_worker_status(state, wid, status="Stopped", event="worker exit", current_triple=None)
@@ -1039,6 +1118,7 @@ def build_dashboard_renderable(state: SharedState) -> Group:
         last_event = state.last_event
         last_error = state.last_error
         stopping = state.stop_event.is_set()
+        completion_tokens_total = state.completion_tokens_total
         worker_snapshot = {
             wid: dataclasses.replace(stat)
             for wid, stat in state.worker_stats.items()
@@ -1047,14 +1127,15 @@ def build_dashboard_renderable(state: SharedState) -> Group:
     table = Table(box=SIMPLE, show_lines=False, expand=True)
     table.add_column("Role", no_wrap=True)
     table.add_column("Status", no_wrap=True)
-    table.add_column("Succ", no_wrap=True, justify="right")
-    table.add_column("Fail", no_wrap=True, justify="right")
-    table.add_column("Att", no_wrap=True, justify="right")
-    table.add_column("Ret", no_wrap=True, justify="right")
-    table.add_column("Rate/s", no_wrap=True, justify="right")
+    table.add_column("Successes", no_wrap=True, justify="right")
+    table.add_column("Failures", no_wrap=True, justify="right")
+    table.add_column("Attempts", no_wrap=True, justify="right")
+    table.add_column("Retries", no_wrap=True, justify="right")
+    table.add_column("Success Rate", no_wrap=True, justify="right")
     table.add_column("ETA", no_wrap=True, justify="right")
-    table.add_column("Stage(s)", no_wrap=True, justify="right")
-    table.add_column("Last event", overflow="fold")
+    table.add_column("Completion Tokens", no_wrap=True, justify="right")
+    table.add_column("Stage Seconds", no_wrap=True, justify="right")
+    table.add_column("Last Event", overflow="fold")
 
     elapsed = max(1e-9, time.time() - start_time)
     rate = successes / elapsed
@@ -1070,6 +1151,7 @@ def build_dashboard_renderable(state: SharedState) -> Group:
         str(retries),
         f"{rate:.2f}",
         format_eta(eta),
+        str(completion_tokens_total),
         "-",
         last_event,
     )
@@ -1088,13 +1170,14 @@ def build_dashboard_renderable(state: SharedState) -> Group:
             str(stats.retries),
             f"{per_s:.2f}",
             "-",
+            str(stats.completion_tokens),
             f"{stats.stage_elapsed():.1f}",
             stats.last_event,
         )
 
     errors_table = Table(box=SIMPLE, show_header=True, expand=True)
     errors_table.add_column("Role", no_wrap=True)
-    errors_table.add_column("Last error", overflow="fold")
+    errors_table.add_column("Last Error", overflow="fold")
     errors_table.add_row("MASTER", last_error or "-")
     for wid in sorted(worker_snapshot.keys()):
         stats = worker_snapshot[wid]
@@ -1103,11 +1186,18 @@ def build_dashboard_renderable(state: SharedState) -> Group:
     return Group(table, Panel(errors_table, title="Last errors", box=SIMPLE))
 
 
-def live_dashboard(state: SharedState, console: Console, refresh_per_sec: float = 4.0) -> None:
-    with Live(build_dashboard_renderable(state), console=console, refresh_per_second=refresh_per_sec, transient=False) as live:
+def live_dashboard(state: SharedState, console: Console) -> None:
+    state.dashboard_event.set()
+    with Live(build_dashboard_renderable(state), console=console, transient=False) as live:
+        state.dashboard_event.clear()
         while not state.stop_event.is_set():
-            time.sleep(1.0 / refresh_per_sec)
+            triggered = state.dashboard_event.wait(timeout=1.0)
+            if not triggered and not state.dashboard_event.is_set():
+                continue
+            state.dashboard_event.clear()
             live.update(build_dashboard_renderable(state))
+        # Final refresh before exit
+        live.update(build_dashboard_renderable(state))
 
 
 # ------------------------------ Main ------------------------------
@@ -1190,6 +1280,7 @@ def main() -> None:
         if not state.stop_event.is_set():
             state.stop_event.set()
             console.log("[yellow]SIGINT received, signaling workers to stop...[/]")
+            notify_dashboard(state)
         raise KeyboardInterrupt
     signal.signal(signal.SIGINT, handle_sigint)
 
@@ -1215,6 +1306,7 @@ def main() -> None:
     with state.lock:
         for wid in range(state.max_workers):
             state.worker_stats[wid] = WorkerStat(status="Idle", last_event="awaiting tasks")
+    notify_dashboard(state)
 
     # Start workers
     threads: List[threading.Thread] = []
