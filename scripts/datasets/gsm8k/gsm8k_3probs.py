@@ -537,7 +537,12 @@ class AOAIClient:
         self.backoff_base = backoff_base
         self.backoff_jitter = backoff_jitter
 
-    def chat(self, messages: List[Dict[str, str]], temperature: float = 0.3, max_tokens: int = 800) -> str:
+    def chat(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: Optional[float] = None,
+        max_completion_tokens: Optional[int] = None,
+    ) -> str:
         """
         Call Azure OpenAI Chat Completions with robust retries.
         Returns the content string.
@@ -545,13 +550,15 @@ class AOAIClient:
         attempt = 0
         while True:
             try:
-                resp = self.client.chat.completions.create(
-                    model=self.deployment,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    n=1,
-                )
+                kwargs: Dict[str, Any] = {
+                    "model": self.deployment,
+                    "messages": messages,
+                }
+                if temperature is not None:
+                    kwargs["temperature"] = temperature
+                if max_completion_tokens is not None:
+                    kwargs["max_completion_tokens"] = max_completion_tokens
+                resp = self.client.chat.completions.create(**kwargs)
                 content = resp.choices[0].message.content or ""
                 return content.strip()
             except Exception as e:
@@ -711,6 +718,8 @@ def do_attempt(
     items: List[GSMItem],
     triple: Tuple[int, int, int],
     progress_cb: Optional[Callable[[str], None]] = None,
+    combine_chat_kwargs: Optional[Dict[str, Any]] = None,
+    solve_chat_kwargs: Optional[Dict[str, Any]] = None,
 ) -> AttemptResult:
     t0 = time.time()
     idA, idB, idC = triple
@@ -729,7 +738,8 @@ def do_attempt(
         progress_cb("combine")
 
     try:
-        combined = client.chat(messages, temperature=0.4, max_tokens=700)
+        chat_kwargs = dict(combine_chat_kwargs or {})
+        combined = client.chat(messages, **chat_kwargs)
         res.combined_problem = combined.strip()
     except Exception as e:
         res.combine_error = f"combine_error: {type(e).__name__}: {e}"
@@ -752,7 +762,8 @@ def do_attempt(
         {"role": "user", "content": solve_user_content},
     ]
     try:
-        solver_text = client.chat(messages, temperature=0.0, max_tokens=128)
+        solve_kwargs = dict(solve_chat_kwargs or {})
+        solver_text = client.chat(messages, **solve_kwargs)
         res.solver_output = solver_text
     except Exception as e:
         res.reason = f"solve_call_failed: {type(e).__name__}: {e}"
@@ -868,6 +879,8 @@ def worker_loop(
     items: List[GSMItem],
     seen: set,
     rng: random.Random,
+    combine_chat_kwargs: Optional[Dict[str, Any]],
+    solve_chat_kwargs: Optional[Dict[str, Any]],
 ) -> None:
     update_worker_status(state, wid, status="Idle", event="worker starting", current_triple=None)
     n = len(items)
@@ -933,7 +946,14 @@ def worker_loop(
 
         attempt_started = time.time()
         try:
-            res = do_attempt(client, items, triple, progress_cb=stage_cb)
+            res = do_attempt(
+                client,
+                items,
+                triple,
+                progress_cb=stage_cb,
+                combine_chat_kwargs=combine_chat_kwargs,
+                solve_chat_kwargs=solve_chat_kwargs,
+            )
         except Exception as e:
             res = AttemptResult(
                 triple_ids=triple,
@@ -1105,6 +1125,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--timeout", type=float, default=DEFAULT_REQ_TIMEOUT,
                    help=f"Azure API request timeout in seconds (default: {DEFAULT_REQ_TIMEOUT}).")
     p.add_argument("--quiet", action="store_true", help="Reduce console output (hides the live dashboard).")
+    p.add_argument("--combine-temperature", type=float, default=None,
+                   help="Temperature to use for the combine request (default: provider default).")
+    p.add_argument("--combine-max-completion-tokens", type=int, default=None,
+                   help="Max completion tokens for the combine request (default: provider default).")
+    p.add_argument("--solve-temperature", type=float, default=None,
+                   help="Temperature to use for the solve request (default: provider default).")
+    p.add_argument("--solve-max-completion-tokens", type=int, default=None,
+                   help="Max completion tokens for the solve request (default: provider default).")
     return p.parse_args()
 
 
@@ -1123,6 +1151,23 @@ def main() -> None:
     # Paths
     out_root = Path(args.out_dir).expanduser().resolve()
     paths = make_paths(out_root)
+
+    # Chat parameter overrides
+    combine_chat_kwargs: Optional[Dict[str, Any]] = {}
+    if args.combine_temperature is not None:
+        combine_chat_kwargs["temperature"] = args.combine_temperature
+    if args.combine_max_completion_tokens is not None:
+        combine_chat_kwargs["max_completion_tokens"] = args.combine_max_completion_tokens
+    if not combine_chat_kwargs:
+        combine_chat_kwargs = None
+
+    solve_chat_kwargs: Optional[Dict[str, Any]] = {}
+    if args.solve_temperature is not None:
+        solve_chat_kwargs["temperature"] = args.solve_temperature
+    if args.solve_max_completion_tokens is not None:
+        solve_chat_kwargs["max_completion_tokens"] = args.solve_max_completion_tokens
+    if not solve_chat_kwargs:
+        solve_chat_kwargs = None
 
     # Azure config
     try:
@@ -1176,7 +1221,7 @@ def main() -> None:
     for wid, worker_rng in enumerate(worker_rngs):
         t = threading.Thread(
             target=worker_loop,
-            args=(wid, state, paths, client, items, seen, worker_rng),
+            args=(wid, state, paths, client, items, seen, worker_rng, combine_chat_kwargs, solve_chat_kwargs),
             name=f"worker-{wid}",
             daemon=True,
         )
