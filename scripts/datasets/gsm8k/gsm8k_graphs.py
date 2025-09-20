@@ -536,13 +536,29 @@ def parse_gold_answer(ans: str) -> Optional[float]:
 
 
 def build_edges_from_inputs(nodes: List[Dict[str, Any]]) -> List[Tuple[str, str]]:
-    edges = []
-    idset = {n["id"] for n in nodes if "id" in n}
+    edges: List[Tuple[str, str]] = []
+    if not nodes:
+        return edges
+
+    # Collect valid node ids first so stray None/invalid entries are ignored gracefully.
+    idset = {
+        n["id"]
+        for n in nodes
+        if isinstance(n, dict) and isinstance(n.get("id"), str)
+    }
+
     for n in nodes:
+        if not isinstance(n, dict):
+            continue
+        nid = n.get("id")
+        if nid not in idset:
+            continue
         ins = n.get("inputs") or []
+        if not isinstance(ins, list):
+            continue
         for src in ins:
-            if src in idset:
-                edges.append((src, n["id"]))
+            if isinstance(src, str) and src in idset:
+                edges.append((src, nid))
     return edges
 
 
@@ -1520,6 +1536,9 @@ class Runner:
 
     # ---------- main entry ----------
     async def run(self) -> None:
+        # Surface output location immediately so long runs show where results land.
+        self.console.print(f"[bold green]Outputs will be written to:[/bold green] {self.out_dir}")
+
         if self.cfg.build_arrow_only:
             self.build_arrow()
             # Print final output directory for user clarity
