@@ -128,6 +128,7 @@ class Config:
     network_max_retries: int = 8
     content_max_attempts: int = 3   # model "repair" attempts for invalid graphs
     dry_run: int = 0                # if >0, only process this many per split
+    max_problems: int = -1          # if >=0, process at most this many problems overall
 
     # Prompt knobs
     temperature: Optional[float] = None
@@ -715,6 +716,7 @@ class Runner:
         self.repaired = 0
         self.bytes_written = 0
         self._last_stats = (-1, -1, -1, -1, -1)
+        self.remaining_budget = None if self.cfg.max_problems is None or self.cfg.max_problems < 0 else self.cfg.max_problems
 
     # ---------- printing helpers ----------
     async def _print_worker(self, rid: str, message: str, style: Optional[str] = None) -> None:
@@ -1048,9 +1050,40 @@ class Runner:
         self.console.rule(f"[bold]Processing split: {split}")
         rows = self._load_dataset_split(split)
         done = self.already_done_ids(split)
-        n_total = len(rows) if self.cfg.dry_run <= 0 else min(self.cfg.dry_run, len(rows))
-        self.total += n_total
-        self.log.info(f"{split}: {n_total} total; {len(done)} already cached; will skip cached.")
+
+        max_rows = len(rows)
+        if self.cfg.dry_run > 0:
+            max_rows = min(max_rows, self.cfg.dry_run)
+
+        selected_indices: List[int] = []
+        remaining_budget = self.remaining_budget
+        for idx in range(max_rows):
+            if remaining_budget is not None and remaining_budget <= 0:
+                break
+            selected_indices.append(idx)
+            if remaining_budget is not None:
+                rid = f"{split}_{idx:05d}"
+                if rid not in done:
+                    remaining_budget -= 1
+
+        if not selected_indices:
+            if max_rows == 0:
+                self.log.info(f"{split}: no examples available after dry-run filtering.")
+                await self._print_main(f"[yellow]Skipping split {split}: no examples available[/yellow]")
+            else:
+                self.log.info(f"{split}: budget exhausted; skipping remaining {max_rows} example(s).")
+                await self._print_main(f"[yellow]Skipping split {split}: max_problems budget exhausted[/yellow]")
+            return
+
+        self.total += len(selected_indices)
+        if self.remaining_budget is not None:
+            self.remaining_budget = remaining_budget
+
+        planned_uncached = sum(1 for idx in selected_indices if f"{split}_{idx:05d}" not in done)
+        self.log.info(
+            f"{split}: planning {len(selected_indices)} example(s); "
+            f"{planned_uncached} require processing; {len(done)} already cached overall."
+        )
 
         async def worker(idx: int, row: Dict[str, Any]):
             rid = f"{split}_{idx:05d}"
@@ -1068,9 +1101,8 @@ class Runner:
                 self.save_record(split, rid, rec)
 
         tasks = []
-        for idx, row in enumerate(rows):
-            if self.cfg.dry_run > 0 and idx >= self.cfg.dry_run:
-                break
+        for idx in selected_indices:
+            row = rows[idx]
             rid = f"{split}_{idx:05d}"
             if rid in done:
                 self.done += 1  # count towards progress
@@ -1200,6 +1232,8 @@ def parse_args(argv: Optional[List[str]] = None) -> Config:
     p.add_argument("--net-retries", type=int, default=None, help="Max network retries.")
     p.add_argument("--content-attempts", type=int, default=None, help="Max content repair attempts per record.")
     p.add_argument("--dry-run", type=int, default=None, help="If set, only process this many examples per split.")
+    p.add_argument("--max-problems", type=int, default=None,
+                   help="If set >=0, stop after processing this many problems across all splits.")
     p.add_argument("--temperature", type=float, default=None, help="Sampling temperature.")
     p.add_argument("--seed", type=int, default=None, help="Deterministic seed for the model (if supported).")
 
@@ -1225,6 +1259,7 @@ def parse_args(argv: Optional[List[str]] = None) -> Config:
     if args.net_retries is not None: cfg.network_max_retries = args.net_retries
     if args.content_attempts is not None: cfg.content_max_attempts = args.content_attempts
     if args.dry_run is not None: cfg.dry_run = args.dry_run
+    if args.max_problems is not None: cfg.max_problems = args.max_problems
     if args.temperature is not None: cfg.temperature = args.temperature
     if args.seed is not None: cfg.seed = args.seed
 
