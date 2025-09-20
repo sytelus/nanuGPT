@@ -129,7 +129,7 @@ except Exception:
 from fractions import Fraction
 
 try:
-    from rich.console import Console
+    from rich.console import Console, Group
     from rich.live import Live
     from rich.table import Table
     from rich.panel import Panel
@@ -619,6 +619,7 @@ class WorkerStat:
     stage_started_at: float = dataclasses.field(default_factory=time.time)
     first_started_at: float = dataclasses.field(default_factory=time.time)
     last_update: float = dataclasses.field(default_factory=time.time)
+    last_error: Optional[str] = None
 
     def stage_elapsed(self) -> float:
         return max(0.0, time.time() - self.stage_started_at)
@@ -636,6 +637,7 @@ class SharedState:
     lock: threading.Lock = dataclasses.field(default_factory=threading.Lock)
     io_lock: threading.Lock = dataclasses.field(default_factory=threading.Lock)
     last_event: str = ""
+    last_error: Optional[str] = None
     # Per-worker stats
     worker_stats: Dict[int, WorkerStat] = dataclasses.field(default_factory=dict)
 
@@ -835,6 +837,29 @@ def writer_fail(paths: Paths, res: AttemptResult, lock: threading.Lock) -> None:
         append_jsonl(paths.attempts, {"success": False, **row})
 
 
+def summarize_failure(res: AttemptResult) -> str:
+    reason = res.reason or "unknown_failure"
+    parts: List[str] = []
+    if res.combine_error:
+        parts.append(res.combine_error)
+    if res.reason in {"solve_call_failed", "solver_answer_not_parsable", "answer_mismatch"}:
+        if res.solver_output:
+            parts.append(f"solver_output={res.solver_output}")
+    if res.reason == "answer_mismatch":
+        parts.append(f"expected={res.expected_answer_raw}")
+        parts.append(f"got={res.solver_answer_raw}")
+    if res.reason == "solver_answer_not_parsable" and res.solver_answer_raw:
+        parts.append(f"parsed={res.solver_answer_raw}")
+    if not parts and res.solver_output and res.reason not in {"combine_call_failed", "combine_invalid_output"}:
+        parts.append(f"solver_output={res.solver_output}")
+    if res.reason == "expected_answer_not_parsable" and res.expected_answer_raw:
+        parts.append(f"expected={res.expected_answer_raw}")
+    if res.reason == "combine_invalid_output" and res.combined_problem:
+        parts.append(f"combined_problem={res.combined_problem}")
+    detail = "; ".join(filter(None, parts))
+    return f"{reason}{(': ' + detail) if detail else ''}"
+
+
 def worker_loop(
     wid: int,
     state: SharedState,
@@ -944,10 +969,14 @@ def worker_loop(
                 stat.current_triple = None
             writer_success(paths, res, state.io_lock)
         else:
+            failure_detail = summarize_failure(res)
             with state.lock:
                 state.failures += 1
-                last_event = f"worker {wid}: fail ({res.reason}) (triple {res.triple_ids})"
+                last_event = (
+                    f"worker {wid}: fail {failure_detail} (triple {res.triple_ids})"
+                )
                 state.last_event = last_event
+                state.last_error = failure_detail
                 stat = state.worker_stats.setdefault(wid, WorkerStat())
                 stat.failures += 1
                 stat.attempts += 1
@@ -957,6 +986,7 @@ def worker_loop(
                 stat.last_update = time.time()
                 stat.stage_started_at = stat.last_update
                 stat.current_triple = None
+                stat.last_error = failure_detail
             writer_fail(paths, res, state.io_lock)
 
         if state.stop_event.is_set():
@@ -979,7 +1009,7 @@ def format_eta(seconds_left: float) -> str:
     return f"{m:02d}:{s:02d}"
 
 
-def build_dashboard_table(state: SharedState) -> Table:
+def build_dashboard_renderable(state: SharedState) -> Group:
     with state.lock:
         successes = state.successes
         failures = state.failures
@@ -987,6 +1017,7 @@ def build_dashboard_table(state: SharedState) -> Table:
         start_time = state.start_time
         target_success = state.target_success
         last_event = state.last_event
+        last_error = state.last_error
         stopping = state.stop_event.is_set()
         worker_snapshot = {
             wid: dataclasses.replace(stat)
@@ -1020,7 +1051,7 @@ def build_dashboard_table(state: SharedState) -> Table:
         f"{rate:.2f}",
         format_eta(eta),
         "-",
-        last_event[:120],
+        last_event,
     )
 
     now = time.time()
@@ -1038,17 +1069,25 @@ def build_dashboard_table(state: SharedState) -> Table:
             f"{per_s:.2f}",
             "-",
             f"{stats.stage_elapsed():.1f}",
-            stats.last_event[:120],
+            stats.last_event,
         )
 
-    return table
+    errors_table = Table(box=SIMPLE, show_header=True, expand=True)
+    errors_table.add_column("Role", no_wrap=True)
+    errors_table.add_column("Last error", overflow="fold")
+    errors_table.add_row("MASTER", last_error or "-")
+    for wid in sorted(worker_snapshot.keys()):
+        stats = worker_snapshot[wid]
+        errors_table.add_row(f"WORKER-{wid}", stats.last_error or "-")
+
+    return Group(table, Panel(errors_table, title="Last errors", box=SIMPLE))
 
 
 def live_dashboard(state: SharedState, console: Console, refresh_per_sec: float = 4.0) -> None:
-    with Live(build_dashboard_table(state), console=console, refresh_per_second=refresh_per_sec, transient=False) as live:
+    with Live(build_dashboard_renderable(state), console=console, refresh_per_second=refresh_per_sec, transient=False) as live:
         while not state.stop_event.is_set():
             time.sleep(1.0 / refresh_per_sec)
-            live.update(build_dashboard_table(state))
+            live.update(build_dashboard_renderable(state))
 
 
 # ------------------------------ Main ------------------------------
