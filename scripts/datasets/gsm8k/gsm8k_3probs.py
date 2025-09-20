@@ -111,7 +111,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 # Third-party
 try:
@@ -607,6 +607,24 @@ def make_paths(root: Path) -> Paths:
 
 
 @dataclass
+class WorkerStat:
+    attempts: int = 0
+    successes: int = 0
+    failures: int = 0
+    retries: int = 0
+    status: str = "Idle"
+    last_event: str = ""
+    last_duration: float = 0.0
+    current_triple: Optional[Tuple[int, int, int]] = None
+    stage_started_at: float = dataclasses.field(default_factory=time.time)
+    first_started_at: float = dataclasses.field(default_factory=time.time)
+    last_update: float = dataclasses.field(default_factory=time.time)
+
+    def stage_elapsed(self) -> float:
+        return max(0.0, time.time() - self.stage_started_at)
+
+
+@dataclass
 class SharedState:
     target_success: int
     max_workers: int
@@ -619,7 +637,7 @@ class SharedState:
     io_lock: threading.Lock = dataclasses.field(default_factory=threading.Lock)
     last_event: str = ""
     # Per-worker stats
-    worker_stats: Dict[int, Dict[str, Any]] = dataclasses.field(default_factory=dict)
+    worker_stats: Dict[int, WorkerStat] = dataclasses.field(default_factory=dict)
 
 
 def read_seen_triples(path: Path) -> set:
@@ -637,6 +655,35 @@ def read_seen_triples(path: Path) -> set:
 def append_seen_triple(path: Path, triple: Tuple[int, int, int]) -> None:
     with path.open("a", encoding="utf-8") as f:
         f.write(f"{triple[0]},{triple[1]},{triple[2]}\n")
+
+
+_CURRENT_TRIPLE_SENTINEL = object()
+
+
+def update_worker_status(
+    state: SharedState,
+    wid: int,
+    *,
+    status: Optional[str] = None,
+    event: Optional[str] = None,
+    current_triple: Any = _CURRENT_TRIPLE_SENTINEL,
+    stage_reset: bool = True,
+) -> None:
+    """Helper to mutate per-worker stats under the shared lock."""
+    with state.lock:
+        stat = state.worker_stats.setdefault(wid, WorkerStat())
+        if status is not None:
+            stat.status = status
+        if event is not None:
+            stat.last_event = event
+        if current_triple is not _CURRENT_TRIPLE_SENTINEL:
+            stat.current_triple = current_triple
+        if stage_reset:
+            now = time.time()
+            stat.stage_started_at = now
+            stat.last_update = now
+        else:
+            stat.last_update = time.time()
 
 
 def pick_random_triple(n: int, rng: random.Random) -> Tuple[int, int, int]:
@@ -661,6 +708,7 @@ def do_attempt(
     client: AOAIClient,
     items: List[GSMItem],
     triple: Tuple[int, int, int],
+    progress_cb: Optional[Callable[[str], None]] = None,
 ) -> AttemptResult:
     t0 = time.time()
     idA, idB, idC = triple
@@ -675,6 +723,9 @@ def do_attempt(
         {"role": "system", "content": SYSTEM_COMBINE},
         {"role": "user", "content": combine_user_content},
     ]
+    if progress_cb:
+        progress_cb("combine")
+
     try:
         combined = client.chat(messages, temperature=0.4, max_tokens=700)
         res.combined_problem = combined.strip()
@@ -691,6 +742,8 @@ def do_attempt(
         return res
 
     # 2) Solve
+    if progress_cb:
+        progress_cb("solve")
     solve_user_content = SOLVE_PROMPT.format(problem=res.combined_problem)
     messages = [
         {"role": "system", "content": SYSTEM_SOLVE},
@@ -791,39 +844,72 @@ def worker_loop(
     seen: set,
     rng: random.Random,
 ) -> None:
-    local_attempts = 0
-    local_succ = 0
-    local_fail = 0
-    local_retries = 0
-    last_event = ""
-
+    update_worker_status(state, wid, status="Idle", event="worker starting", current_triple=None)
     n = len(items)
+
     while not state.stop_event.is_set():
-        # Stop if we've reached the target
         with state.lock:
             if state.successes >= state.target_success:
                 break
 
-        # Pick a fresh triple we haven't seen
+        update_worker_status(state, wid, status="Sampling", event="choosing triple", current_triple=None)
+
+        triple: Optional[Tuple[int, int, int]] = None
         for _ in range(1000):
-            triple = pick_random_triple(n, rng)
-            triple_key = f"{triple[0]},{triple[1]},{triple[2]}"
+            if state.stop_event.is_set():
+                break
+            candidate = pick_random_triple(n, rng)
+            triple_key = f"{candidate[0]},{candidate[1]},{candidate[2]}"
             with state.lock:
                 if triple_key not in seen:
                     seen.add(triple_key)
-                    append_seen_triple(paths.seen_triples, triple)
+                    append_seen_triple(paths.seen_triples, candidate)
+                    triple = candidate
                     break
-        else:
-            # Could not find unseen triple quickly (unlikely). Small sleep.
+        if triple is None:
+            if state.stop_event.is_set():
+                break
             time.sleep(0.1)
             continue
 
-        local_attempts += 1
-        started = time.time()
+        update_worker_status(
+            state,
+            wid,
+            status="Queued",
+            event=f"triple {triple}",
+            current_triple=triple,
+        )
+
+        def stage_cb(stage: str) -> None:
+            if stage == "combine":
+                update_worker_status(
+                    state,
+                    wid,
+                    status="Combining",
+                    event=f"combining {triple}",
+                    current_triple=triple,
+                )
+            elif stage == "solve":
+                update_worker_status(
+                    state,
+                    wid,
+                    status="Solving",
+                    event=f"solving {triple}",
+                    current_triple=triple,
+                )
+            elif stage == "validate":
+                update_worker_status(
+                    state,
+                    wid,
+                    status="Validating",
+                    event=f"checking {triple}",
+                    current_triple=triple,
+                )
+
+        attempt_started = time.time()
         try:
-            res = do_attempt(client, items, triple)
+            res = do_attempt(client, items, triple, progress_cb=stage_cb)
         except Exception as e:
-            # This is an unexpected top-level failure; log as fail.
             res = AttemptResult(
                 triple_ids=triple,
                 problemA=items[triple[0]],
@@ -832,6 +918,12 @@ def worker_loop(
                 success=False,
                 reason=f"unexpected_exception: {type(e).__name__}: {e}",
             )
+            res.elapsed_s = time.time() - attempt_started
+
+        if res.elapsed_s == 0:
+            res.elapsed_s = time.time() - attempt_started
+
+        stage_cb("validate")
 
         if res.success:
             with state.lock:
@@ -841,32 +933,40 @@ def worker_loop(
                     f"(triple {res.triple_ids})"
                 )
                 state.last_event = last_event
+                stat = state.worker_stats.setdefault(wid, WorkerStat())
+                stat.successes += 1
+                stat.attempts += 1
+                stat.last_duration = res.elapsed_s
+                stat.last_event = last_event
+                stat.status = "Success"
+                stat.last_update = time.time()
+                stat.stage_started_at = stat.last_update
+                stat.current_triple = None
             writer_success(paths, res, state.io_lock)
-            local_succ += 1
         else:
             with state.lock:
                 state.failures += 1
                 last_event = f"worker {wid}: fail ({res.reason}) (triple {res.triple_ids})"
                 state.last_event = last_event
+                stat = state.worker_stats.setdefault(wid, WorkerStat())
+                stat.failures += 1
+                stat.attempts += 1
+                stat.last_duration = res.elapsed_s
+                stat.last_event = last_event
+                stat.status = "Failed"
+                stat.last_update = time.time()
+                stat.stage_started_at = stat.last_update
+                stat.current_triple = None
             writer_fail(paths, res, state.io_lock)
-            local_fail += 1
 
-        # Update per-worker stats
-        with state.lock:
-            state.worker_stats[wid] = {
-                "attempts": local_attempts,
-                "succ": local_succ,
-                "fail": local_fail,
-                "retries": local_retries,
-                "last": last_event,
-                "avg_s": (time.time() - started),
-            }
-
-        # Check stop condition again
+        if state.stop_event.is_set():
+            break
         with state.lock:
             if state.successes >= state.target_success:
                 state.stop_event.set()
                 break
+
+    update_worker_status(state, wid, status="Stopped", event="worker exit", current_triple=None)
 
 
 def format_eta(seconds_left: float) -> str:
@@ -880,50 +980,65 @@ def format_eta(seconds_left: float) -> str:
 
 
 def build_dashboard_table(state: SharedState) -> Table:
+    with state.lock:
+        successes = state.successes
+        failures = state.failures
+        retries = state.retries
+        start_time = state.start_time
+        target_success = state.target_success
+        last_event = state.last_event
+        stopping = state.stop_event.is_set()
+        worker_snapshot = {
+            wid: dataclasses.replace(stat)
+            for wid, stat in state.worker_stats.items()
+        }
+
     table = Table(box=SIMPLE, show_lines=False, expand=True)
     table.add_column("Role", no_wrap=True)
+    table.add_column("Status", no_wrap=True)
     table.add_column("Succ", no_wrap=True, justify="right")
     table.add_column("Fail", no_wrap=True, justify="right")
     table.add_column("Att", no_wrap=True, justify="right")
     table.add_column("Ret", no_wrap=True, justify="right")
     table.add_column("Rate/s", no_wrap=True, justify="right")
     table.add_column("ETA", no_wrap=True, justify="right")
+    table.add_column("Stage(s)", no_wrap=True, justify="right")
     table.add_column("Last event", overflow="fold")
 
-    # Master row
-    elapsed = max(1e-9, time.time() - state.start_time)
-    rate = state.successes / elapsed
-    remaining = max(0, state.target_success - state.successes)
+    elapsed = max(1e-9, time.time() - start_time)
+    rate = successes / elapsed
+    remaining = max(0, target_success - successes)
     eta = remaining / rate if rate > 0 else float("inf")
+    master_status = "Stopping" if stopping else ("Done" if remaining == 0 else "Running")
     table.add_row(
         "MASTER",
-        str(state.successes),
-        str(state.failures),
-        str(state.successes + state.failures),
-        str(state.retries),
+        master_status,
+        str(successes),
+        str(failures),
+        str(successes + failures),
+        str(retries),
         f"{rate:.2f}",
         format_eta(eta),
-        state.last_event[:120],
+        "-",
+        last_event[:120],
     )
 
-    # Worker rows
-    for wid in sorted(state.worker_stats.keys()):
-        stats = state.worker_stats[wid]
-        attempts = stats.get("attempts", 0)
-        succ = stats.get("succ", 0)
-        fail = stats.get("fail", 0)
-        retries = stats.get("retries", 0)
-        avg_s = stats.get("avg_s", 0.0)
-        per_s = (succ / avg_s) if avg_s > 0 else 0.0
+    now = time.time()
+    for wid in sorted(worker_snapshot.keys()):
+        stats = worker_snapshot[wid]
+        worker_elapsed = max(1e-9, now - stats.first_started_at)
+        per_s = stats.successes / worker_elapsed
         table.add_row(
             f"WORKER-{wid}",
-            str(succ),
-            str(fail),
-            str(attempts),
-            str(retries),
+            stats.status,
+            str(stats.successes),
+            str(stats.failures),
+            str(stats.attempts),
+            str(stats.retries),
             f"{per_s:.2f}",
             "-",
-            stats.get("last", "")[:120],
+            f"{stats.stage_elapsed():.1f}",
+            stats.last_event[:120],
         )
 
     return table
@@ -988,7 +1103,10 @@ def main() -> None:
     state = SharedState(target_success=int(args.max_problem), max_workers=int(args.max_workers))
 
     def handle_sigint(signum, frame):
-        state.stop_event.set()
+        if not state.stop_event.is_set():
+            state.stop_event.set()
+            console.log("[yellow]SIGINT received, signaling workers to stop...[/]")
+        raise KeyboardInterrupt
     signal.signal(signal.SIGINT, handle_sigint)
 
     # Repeatable randomness (optional seed)
@@ -1010,6 +1128,10 @@ def main() -> None:
     # Initialize seen triples from prior runs
     seen = read_seen_triples(paths.seen_triples)
 
+    with state.lock:
+        for wid in range(state.max_workers):
+            state.worker_stats[wid] = WorkerStat(status="Idle", last_event="awaiting tasks")
+
     # Start workers
     threads: List[threading.Thread] = []
     for wid, worker_rng in enumerate(worker_rngs):
@@ -1022,16 +1144,21 @@ def main() -> None:
         t.start()
         threads.append(t)
 
-    # Start live dashboard (unless quiet)
-    if not args.quiet:
-        try:
+    skip_join = False
+    try:
+        if not args.quiet:
             live_dashboard(state, console)
-        except KeyboardInterrupt:
-            state.stop_event.set()
+        else:
+            while not state.stop_event.is_set() and any(t.is_alive() for t in threads):
+                time.sleep(0.25)
+    except KeyboardInterrupt:
+        skip_join = True
+        state.stop_event.set()
+        console.log("[yellow]Interrupted by user; exiting without waiting for all workers.[/]")
 
-    # Wait for workers to finish
-    for t in threads:
-        t.join()
+    if not skip_join:
+        for t in threads:
+            t.join()
 
     # Final summary
     console.print("\n[bold]Run complete[/].")
