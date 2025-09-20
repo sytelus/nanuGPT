@@ -410,7 +410,7 @@ def compute_stats(nodes: List[Dict[str, Any]], edges: List[Tuple[str, str]], out
         "max_width": int(max_width),
         "height": int(height),
         "ops": ops,
-        "levels": {k: v for k, v in sorted(width_by_level.items())},
+        "levels": {str(k): int(v) for k, v in sorted(width_by_level.items())},
         "topo_ok": True,
     }
 
