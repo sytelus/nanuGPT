@@ -36,7 +36,10 @@ dependencies = [
     "datasets",
     "tqdm",
     "matplotlib",
-    "rich"
+    "rich",
+    "pyarrow",
+    "orjson",
+    "tenacity",
 ]
 
 [project.urls]
