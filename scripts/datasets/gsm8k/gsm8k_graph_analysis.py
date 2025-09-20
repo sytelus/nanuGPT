@@ -24,15 +24,19 @@ Artifacts are written to ``<out_dir>/<report-subdir>`` (default ``report``):
   examples per metric.
 * ``images/*.png`` – histogram visualisations for each measured quantity and
   diagrammatic renderings of selected computational graphs.
+* Additional tables covering operator usage and outcome-comparison insights.
 
 Workflow Summary
 ----------------
 1. Load the Arrow dataset into memory as plain dictionaries.
-2. Enrich records with derived metrics (e.g., nodes+edges, unique op count).
+2. Enrich records with derived metrics (e.g., nodes+edges, width/height ratio,
+   fan-in statistics, unique op count) and aggregate global operator usage.
 3. Compute descriptive statistics and save distribution histograms.
 4. Identify extreme examples (lowest/highest) per metric and render their
    graphs using a simple topological layout.
-5. Assemble all findings into a markdown report with inline image references.
+5. Compare matched vs. mismatched outcomes for each metric.
+6. Assemble all findings into a markdown report with inline image references,
+   tables, and commentary.
 
 Graph Rendering Overview
 ------------------------
@@ -58,7 +62,7 @@ import json
 import math
 import os
 import textwrap
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -85,6 +89,7 @@ class Quantity:
     key: str
     title: str
     description: str
+    interpretation: str
 
 
 @dataclass
@@ -340,6 +345,14 @@ def render_markdown(
 
     lines.append("## Descriptive Statistics")
     lines.append("")
+    lines.append(
+        textwrap.fill(
+            "Summary statistics capture the central tendencies of each quantity before the report "
+            "dives into detailed commentary and examples.",
+            width=100,
+        )
+    )
+    lines.append("")
     header = "| Quantity | Count | Mean | Median | Std | Min | Max |"
     separator = "|---|---:|---:|---:|---:|---:|---:|"
     lines.append(header)
@@ -385,6 +398,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     dataset, arrow_path = load_arrow_dataset(out_dir)
     records: List[Dict[str, Any]] = [dict(row) for row in dataset]
 
+    # Global accumulators for cross-cutting analysis.
+    ops_counter: Counter[str] = Counter()
+
     # Augment derived columns needed for analysis.
     for rec in records:
         num_nodes = rec.get("num_nodes")
@@ -397,19 +413,163 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         ops = rec.get("ops") or []
         rec["ops_count"] = len(ops) if isinstance(ops, list) else None
 
+        rec["edges_per_node"] = (
+            (float(num_edges) / float(num_nodes))
+            if num_nodes not in (None, 0) and num_edges is not None
+            else None
+        )
+        height = rec.get("height")
+        max_width = rec.get("max_width")
+        rec["width_to_height"] = (
+            (float(max_width) / float(height))
+            if height not in (None, 0) and max_width is not None
+            else None
+        )
+
+        # Parse level histogram to compute average width for memory style insights.
+        level_counts: List[int] = []
+        for entry in rec.get("levels") or []:
+            if isinstance(entry, (int, float)):
+                level_counts.append(int(entry))
+                continue
+            if isinstance(entry, str) and ":" in entry:
+                _, count_str = entry.split(":", 1)
+                try:
+                    level_counts.append(int(count_str))
+                except ValueError:
+                    continue
+        rec["avg_width"] = (
+            float(sum(level_counts)) / float(len(level_counts))
+            if level_counts
+            else None
+        )
+
+        graph_json = rec.get("graph_json")
+        graph_obj: Optional[Dict[str, Any]] = None
+        if graph_json:
+            try:
+                graph_obj = json.loads(graph_json)
+            except Exception:
+                graph_obj = None
+
+        if graph_obj:
+            nodes = graph_obj.get("nodes") or []
+            input_like = 0
+            input_counts: List[int] = []
+            for node in nodes:
+                if not isinstance(node, dict):
+                    continue
+                op = node.get("op")
+                if isinstance(op, str):
+                    ops_counter[op] += 1
+                    if op.lower() in {"input", "const"}:
+                        input_like += 1
+                ins = node.get("inputs") or []
+                if isinstance(ins, list):
+                    input_counts.append(len(ins))
+                else:
+                    input_counts.append(0)
+
+            total_nodes = len(nodes)
+            rec["avg_inputs_per_node"] = (
+                float(sum(input_counts)) / float(total_nodes)
+                if total_nodes > 0
+                else None
+            )
+            rec["max_inputs_per_node"] = (
+                float(max(input_counts))
+                if input_counts
+                else None
+            )
+            rec["input_const_ratio"] = (
+                float(input_like) / float(total_nodes)
+                if total_nodes > 0
+                else None
+            )
+        else:
+            rec["avg_inputs_per_node"] = None
+            rec["max_inputs_per_node"] = None
+            rec["input_const_ratio"] = None
+
     total_records = len(records)
 
     quantities: List[Quantity] = [
-        Quantity("num_nodes", "Number of Nodes", "Total nodes in the graph."),
-        Quantity("num_edges", "Number of Edges", "Total directed edges implied by inputs."),
-        Quantity("max_width", "Max Width", "Maximum nodes present at any depth level."),
-        Quantity("height", "Height", "Number of graph levels (topological depth)."),
-        Quantity("sum_nodes_edges", "Nodes + Edges", "Combined size of the graph."),
-        Quantity("ops_count", "Unique Ops", "Distinct operator types used in the graph."),
+        Quantity(
+            "num_nodes",
+            "Number of Nodes",
+            "Total node count in the generated graph.",
+            "Acts as a proxy for overall computational footprint—larger graphs may require more execution steps and storage.",
+        ),
+        Quantity(
+            "num_edges",
+            "Number of Edges",
+            "Total directed edges implied by node inputs.",
+            "Edges signal data dependencies; more edges typically translate to heavier data movement and intermediate storage.",
+        ),
+        Quantity(
+            "sum_nodes_edges",
+            "Nodes + Edges",
+            "Aggregate size combining nodes and edges.",
+            "Useful for ranking heavy problems because it blends structural breadth and dependency count into a single magnitude.",
+        ),
+        Quantity(
+            "max_width",
+            "Max Width",
+            "Peak number of nodes at any depth level.",
+            "Correlates with instantaneous memory pressure—the wider the layer, the more parallel state must be held.",
+        ),
+        Quantity(
+            "avg_width",
+            "Average Width",
+            "Mean number of nodes per depth level (derived from level histogram).",
+            "Highlights how consistently wide the computation remains; high averages imply sustained parallel workloads.",
+        ),
+        Quantity(
+            "height",
+            "Height",
+            "Number of depth levels in the graph (topological height).",
+            "Captures sequential work: deeper graphs generally demand more serial reasoning steps.",
+        ),
+        Quantity(
+            "width_to_height",
+            "Width-to-Height Ratio",
+            "Max width divided by height.",
+            "A heuristic for parallelism vs. sequential depth—high ratios suggest wide, shallow computations.",
+        ),
+        Quantity(
+            "edges_per_node",
+            "Edges per Node",
+            "Average outgoing dependencies per node (edges ÷ nodes).",
+            "Approximates branching factor; higher values imply more fan-in/out to manage per operation.",
+        ),
+        Quantity(
+            "avg_inputs_per_node",
+            "Avg Inputs per Node",
+            "Mean number of inputs provided to each node (parsed from graph JSON).",
+            "Highlights combinational complexity—nodes with many inputs often encode larger algebraic steps.",
+        ),
+        Quantity(
+            "max_inputs_per_node",
+            "Max Inputs per Node",
+            "Largest fan-in observed for any node in the graph.",
+            "Isolates extreme aggregation points that may dominate compute or memory needs.",
+        ),
+        Quantity(
+            "input_const_ratio",
+            "Input/Const Ratio",
+            "Fraction of nodes that are Input or Const (sourced from graph JSON).",
+            "Measures how much of the graph is spent wiring known values versus performing transformations—lower ratios imply richer computation.",
+        ),
+        Quantity(
+            "ops_count",
+            "Unique Ops",
+            "Number of distinct operator types used in the graph.",
+            "Variety of operators hints at conceptual breadth; diverse graphs may exercise more reasoning templates.",
+        ),
     ]
 
     stat_rows: List[Tuple[str, Optional[StatSummary]]] = []
-    quantity_sections: List[str] = []
+    quantity_sections: List[str] = ["## Metric Deep Dives", ""]
 
     # Overall summary diagnostics.
     valid_count, valid_total, valid_rate = summarise_boolean(r.get("graph_valid") for r in records)
@@ -417,6 +577,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     match_count, match_total, match_rate = summarise_boolean(r.get("answer_match") for r in records)
 
     summary_lines = [
+        textwrap.fill(
+            "High-level run health indicators provide context for the deeper analyses below.",
+            width=100,
+        ),
+        "",
         f"- Valid graphs: **{valid_count}/{valid_total}** ({valid_rate*100:.1f}%)",
         f"- Successfully evaluated: **{eval_count}/{eval_total}** ({eval_rate*100:.1f}%)",
         f"- Gold answer matches: **{match_count}/{match_total}** ({match_rate*100:.1f}%)",
@@ -429,9 +594,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         stat_rows.append((qty.title, stats))
 
         section_lines: List[str] = []
-        section_lines.append(f"## {qty.title}")
+        section_lines.append(f"### {qty.title}")
         section_lines.append("")
-        section_lines.append(qty.description)
+        section_lines.append(textwrap.fill(qty.description, width=100))
+        section_lines.append("")
+        section_lines.append(textwrap.fill(qty.interpretation, width=100))
         section_lines.append("")
 
         if values:
@@ -488,6 +655,92 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         describe_examples("Maximum", highs)
 
         quantity_sections.extend(section_lines)
+
+    # Operator usage overview
+    operator_sections: List[str] = [
+        "## Operator Landscape",
+        "",
+        textwrap.fill(
+            "Operator frequencies offer a quick lens on the reasoning templates exercised by the run. High-usage "
+            "operators may warrant focused optimisation or qualitative review.",
+            width=100,
+        ),
+        "",
+    ]
+
+    if ops_counter:
+        operator_sections.append("| Operator | Count | Share |")
+        operator_sections.append("|---|---:|---:|")
+        total_ops = sum(ops_counter.values()) or 1
+        for op, count in ops_counter.most_common(20):
+            share = count / total_ops
+            operator_sections.append(
+                f"| `{op}` | {count} | {share*100:.1f}% |"
+            )
+        operator_sections.append("")
+    else:
+        operator_sections.append("_No operator data available (no graphs parsed)._")
+        operator_sections.append("")
+
+    quantity_sections.extend(operator_sections)
+
+    # Compare outcomes (answer match) across metrics
+    outcome_sections: List[str] = [
+        "## Outcome Comparison",
+        "",
+        textwrap.fill(
+            "To contextualise complexity, the table below contrasts mean metric values between records whose evaluated "
+            "graph matched the gold answer and those that did not.",
+            width=100,
+        ),
+        "",
+    ]
+
+    outcome_rows: List[str] = []
+    insufficient: List[str] = []
+    for qty in quantities:
+        match_vals = safe_float_list(
+            rec.get(qty.key)
+            for rec in records
+            if rec.get("answer_match") is True
+        )
+        nonmatch_vals = safe_float_list(
+            rec.get(qty.key)
+            for rec in records
+            if rec.get("answer_match") is False
+        )
+        if match_vals and nonmatch_vals:
+            mean_match = float(np.mean(match_vals))
+            mean_nonmatch = float(np.mean(nonmatch_vals))
+            diff = mean_match - mean_nonmatch
+            outcome_rows.append(
+                "| {title} | {match} | {nonmatch} | {diff} |".format(
+                    title=qty.title,
+                    match=format_float(mean_match),
+                    nonmatch=format_float(mean_nonmatch),
+                    diff=format_float(diff),
+                )
+            )
+        else:
+            insufficient.append(qty.title)
+
+    if outcome_rows:
+        outcome_sections.append("| Metric | Mean (match) | Mean (non-match) | Δ |")
+        outcome_sections.append("|---|---:|---:|---:|")
+        outcome_sections.extend(outcome_rows)
+        outcome_sections.append("")
+    if insufficient:
+        outcome_sections.append(
+            textwrap.fill(
+                "Metrics without enough matched and mismatched examples for comparison: "
+                + ", ".join(insufficient)
+                + ".",
+                width=100,
+            )
+        )
+        outcome_sections.append("")
+
+    quantity_sections.extend(outcome_sections)
 
     report_path = os.path.join(report_dir, "report.md")
     render_markdown(
