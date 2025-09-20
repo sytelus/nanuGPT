@@ -431,6 +431,7 @@ def validate_graph(graph: Dict[str, Any]) -> Tuple[bool, List[str], Dict[str, An
         errors.append("Missing 'output' id string.")
 
     id_to_node: Dict[str, Dict[str, Any]] = {}
+    input_refs: List[Tuple[str, str]] = []
     if isinstance(nodes, list):
         for n in nodes:
             if not isinstance(n, dict):
@@ -450,10 +451,23 @@ def validate_graph(graph: Dict[str, Any]) -> Tuple[bool, List[str], Dict[str, An
             if op in ("Input", "Const"):
                 if "value" not in n:
                     errors.append(f"Node {nid} (op={op}) missing 'value'.")
+                if n.get("inputs"):
+                    errors.append(f"Node {nid} (op={op}) should not have 'inputs'.")
             else:
                 ins = n.get("inputs")
                 if ins is None or not isinstance(ins, list) or len(ins) < 1:
                     errors.append(f"Node {nid} (op={op}) must have non-empty 'inputs'.")
+                else:
+                    for idx, src in enumerate(ins):
+                        if not isinstance(src, str) or not src:
+                            errors.append(f"Node {nid} (op={op}) has invalid input at position {idx}.")
+                        else:
+                            input_refs.append((nid, src))
+
+    idset = set(id_to_node.keys())
+    for nid, src in input_refs:
+        if src not in idset:
+            errors.append(f"Node {nid} references unknown input id: {src}")
 
     # Assemble edges
     if isinstance(nodes, list):
@@ -479,7 +493,6 @@ def validate_graph(graph: Dict[str, Any]) -> Tuple[bool, List[str], Dict[str, An
             errors.append("Provided 'edges' do not match the edges implied by 'inputs'.")
 
     # Verify all edge endpoints exist
-    idset = set(id_to_node.keys())
     for s, d in edges:
         if s not in idset:
             errors.append(f"Edge src id not found: {s}")
@@ -932,6 +945,7 @@ class Runner:
         messages = user_prompt(question)
         errors_all: List[str] = []
         attempts = 0
+        last_graph_payload: Optional[Dict[str, Any]] = None
 
         # Initial call
         attempts += 1
@@ -942,23 +956,32 @@ class Runner:
         if graph is None:
             if rid:
                 await self._print_worker(rid, f"Unexpected API return: {parse_err}", style="red")
-            errors_all.append(parse_err or "Parse error")
+            errors_all = [parse_err or "Parse error"]
         else:
+            last_graph_payload = graph
             valid, errors, _ = validate_graph(graph)
             if valid:
                 if rid:
                     await self._print_worker(rid, "Initial graph valid", style="green")
                 return graph, raw_resp, [], attempts
-            errors_all.extend(errors)
+            errors_all = list(errors)
             if rid:
                 await self._print_worker(rid, f"Initial graph invalid: {len(errors)} error(s)", style="yellow")
 
         # Repair attempts
         for _ in range(self.cfg.content_max_attempts - 1):
             attempts += 1
+            error_lines = "\n".join(f"- {e}" for e in errors_all) if errors_all else "- Unable to parse model response."
+            repair_prompt = (
+                f"{REPAIR_SYSTEM_PROMPT.strip()}\n\n"
+                f"Problem:\n{question}\n\n"
+                f"Validator errors:\n{error_lines}"
+            )
+            if last_graph_payload is not None:
+                repair_prompt += "\n\nPrevious graph attempt:\n" + json_dumps(last_graph_payload)
             repair_messages = [
-                {"role": "system", "content": REPAIR_SYSTEM_PROMPT},
-                {"role": "user", "content": "Validator errors:\n" + "\n".join(f"- {e}" for e in errors_all)},
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": repair_prompt},
             ]
             if rid:
                 await self._print_worker(rid, f"Repair attempt {attempts - 1}")
@@ -967,8 +990,9 @@ class Runner:
             if graph is None:
                 if rid:
                     await self._print_worker(rid, f"Unexpected API return on repair: {parse_err}", style="red")
-                errors_all.append(parse_err or "Parse error")
+                errors_all = [parse_err or "Parse error"]
                 continue
+            last_graph_payload = graph
             valid, errors, _ = validate_graph(graph)
             if valid:
                 self.repaired += 1
@@ -976,7 +1000,7 @@ class Runner:
                 if rid:
                     await self._print_worker(rid, "Graph repaired successfully", style="green")
                 return graph, raw_resp, [], attempts
-            errors_all.extend(errors)
+            errors_all = list(errors)
             if rid:
                 await self._print_worker(rid, f"Repair failed: {len(errors)} validation error(s)", style="yellow")
 
