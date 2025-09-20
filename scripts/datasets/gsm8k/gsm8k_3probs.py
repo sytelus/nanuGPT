@@ -181,8 +181,8 @@ RNG_SEED = None  # set to int for reproducibility; None mixes in system entropy
 @dataclass
 class ChatResult:
     content: str
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
     total_tokens: int = 0
 
 
@@ -280,6 +280,54 @@ def count_jsonl(path: Path) -> int:
             if line.strip():
                 count += 1
     return count
+
+
+def ensure_text_parts(content: Any) -> List[Dict[str, str]]:
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}]
+    # Support legacy chat message structures
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and "text" in item:
+                if item.get("type") == "text" or "type" not in item:
+                    parts.append({"type": "text", "text": item["text"]})
+        if parts:
+            return parts
+    return [{"type": "text", "text": str(content)}]
+
+
+def messages_to_responses_input(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    formatted: List[Dict[str, Any]] = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        formatted.append({"role": role, "content": ensure_text_parts(content)})
+    return formatted
+
+
+def extract_response_text(resp: Any) -> str:
+    if hasattr(resp, "output_text") and resp.output_text:
+        return resp.output_text
+    texts: List[str] = []
+    for item in getattr(resp, "output", []) or []:
+        for part in getattr(item, "content", []) or []:
+            text = getattr(part, "text", None)
+            if text:
+                texts.append(text)
+    if texts:
+        return "".join(texts)
+    # Fallback for dictionary-like responses
+    if isinstance(resp, dict):
+        output = resp.get("output") or []
+        for item in output:
+            for part in item.get("content", []):
+                text = part.get("text")
+                if text:
+                    texts.append(text)
+        if texts:
+            return "".join(texts)
+    return ""
 
 
 def suppress_third_party_logs() -> None:
@@ -571,7 +619,7 @@ class AOAIClient:
         reasoning_effort: Optional[str] = None,
     ) -> ChatResult:
         """
-        Call Azure OpenAI Chat Completions with robust retries.
+        Call Azure OpenAI Responses API with robust retries.
         Returns the content string.
         """
         attempt = 0
@@ -579,24 +627,24 @@ class AOAIClient:
             try:
                 kwargs: Dict[str, Any] = {
                     "model": self.deployment,
-                    "messages": messages,
+                    "input": messages_to_responses_input(messages),
                 }
                 if temperature is not None:
                     kwargs["temperature"] = temperature
                 if max_completion_tokens is not None:
-                    kwargs["max_completion_tokens"] = max_completion_tokens
+                    kwargs["max_output_tokens"] = max_completion_tokens
                 if reasoning_effort is not None:
                     kwargs["reasoning"] = {"effort": reasoning_effort}
-                resp = self.client.chat.completions.create(**kwargs)
-                content = resp.choices[0].message.content or ""
+                resp = self.client.responses.create(**kwargs)
+                content = extract_response_text(resp)
                 usage = getattr(resp, "usage", None)
-                prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
-                completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+                input_tokens = getattr(usage, "input_tokens", 0) or 0
+                output_tokens = getattr(usage, "output_tokens", 0) or 0
                 total_tokens = getattr(usage, "total_tokens", 0) or 0
                 return ChatResult(
                     content=content.strip(),
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
                     total_tokens=total_tokens,
                 )
             except Exception as e:
@@ -811,7 +859,7 @@ def do_attempt(
             chat_kwargs.setdefault("on_retry", combine_retry_cb)
         combined_res = client.chat(messages, **chat_kwargs)
         res.combined_problem = combined_res.content
-        res.combine_completion_tokens = combined_res.completion_tokens
+        res.combine_completion_tokens = combined_res.output_tokens
     except Exception as e:
         res.combine_error = f"combine_error: {type(e).__name__}: {e}"
         res.reason = "combine_call_failed"
@@ -838,7 +886,7 @@ def do_attempt(
             solve_kwargs.setdefault("on_retry", solve_retry_cb)
         solver_res = client.chat(messages, **solve_kwargs)
         res.solver_output = solver_res.content
-        res.solve_completion_tokens += solver_res.completion_tokens
+        res.solve_completion_tokens += solver_res.output_tokens
         res.solver_outputs.append(solver_res.content)
     except Exception as e:
         res.reason = f"solve_call_failed: {type(e).__name__}: {e}"
@@ -878,7 +926,7 @@ def do_attempt(
         try:
             retry_res = client.chat(messages, **retry_kwargs)
             res.solver_output = retry_res.content
-            res.solve_completion_tokens += retry_res.completion_tokens
+            res.solve_completion_tokens += retry_res.output_tokens
             res.solver_outputs.append(retry_res.content)
         except Exception as e:
             res.reason = f"solve_call_failed_retry: {type(e).__name__}: {e}"
