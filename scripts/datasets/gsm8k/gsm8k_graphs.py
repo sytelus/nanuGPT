@@ -649,6 +649,7 @@ class Runner:
         self.aoai = AOAI(cfg)
         self.sem = asyncio.Semaphore(cfg.max_workers)
         self.start_time = time.time()
+        self.print_lock = asyncio.Lock()
 
         # cache dirs
         if not cfg.out_dir or not str(cfg.out_dir).strip():
@@ -683,6 +684,43 @@ class Runner:
         self.net_fail = 0
         self.repaired = 0
         self.bytes_written = 0
+        self._last_stats = (-1, -1, -1, -1, -1)
+
+    # ---------- printing helpers ----------
+    async def _print_worker(self, rid: str, message: str, style: Optional[str] = None) -> None:
+        async with self.print_lock:
+            prefix = f"[{rid}]"
+            if style:
+                self.console.print(f"{prefix} {message}", style=style)
+            else:
+                self.console.print(f"{prefix} {message}")
+
+    async def _print_main(self, message: str) -> None:
+        async with self.print_lock:
+            self.console.print(message, style="bold cyan")
+
+    def _eta(self) -> str:
+        elapsed = max(time.time() - self.start_time, 1e-6)
+        speed = self.done / elapsed if self.done > 0 else 0.0
+        remaining = max(self.total - self.done, 0)
+        eta_s = (remaining / speed) if speed > 0 else float("inf")
+        if not math.isfinite(eta_s):
+            return "ETA: ∞"
+        m, s = divmod(int(eta_s), 60)
+        h, m = divmod(m, 60)
+        if h > 0:
+            return f"ETA≈{h}h {m}m"
+        return f"ETA≈{m}m {s}s"
+
+    async def _report_progress(self) -> None:
+        stats = (self.done, self.success, self.content_fail, self.net_fail, self.repaired)
+        if stats == self._last_stats:
+            return
+        self._last_stats = stats
+        await self._print_main(
+            f"progress: {self.done}/{self.total} | success={self.success} | "
+            f"content_fail={self.content_fail} | net_fail={self.net_fail} | repaired={self.repaired} | {self._eta()}"
+        )
 
     # ---------- persistence helpers ----------
     def _split_dir(self, split: str) -> str:
@@ -710,12 +748,14 @@ class Runner:
         self.bytes_written += os.path.getsize(p)
 
     # ---------- model call & repair ----------
-    async def call_model_once(self, messages: List[Dict[str, Any]], is_repair: bool = False) -> Dict[str, Any]:
+    async def call_model_once(self, messages: List[Dict[str, Any]], is_repair: bool = False, rid: Optional[str] = None) -> Dict[str, Any]:
         attempts = 0
         delay = 1.0
         while True:
             attempts += 1
             try:
+                if rid:
+                    await self._print_worker(rid, f"API call attempt {attempts}{' (repair)' if is_repair else ''} ...")
                 resp = await self.aoai.chat(
                     messages=messages,
                     tools=tool_schema(),
@@ -724,16 +764,24 @@ class Runner:
                     temperature=self.cfg.temperature,
                     seed=self.cfg.seed,
                 )
+                if rid:
+                    await self._print_worker(rid, f"API call attempt {attempts} succeeded", style="green")
                 return resp
             except Exception as e:
                 # Transient?
                 if _is_transient_exception(e) and attempts < self.cfg.network_max_retries:
+                    if rid:
+                        await self._print_worker(rid, f"Transient API error: {e}; retrying in {delay:.1f}s", style="yellow")
                     await asyncio.sleep(delay + random.random() * 0.5 * delay)
                     delay = min(delay * 2.0, 30.0)
                     continue
                 # Non-transient or out of retries
                 if _is_transient_exception(e):
+                    if rid:
+                        await self._print_worker(rid, f"API failed after {attempts} attempts: {e}", style="red")
                     raise TransientNetworkError(str(e))
+                if rid:
+                    await self._print_worker(rid, f"API error (non-retryable): {e}", style="red")
                 raise
 
     def extract_graph(self, resp: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str], Dict[str, Any]]:
@@ -765,7 +813,7 @@ class Runner:
             return None, f"Failed to parse model output as JSON: {e}", resp
         return None, "No function call or JSON content found.", resp
 
-    async def build_or_repair_graph(self, question: str) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any], List[str], int]:
+    async def build_or_repair_graph(self, question: str, rid: Optional[str] = None) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any], List[str], int]:
         """Attempt initial build; if invalid, send one or two repair attempts with validator feedback."""
         messages = user_prompt(question)
         errors_all: List[str] = []
@@ -773,15 +821,23 @@ class Runner:
 
         # Initial call
         attempts += 1
-        resp = await self.call_model_once(messages)
+        if rid:
+            await self._print_worker(rid, "Building graph: initial API call")
+        resp = await self.call_model_once(messages, rid=rid)
         graph, parse_err, raw_resp = self.extract_graph(resp)
         if graph is None:
+            if rid:
+                await self._print_worker(rid, f"Unexpected API return: {parse_err}", style="red")
             errors_all.append(parse_err or "Parse error")
         else:
             valid, errors, _ = validate_graph(graph)
             if valid:
+                if rid:
+                    await self._print_worker(rid, "Initial graph valid", style="green")
                 return graph, raw_resp, [], attempts
             errors_all.extend(errors)
+            if rid:
+                await self._print_worker(rid, f"Initial graph invalid: {len(errors)} error(s)", style="yellow")
 
         # Repair attempts
         for _ in range(self.cfg.content_max_attempts - 1):
@@ -790,25 +846,37 @@ class Runner:
                 {"role": "system", "content": REPAIR_SYSTEM_PROMPT},
                 {"role": "user", "content": "Validator errors:\n" + "\n".join(f"- {e}" for e in errors_all)},
             ]
-            resp = await self.call_model_once(repair_messages, is_repair=True)
+            if rid:
+                await self._print_worker(rid, f"Repair attempt {attempts - 1}")
+            resp = await self.call_model_once(repair_messages, is_repair=True, rid=rid)
             graph, parse_err, raw_resp = self.extract_graph(resp)
             if graph is None:
+                if rid:
+                    await self._print_worker(rid, f"Unexpected API return on repair: {parse_err}", style="red")
                 errors_all.append(parse_err or "Parse error")
                 continue
             valid, errors, _ = validate_graph(graph)
             if valid:
                 self.repaired += 1
+                await self._report_progress()
+                if rid:
+                    await self._print_worker(rid, "Graph repaired successfully", style="green")
                 return graph, raw_resp, [], attempts
             errors_all.extend(errors)
+            if rid:
+                await self._print_worker(rid, f"Repair failed: {len(errors)} validation error(s)", style="yellow")
 
         return None, raw_resp if 'raw_resp' in locals() else {}, errors_all, attempts
 
     # ---------- per-record processing ----------
     async def process_one(self, split: str, rid: str, question: str, answer: str) -> Dict[str, Any]:
         try:
-            graph, raw, errors, attempts = await self.build_or_repair_graph(question)
+            await self._print_worker(rid, "Starting problem")
+            graph, raw, errors, attempts = await self.build_or_repair_graph(question, rid=rid)
         except TransientNetworkError as ne:
             self.net_fail += 1
+            await self._report_progress()
+            await self._print_worker(rid, f"NetworkError: {ne}", style="red")
             return {
                 "id": rid,
                 "split": split,
@@ -830,6 +898,8 @@ class Runner:
 
         if graph is None:
             self.content_fail += 1
+            await self._report_progress()
+            await self._print_worker(rid, f"Bad graph; {len(errors)} error(s)", style="red")
             record.update({
                 "graph": None,
                 "graph_valid": False,
@@ -867,6 +937,8 @@ class Runner:
         })
 
         self.success += 1
+        await self._report_progress()
+        await self._print_worker(rid, f"Done. valid={bool(valid)} match={bool(match)} attempts={attempts}", style="green" if valid else "yellow")
         return record
 
     # ---------- split processing ----------
@@ -881,11 +953,14 @@ class Runner:
         async def worker(idx: int, row: Dict[str, Any]):
             rid = f"{split}_{idx:05d}"
             if rid in done:
+                await self._print_worker(rid, "Skipping (cached)", style="dim")
                 return  # already processed
             async with self.sem:
+                await self._print_worker(rid, "Acquired worker slot", style="blue")
                 rec = await self.process_one(split, rid, row["question"], row["answer"])
                 self.save_record(split, rid, rec)
                 self.done += 1
+                await self._report_progress()
 
         tasks = []
         for idx, row in enumerate(ds):
@@ -894,47 +969,13 @@ class Runner:
             rid = f"{split}_{idx:05d}"
             if rid in done:
                 self.done += 1  # count towards progress
+                await self._report_progress()
                 continue
             tasks.append(asyncio.create_task(worker(idx, row)))
 
-        # progress UI loop
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            MofNCompleteColumn(),
-            TextColumn("{task.percentage:>3.0f}%"),
-            TimeElapsedColumn(),
-            TimeRemainingColumn(),
-            refresh_per_second=2,
-            console=self.console
-        ) as progress:
-            task_id = progress.add_task(f"Split {split}", total=n_total)
-            last_done = self.done
-            while True:
-                await asyncio.sleep(0.5)
-                delta = self.done - last_done
-                last_done = self.done
-                progress.update(task_id, completed=self.done)
-
-                # ETA & stats summary (printed occasionally)
-                if random.random() < 0.1:
-                    elapsed = max(time.time() - self.start_time, 1e-6)
-                    speed = self.done / elapsed
-                    remaining = max(self.total - self.done, 0)
-                    eta = remaining / speed if speed > 0 else float('inf')
-                    self.log.info(
-                        f"progress: {self.done}/{self.total} | success={self.success} "
-                        f"| content_fail={self.content_fail} | net_fail={self.net_fail} "
-                        f"| repaired={self.repaired} | speed={speed:.2f} rec/s | ETA≈{eta/60:.1f} min"
-                    )
-
-                if all(t.done() for t in tasks):
-                    break
-
         # Await all to raise exceptions if any
         await asyncio.gather(*tasks, return_exceptions=True)
-        self.console.print(f"[green]Finished split {split}[/green]")
+        await self._print_main(f"[green]Finished split {split}[/green]")
 
     # ---------- Arrow dataset build ----------
     def build_arrow(self) -> None:
