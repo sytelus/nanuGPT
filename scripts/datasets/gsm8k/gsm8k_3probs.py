@@ -218,6 +218,7 @@ class AttemptResult:
     solve_completion_tokens: int = 0
     solver_outputs: List[str] = dataclasses.field(default_factory=list)
     second_solve_attempt: bool = False
+    alerts: List[str] = dataclasses.field(default_factory=list)
 
     # Outcome
     success: bool = False
@@ -268,6 +269,17 @@ def write_jsonl(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
     with path.open("w", encoding="utf-8") as f:
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+
+def count_jsonl(path: Path) -> int:
+    if not path.exists():
+        return 0
+    count = 0
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                count += 1
+    return count
 
 
 def suppress_third_party_logs() -> None:
@@ -664,6 +676,7 @@ class WorkerStat:
     first_started_at: float = dataclasses.field(default_factory=time.time)
     last_update: float = dataclasses.field(default_factory=time.time)
     last_error: Optional[str] = None
+    log_message: Optional[str] = None
 
     def stage_elapsed(self) -> float:
         return max(0.0, time.time() - self.stage_started_at)
@@ -676,6 +689,8 @@ class SharedState:
     successes: int = 0
     failures: int = 0
     retries: int = 0
+    initial_successes: int = 0
+    initial_failures: int = 0
     completion_tokens_total: int = 0
     start_time: float = dataclasses.field(default_factory=time.time)
     stop_event: threading.Event = dataclasses.field(default_factory=threading.Event)
@@ -710,6 +725,13 @@ def notify_dashboard(state: SharedState) -> None:
 
 
 _CURRENT_TRIPLE_SENTINEL = object()
+
+
+def record_worker_alert(state: SharedState, wid: int, message: str) -> None:
+    with state.lock:
+        stat = state.worker_stats.setdefault(wid, WorkerStat())
+        stat.log_message = message
+    notify_dashboard(state)
 
 
 def update_worker_status(
@@ -850,6 +872,9 @@ def do_attempt(
         retry_kwargs = dict(solve_kwargs)
         retry_kwargs["reasoning_effort"] = "high"
         res.second_solve_attempt = True
+        res.alerts.append(
+            f"Triggered second solve attempt with reasoning_effort=high (triple {res.triple_ids})"
+        )
         try:
             retry_res = client.chat(messages, **retry_kwargs)
             res.solver_output = retry_res.content
@@ -1050,6 +1075,7 @@ def worker_loop(
                     stat.status = f"{stage_label} retry"
                     stat.last_update = time.time()
                     stat.current_triple = triple
+                    stat.log_message = message
                 notify_dashboard(state)
             return _cb
 
@@ -1082,6 +1108,9 @@ def worker_loop(
         stage_cb("validate")
 
         attempt_tokens = res.combine_completion_tokens + res.solve_completion_tokens
+
+        if res.alerts:
+            record_worker_alert(state, wid, res.alerts[-1])
 
         if res.success:
             with state.lock:
@@ -1125,6 +1154,7 @@ def worker_loop(
                 stat.current_triple = None
                 stat.last_error = failure_detail
                 stat.completion_tokens += attempt_tokens
+                stat.log_message = failure_detail
             writer_fail(paths, res, state.io_lock)
             notify_dashboard(state)
 
@@ -1160,6 +1190,8 @@ def build_dashboard_renderable(state: SharedState) -> Group:
         last_error = state.last_error
         stopping = state.stop_event.is_set()
         completion_tokens_total = state.completion_tokens_total
+        initial_successes = state.initial_successes
+        initial_failures = state.initial_failures
         worker_snapshot = {
             wid: dataclasses.replace(stat)
             for wid, stat in state.worker_stats.items()
@@ -1179,16 +1211,19 @@ def build_dashboard_renderable(state: SharedState) -> Group:
     table.add_column("Last Event", overflow="fold")
 
     elapsed = max(1e-9, time.time() - start_time)
-    rate = successes / elapsed
+    display_successes = max(0, successes - initial_successes)
+    display_failures = max(0, failures - initial_failures)
+    display_attempts = display_successes + display_failures
+    rate = display_successes / elapsed
     remaining = max(0, target_success - successes)
     eta = remaining / rate if rate > 0 else float("inf")
     master_status = "Stopping" if stopping else ("Done" if remaining == 0 else "Running")
     table.add_row(
         "MASTER",
         master_status,
-        str(successes),
-        str(failures),
-        str(successes + failures),
+        str(display_successes),
+        str(display_failures),
+        str(display_attempts),
         str(retries),
         f"{rate:.2f}",
         format_eta(eta),
@@ -1224,7 +1259,19 @@ def build_dashboard_renderable(state: SharedState) -> Group:
         stats = worker_snapshot[wid]
         errors_table.add_row(f"WORKER-{wid}", stats.last_error or "-")
 
-    return Group(table, Panel(errors_table, title="Last errors", box=SIMPLE))
+    alerts_table = Table(box=SIMPLE, show_header=True, expand=True)
+    alerts_table.add_column("Worker", no_wrap=True)
+    alerts_table.add_column("Latest Alert", overflow="fold")
+    for wid in sorted(worker_snapshot.keys()):
+        stats = worker_snapshot[wid]
+        alert = stats.log_message or "-"
+        alerts_table.add_row(f"WORKER-{wid}", alert)
+
+    return Group(
+        table,
+        Panel(errors_table, title="Last errors", box=SIMPLE),
+        Panel(alerts_table, title="Worker alerts", box=SIMPLE),
+    )
 
 
 def live_dashboard(state: SharedState, console: Console) -> None:
@@ -1339,6 +1386,10 @@ def main() -> None:
     # Count existing successes (resumable)
     existing_success = read_jsonl(paths.success_train)
     state.successes = len(existing_success)
+    state.initial_successes = state.successes
+    existing_failures = count_jsonl(paths.fail_train)
+    state.failures = existing_failures
+    state.initial_failures = existing_failures
     console.log(f"[green]Resuming[/]: found {state.successes} existing successes. Target: {state.target_success}.")
 
     # Initialize seen triples from prior runs
