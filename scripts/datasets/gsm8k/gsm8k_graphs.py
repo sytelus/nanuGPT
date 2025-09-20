@@ -78,6 +78,7 @@ import math
 import os
 import random
 import re
+import shutil
 import sys
 import time
 from collections import Counter, defaultdict
@@ -683,8 +684,14 @@ class Runner:
             final_out = cfg.out_dir
 
         self.out_dir = utils.full_path(final_out, create=True)
-        self.cache_dir = os.path.join(self.out_dir, "cache")
-        self.logs_dir = os.path.join(self.out_dir, "logs")
+        self.in_dataset_dir = os.path.join(self.out_dir, "in_dataset")
+        self.working_dir = os.path.join(self.out_dir, "working_dir")
+        self.out_final_dir = os.path.join(self.out_dir, "out_final")
+        for d in (self.in_dataset_dir, self.working_dir, self.out_final_dir):
+            os.makedirs(d, exist_ok=True)
+
+        self.cache_dir = os.path.join(self.working_dir, "cache")
+        self.logs_dir = os.path.join(self.working_dir, "logs")
         os.makedirs(self.cache_dir, exist_ok=True)
         os.makedirs(self.logs_dir, exist_ok=True)
 
@@ -721,6 +728,12 @@ class Runner:
     async def _print_main(self, message: str) -> None:
         async with self.print_lock:
             self.console.print(message, style="bold cyan")
+
+    def _print_dir_summary(self) -> None:
+        self.console.print(f"[bold green]Output directory:[/bold green] {self.out_dir}")
+        self.console.print(f"[green]in_dataset:[/green] {self.in_dataset_dir}")
+        self.console.print(f"[green]working_dir:[/green] {self.working_dir}")
+        self.console.print(f"[green]out_final:[/green] {self.out_final_dir}")
 
     def _eta(self) -> str:
         elapsed = max(time.time() - self.start_time, 1e-6)
@@ -760,6 +773,48 @@ class Runner:
         return encoded
 
     # ---------- persistence helpers ----------
+    def _dataset_path(self, split: str) -> str:
+        return os.path.join(self.in_dataset_dir, f"{split}.jsonl")
+
+    def _read_dataset_split(self, path: str) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        with open(path, "rb") as f:
+            for line_no, raw in enumerate(f, 1):
+                data = raw.strip()
+                if not data:
+                    continue
+                try:
+                    rows.append(orjson.loads(data))
+                except orjson.JSONDecodeError as exc:
+                    raise ValueError(f"Corrupt dataset cache at line {line_no}") from exc
+        return rows
+
+    def _write_dataset_split(self, split: str, rows: List[Dict[str, Any]]) -> None:
+        path = self._dataset_path(split)
+        tmp_path = path + ".tmp"
+        with open(tmp_path, "wb") as f:
+            for row in rows:
+                f.write(orjson.dumps(row))
+                f.write(b"\n")
+        os.replace(tmp_path, path)
+
+    def _load_dataset_split(self, split: str) -> List[Dict[str, Any]]:
+        path = self._dataset_path(split)
+        if os.path.exists(path):
+            try:
+                cached = self._read_dataset_split(path)
+                if cached:
+                    return cached
+                self.log.warning("Dataset cache for split %s is empty; re-downloading.", split)
+            except ValueError as exc:
+                self.log.warning("Failed to read dataset cache for split %s (%s); re-downloading.", split, exc)
+
+        self.console.print(f"[cyan]Downloading dataset split {split} and caching to in_dataset.[/cyan]")
+        ds = load_dataset(self.cfg.dataset_name, self.cfg.dataset_config, split=split)
+        rows = [dict(row) for row in ds]
+        self._write_dataset_split(split, rows)
+        return rows
+
     def _split_dir(self, split: str) -> str:
         d = os.path.join(self.cache_dir, split)
         os.makedirs(d, exist_ok=True)
@@ -991,9 +1046,9 @@ class Runner:
     # ---------- split processing ----------
     async def process_split(self, split: str) -> None:
         self.console.rule(f"[bold]Processing split: {split}")
-        ds = load_dataset(self.cfg.dataset_name, self.cfg.dataset_config, split=split)
+        rows = self._load_dataset_split(split)
         done = self.already_done_ids(split)
-        n_total = len(ds) if self.cfg.dry_run <= 0 else min(self.cfg.dry_run, len(ds))
+        n_total = len(rows) if self.cfg.dry_run <= 0 else min(self.cfg.dry_run, len(rows))
         self.total += n_total
         self.log.info(f"{split}: {n_total} total; {len(done)} already cached; will skip cached.")
 
@@ -1013,7 +1068,7 @@ class Runner:
                 self.save_record(split, rid, rec)
 
         tasks = []
-        for idx, row in enumerate(ds):
+        for idx, row in enumerate(rows):
             if self.cfg.dry_run > 0 and idx >= self.cfg.dry_run:
                 break
             rid = f"{split}_{idx:05d}"
@@ -1070,8 +1125,20 @@ class Runner:
             return
 
         ds = Dataset.from_list(result_rows)
-        save_path = os.path.join(self.out_dir, "arrow_dataset")
-        ds.save_to_disk(save_path)
+        save_path = os.path.join(self.out_final_dir, "arrow_dataset")
+        tmp_save_path = save_path + ".tmp"
+        if os.path.exists(tmp_save_path):
+            if os.path.isdir(tmp_save_path):
+                shutil.rmtree(tmp_save_path)
+            else:
+                os.remove(tmp_save_path)
+        ds.save_to_disk(tmp_save_path)
+        if os.path.exists(save_path):
+            if os.path.isdir(save_path):
+                shutil.rmtree(save_path)
+            else:
+                os.remove(save_path)
+        shutil.move(tmp_save_path, save_path)
         self.console.print(f"[green]Saved Arrow dataset to: {save_path}[/green]")
 
         # Also write a summary table
@@ -1097,7 +1164,7 @@ class Runner:
         if self.cfg.build_arrow_only:
             self.build_arrow()
             # Print final output directory for user clarity
-            self.console.print(f"[bold green]Output directory:[/bold green] {self.out_dir}")
+            self._print_dir_summary()
             return
 
         # Basic sanity checks
@@ -1113,7 +1180,7 @@ class Runner:
         # Build Arrow dataset at the end as a convenience
         self.build_arrow()
         # Print final output directory for user clarity
-        self.console.print(f"[bold green]Output directory:[/bold green] {self.out_dir}")
+        self._print_dir_summary()
 
 
 # -----------------------------
