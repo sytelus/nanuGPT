@@ -1004,7 +1004,12 @@ class Runner:
                 return  # already processed
             async with self.sem:
                 await self._print_worker(rid, "Acquired worker slot", style="blue")
-                rec = await self.process_one(split, rid, row["question"], row["answer"])
+                try:
+                    rec = await self.process_one(split, rid, row["question"], row["answer"])
+                except Exception as exc:
+                    self.log.exception("Unhandled exception during processing | split=%s | rid=%s", split, rid)
+                    await self._print_worker(rid, f"Unhandled error: {exc}", style="red")
+                    raise
                 self.save_record(split, rid, rec)
 
         tasks = []
@@ -1019,7 +1024,7 @@ class Runner:
             tasks.append(asyncio.create_task(worker(idx, row)))
 
         # Await all to raise exceptions if any
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*tasks)
         await self._print_main(f"[green]Finished split {split}[/green]")
 
     # ---------- Arrow dataset build ----------
