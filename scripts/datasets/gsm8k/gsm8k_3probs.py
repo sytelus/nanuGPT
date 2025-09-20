@@ -992,7 +992,12 @@ def main() -> None:
     signal.signal(signal.SIGINT, handle_sigint)
 
     # Repeatable randomness (optional seed)
-    rng = random.Random(RNG_SEED)
+    # Derive one RNG per worker so concurrent sampling stays thread-safe.
+    if RNG_SEED is not None:
+        seed_source = random.Random(RNG_SEED)
+    else:
+        seed_source = random.Random()
+    worker_rngs = [random.Random(seed_source.randrange(2**63)) for _ in range(state.max_workers)]
 
     # Load or download GSM8K train
     items = download_or_load_gsm8k_train(paths.in_dataset, console)
@@ -1007,10 +1012,10 @@ def main() -> None:
 
     # Start workers
     threads: List[threading.Thread] = []
-    for wid in range(state.max_workers):
+    for wid, worker_rng in enumerate(worker_rngs):
         t = threading.Thread(
             target=worker_loop,
-            args=(wid, state, paths, client, items, seen, rng),
+            args=(wid, state, paths, client, items, seen, worker_rng),
             name=f"worker-{wid}",
             daemon=True,
         )
