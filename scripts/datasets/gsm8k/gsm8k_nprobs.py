@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-gsm8k_3probs.py
+gsm8k_nprobs.py
 
 Purpose
 -------
-Create a new dataset by *combining* three randomly chosen GSM8K train problems into a single
-problem whose final answer is guaranteed to match the original answer of Problem C. For each
-attempt we:
-  1) Pick three random, distinct problems A, B, C from GSM8K (train).
-  2) Ask Azure OpenAI to *rewrite* (i.e., combine) the three into one problem using a strict template.
+Create a new dataset by *combining* `n_vars` randomly chosen GSM8K train problems into a single
+problem whose final answer is guaranteed to match the original answer of the final selected problem.
+For each attempt we:
+  1) Pick `n_vars` random, distinct problems from GSM8K (train).
+  2) Ask Azure OpenAI to *rewrite* (i.e., combine) those problems into one using a strict template.
   3) Ask Azure OpenAI to *solve* the combined problem, returning only the final numeric answer.
-  4) Validate that the final numeric answer equals the GSM8K final answer for Problem C.
-  5) If valid, append to `out_dataset/problems3_success/train.jsonl` in GSM8K format
+  4) Validate that the final numeric answer equals the GSM8K final answer of the last selected problem.
+  5) If valid, append to `out_dataset/problems{n_vars}_success/train.jsonl` in GSM8K format
      (fields: {"question": <combined problem>, "answer": "#### <final_number>"}).
-     We also log provenance in `out_dataset/problems3_success/meta.jsonl`.
-  6) Otherwise, append a detailed record to `out_dataset/problems3_fail/train.jsonl` for debugging.
+     We also log provenance in `out_dataset/problems{n_vars}_success/meta.jsonl`.
+  6) Otherwise, append a detailed record to `out_dataset/problems{n_vars}_fail/train.jsonl` for debugging.
 
 The script is designed to be:
   - **Robust**: Retries with exponential backoff for Azure API calls and file writes.
@@ -33,14 +33,14 @@ Non-obvious design choices (and deviations from the user guideline)
    corpus contract that the final answer follows `####` while avoiding unnecessary content.
 
 2) **Provenance logging**: To fulfill the requirement to "log unique IDs" of the base problems
-   in the *final output*, we add `out_dataset/problems3_success/meta.jsonl` with, for each
-   generated item, the `[idA, idB, idC]` triple, a content hash of the combined problem, and
+   in the *final output*, we add `out_dataset/problems{n_vars}_success/meta.jsonl` with, for each
+   generated item, the ordered list of source problem IDs, a content hash of the combined problem, and
    timestamps. This keeps the success dataset strictly GSM8K-formatted while still shipping the
    needed debug info alongside it.
 
 3) **Resumability**: We store outputs directly in their final files using append-only JSONL.
    On restart, we count existing successes and continue. We also maintain a `working_dir/attempts.jsonl`
-   and `working_dir/seen_triples.txt` to avoid retrying identical triples across runs. This ensures
+  and `working_dir/seen_combos.txt` to avoid retrying identical combinations across runs. This ensures
    the script can be stopped anytime and restarted without losing progress.
 
 4) **Answer parsing**: GSM8K answers end with `#### <final>`, but the solver may reply in various
@@ -63,24 +63,24 @@ Quick Start
    export OPENAI_API_VERSION="2024-10-01-preview"   # or the version you use
    export AZURE_OPENAI_DEPLOYMENT="<your-chat-deployment-name>"
 
-3) Optional: choose where to write output (default: ./gsm8k_3probs in current dir)
+3) Optional: choose where to write output (default: ./gsm8k_{n_vars}probs in current dir)
    export OUT_DIR="/path/to/output_root"
 
 4) Run:
-   python gsm8k_3probs.py --max_problem 200 --max_workers 8
+   python gsm8k_nprobs.py --max_problem 200 --max_workers 8 --n_vars 3
 
-Directory Layout (created under OUT_DIR/gsm8k_3probs)
+Directory Layout (created under OUT_DIR/gsm8k_{n_vars}probs)
 -----------------------------------------------------
 in_dataset/
   gsm8k_train.jsonl             # input GSM8K train data with sequential IDs for reference
 working_dir/
   attempts.jsonl                # every attempt appended here (success or fail), for provenance
-  seen_triples.txt              # set of processed triples (one "a,b,c" per line) to avoid repeats
+  seen_combos.txt               # set of processed combinations (one "i,j,k,..." per line) to avoid repeats
 out_dataset/
-  problems3_success/
+  problems{n_vars}_success/
     train.jsonl                 # GSM8K-format output (question, answer)
-    meta.jsonl                  # provenance: source triple IDs, hashes
-  problems3_fail/
+    meta.jsonl                  # provenance: source problem IDs, hashes
+  problems{n_vars}_fail/
     train.jsonl                 # detailed diagnostics for failed attempts
 
 Notes
@@ -144,37 +144,27 @@ except Exception:
 
 # ------------------------------ Configuration ------------------------------
 
-COMBINE_PROMPT_TEMPLATE = """Consider the 3 math problems below. Each problem has one or many input values and only one output value.
+COMBINE_PROMPT_TEMPLATE = """Consider the {n} math problems below. Each problem has one or many input values and only one output value.
 Only the direct numerical values specified in the problem can be treated as input values.
 
-We want to combine these 3 problems to form a single problem under the following conditions.
-Output of problem A should become input for problem B as well as problem C.
-Additionally, output of problem B should also feed into one of the inputs of problem C.
-Finally, the output of problem C should become the final output of the combined problem, and this final value must match the original output of problem C exactly.
+We want to combine these problems to form a single problem under the following conditions.
+The output of each earlier problem should be reused so it meaningfully influences at least one later step.
+The final combined problem must produce exactly the same output value as the original Problem {final_problem}.
 
-When replacing the input of a problem with the output of another problem, you must ensure that the final input value remains the same as it was in the original problem.
-To achieve this, you may transform the output value of a problem (for example, by adding or multiplying by a constant) before using it as an input for another problem.
+When replacing the input of a problem with the output of another problem, you must ensure that the final input value remains the same as in the original wording.
+To achieve this, you may transform the output value of a problem (for example, by adding or multiplying by a constant) before using it as an input elsewhere.
 
-Problem C consumes outputs from both problem A and problem B.
-If problem C does not have two different inputs available for replacement, combine the outputs of problems A and B using addition to create a single value, then transform it if needed so it can replace the available input in problem C.
-If problem C has two or more distinct inputs available, use one for the output of problem A and another for the output of problem B.
+If the final problem does not have enough distinct inputs to accommodate the reused outputs, combine the necessary earlier outputs (for example, by adding them) and then transform them so that the resulting numeric value matches the original input.
+Whenever sufficient distinct inputs exist, map different reused outputs to different inputs.
 
 Keep each problem statement as close to the original wording as possible, making only the minimal changes required.
-You may label the output of each problem with a letter (for example, "Let's call this value T") so you can reference it later when using it as an input in another problem.
-Do not include tags like "Problem A" in the final combined problem statement.
+You may name intermediate values (for example, "Let's call this value T") so you can reference them later, but do not refer to them with tags like "Problem 1" in the final combined statement.
 
 Using these conditions, produce the final combined problem.
-In your response, include only this final combined problem as plain text with no markdown or LaTeX.
+Return only the combined problem as plain text with no markdown or LaTeX.
 If you cannot produce the combined problem, output "ERROR: <reason>" where <reason> explains why you cannot complete the task.
 
-Problem A:
-<problem1>
-
-Problem B:
-<problem2>
-
-Problem C:
-<problem3>"""
+{problem_blocks}"""
 
 SOLVE_PROMPT = """Solve the following math problem. Output ONLY the final numeric answer with no words, no units, no punctuation, and no explanation. If the exact answer is a fraction, return the simplest fraction like 7/3. If the answer is a mixed number, convert it to an improper fraction. If the answer is a monetary amount, return only the number (e.g., 12.50).
 
@@ -220,10 +210,9 @@ class GSMItem:
 @dataclass
 class AttemptResult:
     # Core
-    triple_ids: Tuple[int, int, int]  # (idA, idB, idC)
-    problemA: GSMItem
-    problemB: GSMItem
-    problemC: GSMItem
+    problem_ids: Tuple[int, ...]
+    problems: List[GSMItem]
+    target_problem: GSMItem
 
     # Combine phase
     combined_problem: Optional[str] = None
@@ -708,16 +697,17 @@ class Paths:
     success_meta: Path
     fail_train: Path
     attempts: Path
-    seen_triples: Path
+    seen_combos: Path
+    combo_size: int
 
 
-def make_paths(root: Path) -> Paths:
-    base = root / "gsm8k_3probs"
+def make_paths(root: Path, combo_size: int) -> Paths:
+    base = root / f"gsm8k_{combo_size}probs"
     in_dataset = base / "in_dataset"
     working_dir = base / "working_dir"
     out_dataset = base / "out_dataset"
-    success_dir = out_dataset / "problems3_success"
-    fail_dir = out_dataset / "problems3_fail"
+    success_dir = out_dataset / f"problems{combo_size}_success"
+    fail_dir = out_dataset / f"problems{combo_size}_fail"
     ensure_dir(in_dataset)
     ensure_dir(working_dir)
     ensure_dir(success_dir)
@@ -733,7 +723,8 @@ def make_paths(root: Path) -> Paths:
         success_meta=success_dir / "meta.jsonl",
         fail_train=fail_dir / "train.jsonl",
         attempts=working_dir / "attempts.jsonl",
-        seen_triples=working_dir / "seen_triples.txt",
+        seen_combos=working_dir / "seen_combos.txt",
+        combo_size=combo_size,
     )
 
 
@@ -747,7 +738,7 @@ class WorkerStat:
     status: str = "Idle"
     last_event: str = ""
     last_duration: float = 0.0
-    current_triple: Optional[Tuple[int, int, int]] = None
+    current_combo: Optional[Tuple[int, ...]] = None
     stage_started_at: float = dataclasses.field(default_factory=time.time)
     first_started_at: float = dataclasses.field(default_factory=time.time)
     last_update: float = dataclasses.field(default_factory=time.time)
@@ -779,7 +770,7 @@ class SharedState:
     worker_stats: Dict[int, WorkerStat] = dataclasses.field(default_factory=dict)
 
 
-def read_seen_triples(path: Path) -> set:
+def read_seen_combos(path: Path) -> set:
     seen = set()
     if path.exists():
         with path.open("r", encoding="utf-8") as f:
@@ -791,16 +782,16 @@ def read_seen_triples(path: Path) -> set:
     return seen
 
 
-def append_seen_triple(path: Path, triple: Tuple[int, int, int]) -> None:
+def append_seen_combo(path: Path, combo: Tuple[int, ...]) -> None:
     with path.open("a", encoding="utf-8") as f:
-        f.write(f"{triple[0]},{triple[1]},{triple[2]}\n")
+        f.write(",".join(str(x) for x in combo) + "\n")
 
 
 def notify_dashboard(state: SharedState) -> None:
     state.dashboard_event.set()
 
 
-_CURRENT_TRIPLE_SENTINEL = object()
+_CURRENT_COMBO_SENTINEL = object()
 
 
 def record_worker_alert(state: SharedState, wid: int, message: str) -> None:
@@ -816,7 +807,7 @@ def update_worker_status(
     *,
     status: Optional[str] = None,
     event: Optional[str] = None,
-    current_triple: Any = _CURRENT_TRIPLE_SENTINEL,
+    current_combo: Any = _CURRENT_COMBO_SENTINEL,
     stage_reset: bool = True,
 ) -> None:
     """Helper to mutate per-worker stats under the shared lock."""
@@ -826,8 +817,8 @@ def update_worker_status(
             stat.status = status
         if event is not None:
             stat.last_event = event
-        if current_triple is not _CURRENT_TRIPLE_SENTINEL:
-            stat.current_triple = current_triple
+        if current_combo is not _CURRENT_COMBO_SENTINEL:
+            stat.current_combo = current_combo
         if stage_reset:
             now = time.time()
             stat.stage_started_at = now
@@ -837,28 +828,28 @@ def update_worker_status(
     notify_dashboard(state)
 
 
-def pick_random_triple(n: int, rng: random.Random) -> Tuple[int, int, int]:
-    a = rng.randrange(n)
-    b = rng.randrange(n)
-    while b == a:
-        b = rng.randrange(n)
-    c = rng.randrange(n)
-    while c == a or c == b:
-        c = rng.randrange(n)
-    return (a, b, c)
+def pick_random_combo(n_items: int, combo_size: int, rng: random.Random) -> Tuple[int, ...]:
+    if combo_size > n_items:
+        raise ValueError("combo_size cannot exceed number of available items")
+    return tuple(rng.sample(range(n_items), combo_size))
 
 
-def build_combine_prompt(pA: str, pB: str, pC: str) -> str:
-    return (COMBINE_PROMPT_TEMPLATE
-            .replace("<problem1>", pA.strip())
-            .replace("<problem2>", pB.strip())
-            .replace("<problem3>", pC.strip()))
+def build_combine_prompt(problem_texts: List[str]) -> str:
+    problem_blocks = []
+    for idx, text in enumerate(problem_texts, start=1):
+        block = f"Problem {idx}:\n{text.strip()}"
+        problem_blocks.append(block)
+    return COMBINE_PROMPT_TEMPLATE.format(
+        n=len(problem_texts),
+        final_problem=len(problem_texts),
+        problem_blocks="\n\n".join(problem_blocks),
+    )
 
 
 def do_attempt(
     client: AOAIClient,
     items: List[GSMItem],
-    triple: Tuple[int, int, int],
+    combo: Tuple[int, ...],
     progress_cb: Optional[Callable[[str], None]] = None,
     combine_chat_kwargs: Optional[Dict[str, Any]] = None,
     solve_chat_kwargs: Optional[Dict[str, Any]] = None,
@@ -866,14 +857,14 @@ def do_attempt(
     solve_retry_cb: Optional[Callable[[int, Exception], None]] = None,
 ) -> AttemptResult:
     t0 = time.time()
-    idA, idB, idC = triple
-    A, B, C = items[idA], items[idB], items[idC]
-    res = AttemptResult(triple_ids=triple, problemA=A, problemB=B, problemC=C)
-    res.expected_answer_raw = C.expected_final_raw
-    res.expected_answer_fraction = C.expected_final_fraction
+    problems = [items[i] for i in combo]
+    target_problem = problems[-1]
+    res = AttemptResult(problem_ids=combo, problems=problems, target_problem=target_problem)
+    res.expected_answer_raw = target_problem.expected_final_raw
+    res.expected_answer_fraction = target_problem.expected_final_fraction
 
     # 1) Combine
-    combine_user_content = build_combine_prompt(A.question, B.question, C.question)
+    combine_user_content = build_combine_prompt([p.question for p in problems])
     messages = [
         {"role": "system", "content": SYSTEM_COMBINE},
         {"role": "user", "content": combine_user_content},
@@ -949,7 +940,7 @@ def do_attempt(
         retry_kwargs["reasoning_effort"] = "high"
         res.second_solve_attempt = True
         res.alerts.append(
-            f"Triggered second solve attempt with reasoning_effort=high (triple {res.triple_ids})"
+            f"Triggered second solve attempt with reasoning_effort=high (combo {res.problem_ids})"
         )
         try:
             retry_res = client.chat(messages, **retry_kwargs)
@@ -982,18 +973,25 @@ def writer_success(paths: Paths, res: AttemptResult, lock: threading.Lock) -> No
     Append to success dataset and meta. Thread-safe via external lock.
     """
     assert res.success
+    expected_fraction_str = (
+        f"{res.expected_answer_fraction.numerator}/{res.expected_answer_fraction.denominator}"
+        if res.expected_answer_fraction is not None
+        else None
+    )
     # GSM8K-style minimal answer: only "#### <number>"
-    final_ans_str = canonicalize_answer_str(res.expected_answer_raw) or str(res.expected_answer_fraction)
+    final_ans_str = canonicalize_answer_str(res.expected_answer_raw) or expected_fraction_str
+    if final_ans_str is None:
+        final_ans_str = ""
     out_row = {
         "question": res.combined_problem,
         "answer": f"#### {final_ans_str}",
     }
     meta_row = {
         "timestamp": now_iso(),
-        "source_ids": list(res.triple_ids),
+        "source_ids": list(res.problem_ids),
         "combined_hash": sha256_text(res.combined_problem or ""),
         "expected_answer_raw": res.expected_answer_raw,
-        "expected_answer_fraction": f"{res.expected_answer_fraction.numerator}/{res.expected_answer_fraction.denominator}",
+        "expected_answer_fraction": expected_fraction_str,
         "elapsed_s": round(res.elapsed_s, 3),
         "combine_completion_tokens": res.combine_completion_tokens,
         "solve_completion_tokens": res.solve_completion_tokens,
@@ -1010,21 +1008,37 @@ def writer_fail(paths: Paths, res: AttemptResult, lock: threading.Lock) -> None:
     """
     Append to failure dataset with detailed diagnostics. Thread-safe via external lock.
     """
+    solver_fraction_str = (
+        f"{res.solver_answer_fraction.numerator}/{res.solver_answer_fraction.denominator}"
+        if res.solver_answer_fraction is not None
+        else None
+    )
+    expected_fraction_str = (
+        f"{res.expected_answer_fraction.numerator}/{res.expected_answer_fraction.denominator}"
+        if res.expected_answer_fraction is not None
+        else None
+    )
+    problems_payload = [
+        {
+            "sequence": idx + 1,
+            "id": problem.id,
+            "question": problem.question,
+            "answer": problem.answer,
+        }
+        for idx, problem in enumerate(res.problems)
+    ]
     row = {
         "timestamp": now_iso(),
-        "source_ids": list(res.triple_ids),
-        "A": {"id": res.problemA.id, "question": res.problemA.question, "answer": res.problemA.answer},
-        "B": {"id": res.problemB.id, "question": res.problemB.question, "answer": res.problemB.answer},
-        "C": {"id": res.problemC.id, "question": res.problemC.question, "answer": res.problemC.answer},
+        "source_ids": list(res.problem_ids),
+        "problems": problems_payload,
+        "target_problem_sequence": len(res.problems),
         "combined_problem": res.combined_problem,
         "combine_error": res.combine_error,
         "solver_output": res.solver_output,
         "solver_answer_raw": res.solver_answer_raw,
         "expected_answer_raw": res.expected_answer_raw,
-        "solver_answer_fraction": (f"{res.solver_answer_fraction.numerator}/{res.solver_answer_fraction.denominator}"
-                                   if res.solver_answer_fraction else None),
-        "expected_answer_fraction": (f"{res.expected_answer_fraction.numerator}/{res.expected_answer_fraction.denominator}"
-                                     if res.expected_answer_fraction else None),
+        "solver_answer_fraction": solver_fraction_str,
+        "expected_answer_fraction": expected_fraction_str,
         "reason": res.reason,
         "elapsed_s": round(res.elapsed_s, 3),
         "combine_completion_tokens": res.combine_completion_tokens,
@@ -1075,29 +1089,30 @@ def worker_loop(
     combine_chat_kwargs: Optional[Dict[str, Any]],
     solve_chat_kwargs: Optional[Dict[str, Any]],
 ) -> None:
-    update_worker_status(state, wid, status="Idle", event="worker starting", current_triple=None)
+    update_worker_status(state, wid, status="Idle", event="worker starting", current_combo=None)
     n = len(items)
+    combo_size = paths.combo_size
 
     while not state.stop_event.is_set():
         with state.lock:
             if state.successes >= state.target_success:
                 break
 
-        update_worker_status(state, wid, status="Sampling", event="choosing triple", current_triple=None)
+        update_worker_status(state, wid, status="Sampling", event="choosing combo", current_combo=None)
 
-        triple: Optional[Tuple[int, int, int]] = None
+        combo: Optional[Tuple[int, ...]] = None
         for _ in range(1000):
             if state.stop_event.is_set():
                 break
-            candidate = pick_random_triple(n, rng)
-            triple_key = f"{candidate[0]},{candidate[1]},{candidate[2]}"
+            candidate = pick_random_combo(n, combo_size, rng)
+            combo_key = ",".join(str(x) for x in candidate)
             with state.lock:
-                if triple_key not in seen:
-                    seen.add(triple_key)
-                    append_seen_triple(paths.seen_triples, candidate)
-                    triple = candidate
+                if combo_key not in seen:
+                    seen.add(combo_key)
+                    append_seen_combo(paths.seen_combos, candidate)
+                    combo = candidate
                     break
-        if triple is None:
+        if combo is None:
             if state.stop_event.is_set():
                 break
             time.sleep(0.1)
@@ -1107,8 +1122,8 @@ def worker_loop(
             state,
             wid,
             status="Queued",
-            event=f"triple {triple}",
-            current_triple=triple,
+            event=f"combo {combo}",
+            current_combo=combo,
         )
 
         def stage_cb(stage: str) -> None:
@@ -1117,24 +1132,24 @@ def worker_loop(
                     state,
                     wid,
                     status="Combining",
-                    event=f"combining {triple}",
-                    current_triple=triple,
+                    event=f"combining {combo}",
+                    current_combo=combo,
                 )
             elif stage == "solve":
                 update_worker_status(
                     state,
                     wid,
                     status="Solving",
-                    event=f"solving {triple}",
-                    current_triple=triple,
+                    event=f"solving {combo}",
+                    current_combo=combo,
                 )
             elif stage == "validate":
                 update_worker_status(
                     state,
                     wid,
                     status="Validating",
-                    event=f"checking {triple}",
-                    current_triple=triple,
+                    event=f"checking {combo}",
+                    current_combo=combo,
                 )
 
         def make_retry_cb(stage_label: str) -> Callable[[int, Exception], None]:
@@ -1150,7 +1165,7 @@ def worker_loop(
                     stat.last_event = message
                     stat.status = f"{stage_label} retry"
                     stat.last_update = time.time()
-                    stat.current_triple = triple
+                    stat.current_combo = combo
                     stat.log_message = message
                 notify_dashboard(state)
             return _cb
@@ -1160,7 +1175,7 @@ def worker_loop(
             res = do_attempt(
                 client,
                 items,
-                triple,
+                combo,
                 progress_cb=stage_cb,
                 combine_chat_kwargs=combine_chat_kwargs,
                 solve_chat_kwargs=solve_chat_kwargs,
@@ -1168,14 +1183,16 @@ def worker_loop(
                 solve_retry_cb=make_retry_cb("Solving"),
             )
         except Exception as e:
+            combo_problems = [items[i] for i in combo]
             res = AttemptResult(
-                triple_ids=triple,
-                problemA=items[triple[0]],
-                problemB=items[triple[1]],
-                problemC=items[triple[2]],
+                problem_ids=combo,
+                problems=combo_problems,
+                target_problem=combo_problems[-1],
                 success=False,
                 reason=f"unexpected_exception: {type(e).__name__}: {e}",
             )
+            res.expected_answer_raw = combo_problems[-1].expected_final_raw
+            res.expected_answer_fraction = combo_problems[-1].expected_final_fraction
             res.elapsed_s = time.time() - attempt_started
 
         if res.elapsed_s == 0:
@@ -1193,7 +1210,7 @@ def worker_loop(
                 state.successes += 1
                 last_event = (
                     f"worker {wid}: success #{state.successes} in {res.elapsed_s:.2f}s "
-                    f"(triple {res.triple_ids})"
+                    f"(combo {res.problem_ids})"
                 )
                 state.last_event = last_event
                 state.completion_tokens_total += attempt_tokens
@@ -1205,7 +1222,7 @@ def worker_loop(
                 stat.status = "Success"
                 stat.last_update = time.time()
                 stat.stage_started_at = stat.last_update
-                stat.current_triple = None
+                stat.current_combo = None
                 stat.completion_tokens += attempt_tokens
             writer_success(paths, res, state.io_lock)
             notify_dashboard(state)
@@ -1214,7 +1231,7 @@ def worker_loop(
             with state.lock:
                 state.failures += 1
                 last_event = (
-                    f"worker {wid}: fail {failure_detail} (triple {res.triple_ids})"
+                    f"worker {wid}: fail {failure_detail} (combo {res.problem_ids})"
                 )
                 state.last_event = last_event
                 state.last_error = failure_detail
@@ -1227,7 +1244,7 @@ def worker_loop(
                 stat.status = "Failed"
                 stat.last_update = time.time()
                 stat.stage_started_at = stat.last_update
-                stat.current_triple = None
+                stat.current_combo = None
                 stat.last_error = failure_detail
                 stat.completion_tokens += attempt_tokens
                 stat.log_message = failure_detail
@@ -1242,7 +1259,7 @@ def worker_loop(
                 notify_dashboard(state)
                 break
 
-    update_worker_status(state, wid, status="Stopped", event="worker exit", current_triple=None)
+    update_worker_status(state, wid, status="Stopped", event="worker exit", current_combo=None)
 
 
 def format_eta(seconds_left: float) -> str:
@@ -1378,6 +1395,8 @@ def parse_args() -> argparse.Namespace:
                    help=f"Max retries per Azure API call (default: {DEFAULT_MAX_RETRIES}).")
     p.add_argument("--timeout", type=float, default=DEFAULT_REQ_TIMEOUT,
                    help=f"Azure API request timeout in seconds (default: {DEFAULT_REQ_TIMEOUT}).")
+    p.add_argument("--n_vars", type=int, default=3,
+                   help="Number of GSM8K problems to combine per attempt (default: 3).")
     p.add_argument("--quiet", action="store_true", help="Reduce console output (hides the live dashboard).")
     p.add_argument("--combine-temperature", type=float, default=None,
                    help="Temperature to use for the combine request (default: provider default).")
@@ -1398,13 +1417,18 @@ def main() -> None:
         raise RuntimeError("The `rich` package is required. Install with: pip install rich")
     console = Console()
 
+    combo_size = int(args.n_vars)
+    if combo_size < 2:
+        console.print("[red]--n_vars must be at least 2 so there is something to combine.[/]")
+        sys.exit(2)
+
     # Logging
     logging.basicConfig(level=logging.WARNING, format="%(message)s")
     suppress_third_party_logs()
 
     # Paths
     out_root = Path(args.out_dir).expanduser().resolve()
-    paths = make_paths(out_root)
+    paths = make_paths(out_root, combo_size)
 
     # Chat parameter overrides
     combine_chat_kwargs: Optional[Dict[str, Any]] = {}
@@ -1458,6 +1482,11 @@ def main() -> None:
 
     # Load or download GSM8K train
     items = download_or_load_gsm8k_train(paths.in_dataset, console)
+    if combo_size > len(items):
+        console.print(
+            f"[red]--n_vars of {combo_size} exceeds available GSM8K items ({len(items)}).[/]"
+        )
+        sys.exit(2)
 
     # Count existing successes (resumable)
     existing_success = read_jsonl(paths.success_train)
@@ -1468,8 +1497,8 @@ def main() -> None:
     state.initial_failures = existing_failures
     console.log(f"[green]Resuming[/]: found {state.successes} existing successes. Target: {state.target_success}.")
 
-    # Initialize seen triples from prior runs
-    seen = read_seen_triples(paths.seen_triples)
+    # Initialize seen combinations from prior runs
+    seen = read_seen_combos(paths.seen_combos)
 
     with state.lock:
         for wid in range(state.max_workers):
