@@ -616,6 +616,7 @@ class SharedState:
     start_time: float = dataclasses.field(default_factory=time.time)
     stop_event: threading.Event = dataclasses.field(default_factory=threading.Event)
     lock: threading.Lock = dataclasses.field(default_factory=threading.Lock)
+    io_lock: threading.Lock = dataclasses.field(default_factory=threading.Lock)
     last_event: str = ""
     # Per-worker stats
     worker_stats: Dict[int, Dict[str, Any]] = dataclasses.field(default_factory=dict)
@@ -835,15 +836,19 @@ def worker_loop(
         if res.success:
             with state.lock:
                 state.successes += 1
-                writer_success(paths, res, state.lock)
-                last_event = f"worker {wid}: success #{state.successes} in {res.elapsed_s:.2f}s (triple {res.triple_ids})"
+                last_event = (
+                    f"worker {wid}: success #{state.successes} in {res.elapsed_s:.2f}s "
+                    f"(triple {res.triple_ids})"
+                )
                 state.last_event = last_event
+            writer_success(paths, res, state.io_lock)
             local_succ += 1
         else:
             with state.lock:
                 state.failures += 1
-                writer_fail(paths, res, state.lock)
-                state.last_event = f"worker {wid}: fail ({res.reason}) (triple {res.triple_ids})"
+                last_event = f"worker {wid}: fail ({res.reason}) (triple {res.triple_ids})"
+                state.last_event = last_event
+            writer_fail(paths, res, state.io_lock)
             local_fail += 1
 
         # Update per-worker stats
