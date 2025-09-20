@@ -216,6 +216,8 @@ class AttemptResult:
     expected_answer_raw: Optional[str] = None
     expected_answer_fraction: Optional[Fraction] = None
     solve_completion_tokens: int = 0
+    solver_outputs: List[str] = dataclasses.field(default_factory=list)
+    second_solve_attempt: bool = False
 
     # Outcome
     success: bool = False
@@ -554,6 +556,7 @@ class AOAIClient:
         temperature: Optional[float] = None,
         max_completion_tokens: Optional[int] = None,
         on_retry: Optional[Callable[[int, Exception], None]] = None,
+        reasoning_effort: Optional[str] = None,
     ) -> ChatResult:
         """
         Call Azure OpenAI Chat Completions with robust retries.
@@ -570,6 +573,8 @@ class AOAIClient:
                     kwargs["temperature"] = temperature
                 if max_completion_tokens is not None:
                     kwargs["max_completion_tokens"] = max_completion_tokens
+                if reasoning_effort is not None:
+                    kwargs["reasoning"] = {"effort": reasoning_effort}
                 resp = self.client.chat.completions.create(**kwargs)
                 content = resp.choices[0].message.content or ""
                 usage = getattr(resp, "usage", None)
@@ -811,29 +816,57 @@ def do_attempt(
             solve_kwargs.setdefault("on_retry", solve_retry_cb)
         solver_res = client.chat(messages, **solve_kwargs)
         res.solver_output = solver_res.content
-        res.solve_completion_tokens = solver_res.completion_tokens
+        res.solve_completion_tokens += solver_res.completion_tokens
+        res.solver_outputs.append(solver_res.content)
     except Exception as e:
         res.reason = f"solve_call_failed: {type(e).__name__}: {e}"
         res.elapsed_s = time.time() - t0
         return res
 
-    # 3) Parse solver output
-    solver_raw = extract_last_numeric_token(res.solver_output or "")
-    res.solver_answer_raw = canonicalize_answer_str(solver_raw) if solver_raw else None
-    res.solver_answer_fraction = parse_fraction_from_string(res.solver_answer_raw) if res.solver_answer_raw else None
+    def parse_solver_output(text: Optional[str]) -> Tuple[Optional[str], Optional[Fraction]]:
+        token = extract_last_numeric_token(text or "")
+        canonical = canonicalize_answer_str(token) if token else None
+        frac = parse_fraction_from_string(canonical) if canonical else None
+        return canonical, frac
+
+    res.solver_answer_raw, res.solver_answer_fraction = parse_solver_output(res.solver_output)
 
     if res.expected_answer_fraction is None:
         res.reason = "expected_answer_not_parsable"
         res.elapsed_s = time.time() - t0
         return res
 
+    def solver_matches() -> bool:
+        return (
+            res.solver_answer_fraction is not None
+            and answers_match(res.solver_answer_fraction, res.expected_answer_fraction)
+        )
+
+    need_retry = res.solver_answer_fraction is None or not solver_matches()
+
+    if need_retry:
+        if progress_cb:
+            progress_cb("solve")
+        retry_kwargs = dict(solve_kwargs)
+        retry_kwargs["reasoning_effort"] = "high"
+        res.second_solve_attempt = True
+        try:
+            retry_res = client.chat(messages, **retry_kwargs)
+            res.solver_output = retry_res.content
+            res.solve_completion_tokens += retry_res.completion_tokens
+            res.solver_outputs.append(retry_res.content)
+        except Exception as e:
+            res.reason = f"solve_call_failed_retry: {type(e).__name__}: {e}"
+            res.elapsed_s = time.time() - t0
+            return res
+        res.solver_answer_raw, res.solver_answer_fraction = parse_solver_output(res.solver_output)
+
     if res.solver_answer_fraction is None:
         res.reason = "solver_answer_not_parsable"
         res.elapsed_s = time.time() - t0
         return res
 
-    # 4) Compare
-    if answers_match(res.solver_answer_fraction, res.expected_answer_fraction):
+    if solver_matches():
         res.success = True
         res.elapsed_s = time.time() - t0
         return res
@@ -863,6 +896,8 @@ def writer_success(paths: Paths, res: AttemptResult, lock: threading.Lock) -> No
         "elapsed_s": round(res.elapsed_s, 3),
         "combine_completion_tokens": res.combine_completion_tokens,
         "solve_completion_tokens": res.solve_completion_tokens,
+        "second_solve_attempt": res.second_solve_attempt,
+        "solver_outputs": res.solver_outputs,
     }
     with lock:
         append_jsonl(paths.success_train, out_row)
@@ -893,6 +928,8 @@ def writer_fail(paths: Paths, res: AttemptResult, lock: threading.Lock) -> None:
         "elapsed_s": round(res.elapsed_s, 3),
         "combine_completion_tokens": res.combine_completion_tokens,
         "solve_completion_tokens": res.solve_completion_tokens,
+        "second_solve_attempt": res.second_solve_attempt,
+        "solver_outputs": res.solver_outputs,
     }
     with lock:
         append_jsonl(paths.fail_train, row)
@@ -904,7 +941,7 @@ def summarize_failure(res: AttemptResult) -> str:
     parts: List[str] = []
     if res.combine_error:
         parts.append(res.combine_error)
-    if res.reason in {"solve_call_failed", "solver_answer_not_parsable", "answer_mismatch"}:
+    if res.reason in {"solve_call_failed", "solve_call_failed_retry", "solver_answer_not_parsable", "answer_mismatch"}:
         if res.solver_output:
             parts.append(f"solver_output={res.solver_output}")
     if res.reason == "answer_mismatch":
@@ -918,6 +955,10 @@ def summarize_failure(res: AttemptResult) -> str:
         parts.append(f"expected={res.expected_answer_raw}")
     if res.reason == "combine_invalid_output" and res.combined_problem:
         parts.append(f"combined_problem={res.combined_problem}")
+    if res.second_solve_attempt:
+        parts.append("second_solve_attempt=high")
+    if res.solver_outputs:
+        parts.append(f"solver_outputs={res.solver_outputs}")
     detail = "; ".join(filter(None, parts))
     return f"{reason}{(': ' + detail) if detail else ''}"
 
