@@ -282,19 +282,22 @@ def count_jsonl(path: Path) -> int:
     return count
 
 
-def ensure_text_parts(content: Any) -> List[Dict[str, str]]:
+def ensure_text_parts(content: Any, part_type: str) -> List[Dict[str, str]]:
     if isinstance(content, str):
-        return [{"type": "text", "text": content}]
+        return [{"type": part_type, "text": content}]
     # Support legacy chat message structures
     if isinstance(content, list):
         parts = []
         for item in content:
             if isinstance(item, dict) and "text" in item:
-                if item.get("type") == "text" or "type" not in item:
-                    parts.append({"type": "text", "text": item["text"]})
+                item_type = item.get("type", part_type)
+                if item_type in {"input_text", "output_text"}:
+                    parts.append({"type": item_type, "text": item["text"]})
+                elif item_type == "text":
+                    parts.append({"type": part_type, "text": item["text"]})
         if parts:
             return parts
-    return [{"type": "text", "text": str(content)}]
+    return [{"type": part_type, "text": str(content)}]
 
 
 def messages_to_responses_input(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -302,7 +305,11 @@ def messages_to_responses_input(messages: List[Dict[str, Any]]) -> List[Dict[str
     for msg in messages:
         role = msg.get("role", "user")
         content = msg.get("content", "")
-        formatted.append({"role": role, "content": ensure_text_parts(content)})
+        if role == "assistant":
+            part_type = "output_text"
+        else:
+            part_type = "input_text"
+        formatted.append({"role": role, "content": ensure_text_parts(content, part_type)})
     return formatted
 
 
