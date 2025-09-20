@@ -156,6 +156,29 @@ class AOAI:
         self.deployment = cfg.deployment
         self.api_version = cfg.api_version
 
+    @staticmethod
+    def _response_to_dict(resp: Any) -> Dict[str, Any]:
+        """Normalize SDK responses to plain dicts for downstream consumers."""
+        if isinstance(resp, dict):
+            return resp
+
+        for attr in ("model_dump", "to_dict_recursive", "to_dict", "dict"):
+            if not hasattr(resp, attr):
+                continue
+            method = getattr(resp, attr)
+            try:
+                candidate = method() if callable(method) else method
+            except TypeError:
+                # Some SDK helpers (e.g., dataclasses.asdict) require args; skip safely.
+                continue
+            if isinstance(candidate, dict):
+                return candidate
+
+        if hasattr(resp, "__dict__") and isinstance(resp.__dict__, dict):
+            return dict(resp.__dict__)
+
+        raise TypeError(f"Unexpected response type from OpenAI SDK: {type(resp)!r}")
+
     async def chat(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None,
                    tool_choice: Optional[Dict[str, Any]] = None, timeout_s: Optional[int] = None,
                    temperature: Optional[float] = None, seed: Optional[int] = None) -> Dict[str, Any]:
@@ -181,7 +204,7 @@ class AOAI:
             )
         else:
             resp = await self.client.chat.completions.create(**kwargs)
-        return resp.to_dict_recursive() if hasattr(resp, "to_dict_recursive") else resp
+        return self._response_to_dict(resp)
 
 
 # -----------------------------
@@ -722,6 +745,20 @@ class Runner:
             f"content_fail={self.content_fail} | net_fail={self.net_fail} | repaired={self.repaired} | {self._eta()}"
         )
 
+    def _response_excerpt(self, payload: Any, limit: int = 800) -> str:
+        """Return a compact string snapshot of model output for diagnostics."""
+        try:
+            if isinstance(payload, (dict, list)):
+                encoded = orjson.dumps(payload, option=orjson.OPT_INDENT_2).decode("utf-8")
+            else:
+                encoded = str(payload)
+        except Exception:
+            encoded = repr(payload)
+        encoded = encoded.strip().replace("\n", " ")
+        if len(encoded) > limit:
+            return encoded[:limit] + " …<truncated>"
+        return encoded
+
     # ---------- persistence helpers ----------
     def _split_dir(self, split: str) -> str:
         d = os.path.join(self.cache_dir, split)
@@ -810,7 +847,14 @@ class Runner:
                     graph = orjson.loads(raw)
                     return graph, None, resp
         except Exception as e:
+            self.log.warning(
+                "Failed to parse model output | error=%s | excerpt=%s",
+                e,
+                self._response_excerpt(raw if raw is not None else resp)
+            )
             return None, f"Failed to parse model output as JSON: {e}", resp
+        snapshot = self._response_excerpt(resp)
+        self.log.warning("Model response missing graph payload | keys=%s | excerpt=%s", list(resp.keys()), snapshot)
         return None, "No function call or JSON content found.", resp
 
     async def build_or_repair_graph(self, question: str, rid: Optional[str] = None) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any], List[str], int]:
