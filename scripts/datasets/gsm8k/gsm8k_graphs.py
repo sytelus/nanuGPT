@@ -88,12 +88,11 @@ import orjson
 from tenacity import retry, stop_after_attempt, wait_exponential_jitter, retry_if_exception_type
 
 # Rich for pretty progress and logs
-from rich.console import Console
+from rich.console import Console, Group
 from rich.table import Table
-from rich.progress import (
-    Progress, SpinnerColumn, BarColumn, TimeElapsedColumn,
-    TimeRemainingColumn, TextColumn, MofNCompleteColumn
-)
+from rich.panel import Panel
+from rich.live import Live
+from rich.text import Text
 from rich.logging import RichHandler
 import logging
 
@@ -137,6 +136,182 @@ class Config:
     # Build Arrow dataset from cached jsonl even without calling the API
     build_arrow_only: bool = False
 
+
+# -----------------------------
+# Dashboard helpers
+# -----------------------------
+
+
+@dataclasses.dataclass
+class DashboardRow:
+    name: str
+    status: str = "Idle"
+    success: int = 0
+    failures: int = 0
+    retries: int = 0
+    valid: int = 0
+    problem: str = ""
+
+    def reset(self) -> None:
+        self.status = "Idle"
+        self.problem = ""
+
+
+class Dashboard:
+    def __init__(self, console: Console, worker_count: int) -> None:
+        self.console = console
+        self.worker_count = worker_count
+        self.main = DashboardRow(name="Main", status="Init")
+        self.workers = [DashboardRow(name=f"W{i+1}") for i in range(worker_count)]
+        self.message = Text("Preparing", style="cyan")
+        self.live: Optional[Live] = None
+        self._lock = asyncio.Lock()
+
+    def make_live(self) -> Live:
+        return Live(self.render(), console=self.console, refresh_per_second=5)
+
+    def bind_live(self, live: Optional[Live]) -> None:
+        self.live = live
+
+    async def update_main(
+        self,
+        *,
+        status: Optional[str] = None,
+        problem: Optional[str] = None,
+        success: Optional[int] = None,
+        failures: Optional[int] = None,
+        retries: Optional[int] = None,
+        valid: Optional[int] = None,
+    ) -> None:
+        async with self._lock:
+            self._apply_updates(
+                self.main,
+                status=status,
+                problem=problem,
+                success=success,
+                failures=failures,
+                retries=retries,
+                valid=valid,
+            )
+            self._refresh_locked()
+
+    async def update_worker(
+        self,
+        index: int,
+        *,
+        status: Optional[str] = None,
+        problem: Optional[str] = None,
+        success: Optional[int] = None,
+        failures: Optional[int] = None,
+        retries: Optional[int] = None,
+        valid: Optional[int] = None,
+        success_delta: int = 0,
+        failures_delta: int = 0,
+        retries_delta: int = 0,
+        valid_delta: int = 0,
+    ) -> None:
+        if index < 0 or index >= len(self.workers):
+            return
+        async with self._lock:
+            row = self.workers[index]
+            self._apply_updates(
+                row,
+                status=status,
+                problem=problem,
+                success=success,
+                failures=failures,
+                retries=retries,
+                valid=valid,
+                success_delta=success_delta,
+                failures_delta=failures_delta,
+                retries_delta=retries_delta,
+                valid_delta=valid_delta,
+            )
+            self._refresh_locked()
+
+    async def reset_worker(self, index: int) -> None:
+        if index < 0 or index >= len(self.workers):
+            return
+        async with self._lock:
+            self.workers[index].reset()
+            self._refresh_locked()
+
+    async def set_message(self, message: str, style: str = "white") -> None:
+        async with self._lock:
+            self.message = Text(message, style=style)
+            self._refresh_locked()
+
+    def render(self) -> Group:
+        table = Table(expand=True)
+        table.add_column("Wkr", no_wrap=True)
+        table.add_column("Stat", no_wrap=True)
+        table.add_column("Succ", justify="right", no_wrap=True)
+        table.add_column("Fail", justify="right", no_wrap=True)
+        table.add_column("Rtry", justify="right", no_wrap=True)
+        table.add_column("Valid", justify="right", no_wrap=True)
+        table.add_column("Problem", overflow="fold")
+
+        for row in [self.main, *self.workers]:
+            table.add_row(
+                row.name,
+                self._clip(row.status, 24),
+                str(row.success),
+                str(row.failures),
+                str(row.retries),
+                str(row.valid),
+                self._clip(row.problem, 32),
+            )
+
+        panel = Panel(self.message if self.message.plain else Text("", style="dim"), title="Last Event", border_style="cyan", expand=True)
+        return Group(table, panel)
+
+    def _clip(self, text: Optional[str], limit: int) -> str:
+        if not text:
+            return ""
+        text = text.strip()
+        if len(text) <= limit:
+            return text
+        return text[: max(0, limit - 3)] + "..."
+
+    def _apply_updates(
+        self,
+        row: DashboardRow,
+        *,
+        status: Optional[str] = None,
+        problem: Optional[str] = None,
+        success: Optional[int] = None,
+        failures: Optional[int] = None,
+        retries: Optional[int] = None,
+        valid: Optional[int] = None,
+        success_delta: int = 0,
+        failures_delta: int = 0,
+        retries_delta: int = 0,
+        valid_delta: int = 0,
+    ) -> None:
+        if status is not None:
+            row.status = status
+        if problem is not None:
+            row.problem = problem
+        if success is not None:
+            row.success = success
+        if failures is not None:
+            row.failures = failures
+        if retries is not None:
+            row.retries = retries
+        if valid is not None:
+            row.valid = valid
+        if success_delta:
+            row.success += success_delta
+        if failures_delta:
+            row.failures += failures_delta
+        if retries_delta:
+            row.retries += retries_delta
+        if valid_delta:
+            row.valid += valid_delta
+
+    def _refresh_locked(self) -> None:
+        if self.live is not None:
+            self.live.update(self.render())
 
 # -----------------------------
 # Azure OpenAI client (async)
@@ -684,10 +859,13 @@ class Runner:
     def __init__(self, cfg: Config, console: Console) -> None:
         self.cfg = cfg
         self.console = console
+        self.dashboard = Dashboard(console, cfg.max_workers)
         self.aoai = AOAI(cfg)
         self.sem = asyncio.Semaphore(cfg.max_workers)
         self.start_time = time.time()
-        self.print_lock = asyncio.Lock()
+        self.worker_slot_lock = asyncio.Lock()
+        self.worker_slots: List[Optional[str]] = [None] * cfg.max_workers
+        self.main_status_prefix = "Init"
 
         if not self.cfg.splits:
             builder = load_dataset_builder(
@@ -740,22 +918,18 @@ class Runner:
         self.content_fail = 0
         self.net_fail = 0
         self.repaired = 0
+        self.valid_graphs = 0
+        self.retry_attempts = 0
         self.bytes_written = 0
-        self._last_stats = (-1, -1, -1, -1, -1)
+        self._last_stats = (-1, -1, -1, -1, -1, -1, -1)
         self.remaining_budget = None if self.cfg.max_problems is None or self.cfg.max_problems < 0 else self.cfg.max_problems
 
     # ---------- printing helpers ----------
     async def _print_worker(self, rid: str, message: str, style: Optional[str] = None) -> None:
-        async with self.print_lock:
-            prefix = f"[{rid}]"
-            if style:
-                self.console.print(f"{prefix} {message}", style=style)
-            else:
-                self.console.print(f"{prefix} {message}")
+        await self.dashboard.set_message(f"{rid}: {message}", style or "white")
 
-    async def _print_main(self, message: str) -> None:
-        async with self.print_lock:
-            self.console.print(message, style="bold cyan")
+    async def _print_main(self, message: str, style: Optional[str] = "bold cyan") -> None:
+        await self.dashboard.set_message(message, style or "white")
 
     def _print_dir_summary(self) -> None:
         self.console.print(f"[bold green]Output directory:[/bold green] {self.out_dir}")
@@ -776,14 +950,53 @@ class Runner:
             return f"ETA≈{h}h {m}m"
         return f"ETA≈{m}m {s}s"
 
+    async def _acquire_worker_slot(self, rid: str) -> int:
+        async with self.worker_slot_lock:
+            for idx, current in enumerate(self.worker_slots):
+                if current is None:
+                    self.worker_slots[idx] = rid
+                    return idx
+        raise RuntimeError("No worker slot available")
+
+    async def _release_worker_slot(self, index: int) -> None:
+        async with self.worker_slot_lock:
+            if 0 <= index < len(self.worker_slots):
+                self.worker_slots[index] = None
+
     async def _report_progress(self) -> None:
-        stats = (self.done, self.success, self.content_fail, self.net_fail, self.repaired)
+        stats = (
+            self.done,
+            self.success,
+            self.content_fail,
+            self.net_fail,
+            self.repaired,
+            self.valid_graphs,
+            self.retry_attempts,
+        )
         if stats == self._last_stats:
             return
         self._last_stats = stats
-        await self._print_main(
-            f"progress: {self.done}/{self.total} | success={self.success} | "
-            f"content_fail={self.content_fail} | net_fail={self.net_fail} | repaired={self.repaired} | {self._eta()}"
+        await self._refresh_main_row()
+
+    async def _refresh_main_row(
+        self,
+        *,
+        status: Optional[str] = None,
+        problem: Optional[str] = None,
+    ) -> None:
+        if status is None:
+            base = self.main_status_prefix or "Run"
+            eta = self._eta() if self.total else ""
+            status = f"{base} {eta}".strip()
+        if problem is None:
+            problem = f"{self.done}/{self.total}" if self.total else ""
+        await self.dashboard.update_main(
+            status=status,
+            problem=problem,
+            success=self.success,
+            failures=self.content_fail + self.net_fail,
+            retries=self.retry_attempts,
+            valid=self.valid_graphs,
         )
 
     def _response_excerpt(self, payload: Any, limit: int = 800) -> str:
@@ -837,7 +1050,7 @@ class Runner:
             except ValueError as exc:
                 self.log.warning("Failed to read dataset cache for split %s (%s); re-downloading.", split, exc)
 
-        self.console.print(f"[cyan]Downloading dataset split {split} and caching to in_dataset.[/cyan]")
+        self.log.info("Downloading dataset split %s and caching to in_dataset.", split)
         ds = load_dataset(self.cfg.dataset_name, self.cfg.dataset_config, split=split)
         rows = [dict(row) for row in ds]
         self._write_dataset_split(split, rows)
@@ -868,12 +1081,21 @@ class Runner:
         self.bytes_written += os.path.getsize(p)
 
     # ---------- model call & repair ----------
-    async def call_model_once(self, messages: List[Dict[str, Any]], is_repair: bool = False, rid: Optional[str] = None) -> Dict[str, Any]:
+    async def call_model_once(
+        self,
+        messages: List[Dict[str, Any]],
+        is_repair: bool = False,
+        rid: Optional[str] = None,
+        worker_slot: Optional[int] = None,
+    ) -> Dict[str, Any]:
         attempts = 0
         delay = 1.0
         while True:
             attempts += 1
             try:
+                if worker_slot is not None:
+                    label = "Fix" if is_repair else "API"
+                    await self.dashboard.update_worker(worker_slot, status=f"{label}#{attempts}")
                 if rid:
                     await self._print_worker(rid, f"API call attempt {attempts}{' (repair)' if is_repair else ''} ...")
                 resp = await self.aoai.chat(
@@ -884,12 +1106,16 @@ class Runner:
                     temperature=self.cfg.temperature,
                     seed=self.cfg.seed,
                 )
+                if worker_slot is not None:
+                    await self.dashboard.update_worker(worker_slot, status="Resp")
                 if rid:
                     await self._print_worker(rid, f"API call attempt {attempts} succeeded", style="green")
                 return resp
             except Exception as e:
                 # Transient?
                 if _is_transient_exception(e) and attempts < self.cfg.network_max_retries:
+                    if worker_slot is not None:
+                        await self.dashboard.update_worker(worker_slot, status="Retry")
                     if rid:
                         await self._print_worker(rid, f"Transient API error: {e}; retrying in {delay:.1f}s", style="yellow")
                     await asyncio.sleep(delay + random.random() * 0.5 * delay)
@@ -897,9 +1123,13 @@ class Runner:
                     continue
                 # Non-transient or out of retries
                 if _is_transient_exception(e):
+                    if worker_slot is not None:
+                        await self.dashboard.update_worker(worker_slot, status="NetErr")
                     if rid:
                         await self._print_worker(rid, f"API failed after {attempts} attempts: {e}", style="red")
                     raise TransientNetworkError(str(e))
+                if worker_slot is not None:
+                    await self.dashboard.update_worker(worker_slot, status="Error")
                 if rid:
                     await self._print_worker(rid, f"API error (non-retryable): {e}", style="red")
                 raise
@@ -940,7 +1170,12 @@ class Runner:
         self.log.warning("Model response missing graph payload | keys=%s | excerpt=%s", list(resp.keys()), snapshot)
         return None, "No function call or JSON content found.", resp
 
-    async def build_or_repair_graph(self, question: str, rid: Optional[str] = None) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any], List[str], int]:
+    async def build_or_repair_graph(
+        self,
+        question: str,
+        rid: Optional[str] = None,
+        worker_slot: Optional[int] = None,
+    ) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any], List[str], int]:
         """Attempt initial build; if invalid, send one or two repair attempts with validator feedback."""
         messages = user_prompt(question)
         errors_all: List[str] = []
@@ -951,9 +1186,11 @@ class Runner:
         attempts += 1
         if rid:
             await self._print_worker(rid, "Building graph: initial API call")
-        resp = await self.call_model_once(messages, rid=rid)
+        resp = await self.call_model_once(messages, rid=rid, worker_slot=worker_slot)
         graph, parse_err, raw_resp = self.extract_graph(resp)
         if graph is None:
+            if worker_slot is not None:
+                await self.dashboard.update_worker(worker_slot, status="ParseErr")
             if rid:
                 await self._print_worker(rid, f"Unexpected API return: {parse_err}", style="red")
             errors_all = [parse_err or "Parse error"]
@@ -961,10 +1198,14 @@ class Runner:
             last_graph_payload = graph
             valid, errors, _ = validate_graph(graph)
             if valid:
+                if worker_slot is not None:
+                    await self.dashboard.update_worker(worker_slot, status="Valid")
                 if rid:
                     await self._print_worker(rid, "Initial graph valid", style="green")
                 return graph, raw_resp, [], attempts
             errors_all = list(errors)
+            if worker_slot is not None:
+                await self.dashboard.update_worker(worker_slot, status="Repair")
             if rid:
                 await self._print_worker(rid, f"Initial graph invalid: {len(errors)} error(s)", style="yellow")
 
@@ -985,9 +1226,11 @@ class Runner:
             ]
             if rid:
                 await self._print_worker(rid, f"Repair attempt {attempts - 1}")
-            resp = await self.call_model_once(repair_messages, is_repair=True, rid=rid)
+            resp = await self.call_model_once(repair_messages, is_repair=True, rid=rid, worker_slot=worker_slot)
             graph, parse_err, raw_resp = self.extract_graph(resp)
             if graph is None:
+                if worker_slot is not None:
+                    await self.dashboard.update_worker(worker_slot, status="ParseErr")
                 if rid:
                     await self._print_worker(rid, f"Unexpected API return on repair: {parse_err}", style="red")
                 errors_all = [parse_err or "Parse error"]
@@ -997,24 +1240,30 @@ class Runner:
             if valid:
                 self.repaired += 1
                 await self._report_progress()
+                if worker_slot is not None:
+                    await self.dashboard.update_worker(worker_slot, status="Valid")
                 if rid:
                     await self._print_worker(rid, "Graph repaired successfully", style="green")
                 return graph, raw_resp, [], attempts
             errors_all = list(errors)
+            if worker_slot is not None:
+                await self.dashboard.update_worker(worker_slot, status="Repair")
             if rid:
                 await self._print_worker(rid, f"Repair failed: {len(errors)} validation error(s)", style="yellow")
 
         return None, raw_resp if 'raw_resp' in locals() else {}, errors_all, attempts
 
     # ---------- per-record processing ----------
-    async def process_one(self, split: str, rid: str, question: str, answer: str) -> Dict[str, Any]:
+    async def process_one(self, split: str, rid: str, question: str, answer: str, worker_slot: int) -> Dict[str, Any]:
         try:
+            await self.dashboard.update_worker(worker_slot, status="Start", problem=rid)
             await self._print_worker(rid, "Starting problem")
-            graph, raw, errors, attempts = await self.build_or_repair_graph(question, rid=rid)
+            graph, raw, errors, attempts = await self.build_or_repair_graph(question, rid=rid, worker_slot=worker_slot)
         except TransientNetworkError as ne:
             self.net_fail += 1
             self.done += 1
             await self._report_progress()
+            await self.dashboard.update_worker(worker_slot, status="NetErr", failures_delta=1)
             await self._print_worker(rid, f"NetworkError: {ne}", style="red")
             return {
                 "id": rid,
@@ -1038,7 +1287,15 @@ class Runner:
         if graph is None:
             self.content_fail += 1
             self.done += 1
+            extra_retries = max(0, attempts - 1)
+            self.retry_attempts += extra_retries
             await self._report_progress()
+            await self.dashboard.update_worker(
+                worker_slot,
+                status="Invalid",
+                failures_delta=1,
+                retries_delta=extra_retries,
+            )
             await self._print_worker(rid, f"Bad graph; {len(errors)} error(s)", style="red")
             record.update({
                 "graph": None,
@@ -1057,6 +1314,7 @@ class Runner:
         })
 
         # evaluation
+        await self.dashboard.update_worker(worker_slot, status="Eval")
         eval_ok, value, eval_err = (False, None, None)
         if valid:
             try:
@@ -1076,6 +1334,18 @@ class Runner:
             "stats": stats,
         })
 
+        extra_retries = max(0, attempts - 1)
+        if extra_retries:
+            self.retry_attempts += extra_retries
+        if valid:
+            self.valid_graphs += 1
+        await self.dashboard.update_worker(
+            worker_slot,
+            status="Save",
+            success_delta=1,
+            retries_delta=extra_retries,
+            valid_delta=1 if valid else 0,
+        )
         self.success += 1
         self.done += 1
         await self._report_progress()
@@ -1084,8 +1354,11 @@ class Runner:
 
     # ---------- split processing ----------
     async def process_split(self, split: str) -> None:
-        self.console.rule(f"[bold]Processing split: {split}")
+        self.main_status_prefix = split
+        await self.dashboard.set_message(f"Preparing split {split}", style="cyan")
+        await self._refresh_main_row(status=f"{split} prep")
         rows = self._load_dataset_split(split)
+        await self.dashboard.set_message(f"Loaded split {split} ({len(rows)} rows)", style="cyan")
         done = self.already_done_ids(split)
 
         max_rows = len(rows)
@@ -1106,15 +1379,18 @@ class Runner:
         if not selected_indices:
             if max_rows == 0:
                 self.log.info(f"{split}: no examples available after dry-run filtering.")
-                await self._print_main(f"[yellow]Skipping split {split}: no examples available[/yellow]")
+                await self._print_main(f"Skipping split {split}: no examples available", style="yellow")
             else:
                 self.log.info(f"{split}: budget exhausted; skipping remaining {max_rows} example(s).")
-                await self._print_main(f"[yellow]Skipping split {split}: max_problems budget exhausted[/yellow]")
+                await self._print_main(f"Skipping split {split}: max_problems budget exhausted", style="yellow")
+            self.main_status_prefix = f"{split} skip"
+            await self._refresh_main_row(status=f"{split} skip")
             return
 
         self.total += len(selected_indices)
         if self.remaining_budget is not None:
             self.remaining_budget = remaining_budget
+        await self._refresh_main_row()
 
         planned_uncached = sum(1 for idx in selected_indices if f"{split}_{idx:05d}" not in done)
         self.log.info(
@@ -1128,14 +1404,22 @@ class Runner:
                 await self._print_worker(rid, "Skipping (cached)", style="dim")
                 return  # already processed
             async with self.sem:
+                slot = await self._acquire_worker_slot(rid)
+                await self.dashboard.update_worker(slot, status="Ready", problem=rid)
                 await self._print_worker(rid, "Acquired worker slot", style="blue")
                 try:
-                    rec = await self.process_one(split, rid, row["question"], row["answer"])
+                    rec = await self.process_one(split, rid, row["question"], row["answer"], worker_slot=slot)
+                    self.save_record(split, rid, rec)
                 except Exception as exc:
                     self.log.exception("Unhandled exception during processing | split=%s | rid=%s", split, rid)
                     await self._print_worker(rid, f"Unhandled error: {exc}", style="red")
+                    await self.dashboard.update_worker(slot, status="Error")
+                    await self.dashboard.update_worker(slot, failures_delta=1)
+                    await self.dashboard.set_message(f"{rid}: Unhandled error {exc}", style="red")
                     raise
-                self.save_record(split, rid, rec)
+                finally:
+                    await self.dashboard.reset_worker(slot)
+                    await self._release_worker_slot(slot)
 
         tasks = []
         for idx in selected_indices:
@@ -1149,7 +1433,9 @@ class Runner:
 
         # Await all to raise exceptions if any
         await asyncio.gather(*tasks)
-        await self._print_main(f"[green]Finished split {split}[/green]")
+        await self._print_main(f"Finished split {split}", style="green")
+        self.main_status_prefix = f"{split} done"
+        await self._refresh_main_row(status=f"{split} done")
 
     # ---------- Arrow dataset build ----------
     def build_arrow(self) -> None:
@@ -1242,9 +1528,19 @@ class Runner:
             self.console.print("Set env AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_DEPLOYMENT, or use flags.")
             sys.exit(2)
 
-        # Process each split
-        for split in self.splits:
-            await self.process_split(split)
+        with self.dashboard.make_live() as live:
+            self.dashboard.bind_live(live)
+            await self._refresh_main_row(status="Init")
+            try:
+                for split in self.splits:
+                    await self.process_split(split)
+            except Exception as exc:
+                await self.dashboard.set_message(f"Fatal error: {exc}", style="red")
+                raise
+            await self.dashboard.set_message("Splits complete. Building Arrow dataset...", style="cyan")
+            self.main_status_prefix = "Arrow"
+            await self._refresh_main_row(status="Arrow")
+        self.dashboard.bind_live(None)
 
         # Build Arrow dataset at the end as a convenience
         self.build_arrow()
