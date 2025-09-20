@@ -1,14 +1,54 @@
 #!/usr/bin/env python3
 """Generate descriptive analytics and visualisations for GSM8K graph runs.
 
-This script mirrors the output-directory resolution used by
-``gsm8k_graphs.py``: if ``--out_dir`` is not supplied, it falls back to
-``$OUT_DIR`` or ``~/out_dir/gsm8k_graphs``. It expects the Arrow dataset
-saved by ``gsm8k_graphs.py`` at ``<out_dir>/out_final/arrow_dataset``.
+Purpose
+-------
+Transform the cached Arrow dataset produced by ``gsm8k_graphs.py`` into a
+curated markdown report that highlights structural properties of the
+generated computational graphs. The intent is to provide a quick, repeatable
+overview of run quality and interesting edge cases without re-reading raw
+JSON caches.
 
-Outputs are written under ``<out_dir>/report`` and include a markdown
-summary plus supporting plots and computational-graph diagrams for the
-extreme examples of each measured quantity.
+Inputs & Discovery
+------------------
+The script searches for the dataset using the same resolution rules as
+``gsm8k_graphs.py``: an explicit ``--out_dir`` overrides environment
+``$OUT_DIR`` (defaulting to ``~/out_dir/gsm8k_graphs``). It expects the Arrow
+dataset directory at ``<out_dir>/out_final/arrow_dataset``.
+
+Outputs
+-------
+Artifacts are written to ``<out_dir>/<report-subdir>`` (default ``report``):
+
+* ``report.md`` – markdown narrative with summary stats, tables, and extreme
+  examples per metric.
+* ``images/*.png`` – histogram visualisations for each measured quantity and
+  diagrammatic renderings of selected computational graphs.
+
+Workflow Summary
+----------------
+1. Load the Arrow dataset into memory as plain dictionaries.
+2. Enrich records with derived metrics (e.g., nodes+edges, unique op count).
+3. Compute descriptive statistics and save distribution histograms.
+4. Identify extreme examples (lowest/highest) per metric and render their
+   graphs using a simple topological layout.
+5. Assemble all findings into a markdown report with inline image references.
+
+Graph Rendering Overview
+------------------------
+Nodes are arranged by topological depth; within each depth bucket they are
+spaced evenly along the x-axis. Directed edges are drawn as arrow patches.
+The renderer is defensive—invalid graphs are skipped rather than crash the
+report generation pipeline.
+
+Extensibility Notes
+-------------------
+* New metrics can be added by appending to the ``quantities`` list and
+  providing any additional derived fields necessary in the preprocessing loop.
+* The plotting utilities centralise styling so future tweaks (e.g., seaborn)
+  only require changes in one place.
+* This script deliberately avoids relying on private structures from
+  ``gsm8k_graphs.py``; it only consumes data persisted in the Arrow dataset.
 """
 
 from __future__ import annotations
