@@ -100,6 +100,7 @@ import logging
 from datasets import load_dataset, Dataset, DatasetDict
 import pyarrow as pa
 import pyarrow.dataset as pads
+from nanugpt import utils
 
 
 # -----------------------------
@@ -115,7 +116,9 @@ class Config:
     api_version: str = os.environ.get("OPENAI_API_VERSION", "2024-06-01")
 
     # Run controls
-    outdir: str = "./out/gsm8k_graphs"
+    # Final output directory. If not provided, we derive it at runtime as:
+    #   os.environ.get('OUT_DIR', '~/out_dir') + '/gsm8k_graphs'
+    out_dir: Optional[str] = None
     dataset_name: str = "gsm8k"
     dataset_config: str = "main"
     splits: Tuple[str, ...] = ("train", "test")
@@ -663,9 +666,16 @@ class Runner:
         self.start_time = time.time()
 
         # cache dirs
-        self.outdir = os.path.abspath(cfg.outdir)
-        self.cache_dir = os.path.join(self.outdir, "cache")
-        self.logs_dir = os.path.join(self.outdir, "logs")
+        if not cfg.out_dir or not str(cfg.out_dir).strip():
+            base_out = os.environ.get("OUT_DIR", os.path.expanduser("~/out_dir"))
+            final_out = os.path.join(base_out, "gsm8k_graphs")
+        else:
+            # Respect explicit CLI value as the final directory
+            final_out = cfg.out_dir
+
+        self.out_dir = utils.full_path(final_out, create=True)
+        self.cache_dir = os.path.join(self.out_dir, "cache")
+        self.logs_dir = os.path.join(self.out_dir, "logs")
         os.makedirs(self.cache_dir, exist_ok=True)
         os.makedirs(self.logs_dir, exist_ok=True)
 
@@ -999,7 +1009,7 @@ class Runner:
             return
 
         ds = Dataset.from_list(result_rows)
-        save_path = os.path.join(self.outdir, "arrow_dataset")
+        save_path = os.path.join(self.out_dir, "arrow_dataset")
         ds.save_to_disk(save_path)
         self.console.print(f"[green]Saved Arrow dataset to: {save_path}[/green]")
 
@@ -1025,6 +1035,8 @@ class Runner:
     async def run(self) -> None:
         if self.cfg.build_arrow_only:
             self.build_arrow()
+            # Print final output directory for user clarity
+            self.console.print(f"[bold green]Output directory:[/bold green] {self.out_dir}")
             return
 
         # Basic sanity checks
@@ -1039,6 +1051,8 @@ class Runner:
 
         # Build Arrow dataset at the end as a convenience
         self.build_arrow()
+        # Print final output directory for user clarity
+        self.console.print(f"[bold green]Output directory:[/bold green] {self.out_dir}")
 
 
 # -----------------------------
@@ -1047,7 +1061,9 @@ class Runner:
 
 def parse_args(argv: Optional[List[str]] = None) -> Config:
     p = argparse.ArgumentParser(description="GSM8K → computational graphs via Azure OpenAI (GPT-5).")
-    p.add_argument("--outdir", type=str, default=None, help="Output directory (cache + logs + arrow).")
+    # Standardize to --out_dir; keep --outdir as a backward-compatible alias
+    p.add_argument("--out_dir", "--outdir", dest="out_dir", type=str, default=None,
+                   help="Output directory (cache + logs + arrow). If not set, uses $OUT_DIR or ~/out_dir, with subdir 'gsm8k_graphs'.")
     p.add_argument("--dataset", type=str, default=None, help="Hugging Face dataset name (default: gsm8k).")
     p.add_argument("--config", type=str, default=None, help="Dataset config (default: main).")
     p.add_argument("--splits", type=str, nargs="+", default=None, help="Splits to process (default: train test).")
@@ -1072,7 +1088,7 @@ def parse_args(argv: Optional[List[str]] = None) -> Config:
     cfg = Config()
 
     # Override from CLI
-    if args.outdir: cfg.outdir = args.outdir
+    if args.out_dir: cfg.out_dir = args.out_dir
     if args.dataset: cfg.dataset_name = args.dataset
     if args.config: cfg.dataset_config = args.config
     if args.splits: cfg.splits = tuple(args.splits)
