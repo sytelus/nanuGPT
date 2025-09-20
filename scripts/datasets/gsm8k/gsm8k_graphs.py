@@ -123,13 +123,13 @@ class Config:
     dataset_config: str = "main"
     splits: Tuple[str, ...] = ("train", "test")
     max_workers: int = 8
-    request_timeout_s: int = 120
+    request_timeout_s: Optional[int] = None
     network_max_retries: int = 8
     content_max_attempts: int = 3   # model "repair" attempts for invalid graphs
     dry_run: int = 0                # if >0, only process this many per split
 
     # Prompt knobs
-    temperature: float = 0.2
+    temperature: Optional[float] = None
     seed: Optional[int] = 7
 
     # Build Arrow dataset from cached jsonl even without calling the API
@@ -157,15 +157,16 @@ class AOAI:
         self.api_version = cfg.api_version
 
     async def chat(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None,
-                   tool_choice: Optional[Dict[str, Any]] = None, timeout_s: int = 120,
-                   temperature: float = 0.2, seed: Optional[int] = None) -> Dict[str, Any]:
+                   tool_choice: Optional[Dict[str, Any]] = None, timeout_s: Optional[int] = None,
+                   temperature: Optional[float] = None, seed: Optional[int] = None) -> Dict[str, Any]:
 
         # The openai client uses kwargs for Azure specifics.
-        kwargs = dict(
+        kwargs: Dict[str, Any] = dict(
             model=self.deployment,
             messages=messages,
-            temperature=temperature,
         )
+        if temperature is not None:
+            kwargs["temperature"] = temperature
         if tools is not None:
             kwargs["tools"] = tools
         if tool_choice is not None:
@@ -173,10 +174,13 @@ class AOAI:
         if seed is not None:
             kwargs["seed"] = seed
 
-        resp = await asyncio.wait_for(
-            self.client.chat.completions.create(**kwargs),
-            timeout=timeout_s
-        )
+        if timeout_s is not None:
+            resp = await asyncio.wait_for(
+                self.client.chat.completions.create(**kwargs),
+                timeout=timeout_s
+            )
+        else:
+            resp = await self.client.chat.completions.create(**kwargs)
         return resp.to_dict_recursive() if hasattr(resp, "to_dict_recursive") else resp
 
 
@@ -706,7 +710,7 @@ class Runner:
         self.bytes_written += os.path.getsize(p)
 
     # ---------- model call & repair ----------
-        async def call_model_once(self, messages: List[Dict[str, Any]], is_repair: bool = False) -> Dict[str, Any]:
+    async def call_model_once(self, messages: List[Dict[str, Any]], is_repair: bool = False) -> Dict[str, Any]:
         attempts = 0
         delay = 1.0
         while True:
@@ -731,21 +735,6 @@ class Runner:
                 if _is_transient_exception(e):
                     raise TransientNetworkError(str(e))
                 raise
-
-        try:
-            resp = await self.aoai.chat(
-                messages=messages,
-                tools=tool_schema(),
-                tool_choice={"type": "function", "function": {"name": "emit_graph"}},
-                timeout_s=self.cfg.request_timeout_s,
-                temperature=self.cfg.temperature,
-                seed=self.cfg.seed,
-            )
-            return resp
-        except Exception as e:
-            if _is_transient_exception(e):
-                raise TransientNetworkError(str(e))
-            raise
 
     def extract_graph(self, resp: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str], Dict[str, Any]]:
         """Try to extract the function-call arguments or JSON content as graph."""
