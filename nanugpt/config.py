@@ -190,7 +190,8 @@ def deep_update(d:MutableMapping, u:Mapping, create_map:Callable[[],MutableMappi
                 d[k] = target
             d[k] = deep_update(d[k], v, create_map)
         else:
-            d[k] = v
+            if k != _PREFIX_INHERIT: # we don't copy inherit key to final dict
+                d[k] = v
     return d
 
 def set_env_vars(root_d:MutableMapping):

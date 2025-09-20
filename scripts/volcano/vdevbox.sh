@@ -31,36 +31,39 @@ export NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-0}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
 
 if [ "$#" -eq 0 ]; then
-  # default GPU devbox vars
-  export JOB_NAME=${USER_ALIAS}-devbox
-  export GPUS_PER_NODE=${GPUS_PER_NODE:-8}
-  export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"nvcr.io/nvidia/pytorch:25.08-py3"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
+#   # default GPU devbox vars
+#   export JOB_NAME=${USER_ALIAS}-devbox
+#   export GPUS_PER_NODE=${GPUS_PER_NODE:-8}
+#   export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"nvcr.io/nvidia/pytorch:25.08-py3"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
 
-  export MEMORY_SIZE_LIMIT=${MEMORY_SIZE_LIMIT:-100Gi}
-  export CPU_REQUESTS=${CPU_REQUESTS:-192}
-  export MEMORY_REQUESTS=${MEMORY_REQUESTS:-2600Gi}
-  export RDMA_REQUESTS=${RDMA_REQUESTS:-1}
+#   export MEMORY_SIZE_LIMIT=${MEMORY_SIZE_LIMIT:-100Gi}
+#   export CPU_REQUESTS=${CPU_REQUESTS:-192}
+#   export MEMORY_REQUESTS=${MEMORY_REQUESTS:-2600Gi}
+#   export RDMA_REQUESTS=${RDMA_REQUESTS:-1}
 
-  # good defaults for Pytorch
-  # avoid OOM errors by allowing segments to expand
-  export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
-  # turn on heavy optimizations in torchinductor
-  export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=${TORCHINDUCTOR_COORDINATE_DESCENT_TUNING:-1}
+#   # good defaults for Pytorch
+#   # avoid OOM errors by allowing segments to expand
+#   export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
+#   # turn on heavy optimizations in torchinductor
+#   export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=${TORCHINDUCTOR_COORDINATE_DESCENT_TUNING:-1}
 
-  export TOLERENCE_YAML='tolerations:
-            - key: "nvidia.com/gpu"
-              operator: "Exists"
-              effect: "NoSchedule"
-'
-  # if RDMA_REQUESTS is 1 then add nvidia gpu toleration as well
-  if [[ "${RDMA_REQUESTS}" -eq 1 ]]; then
-    TOLERENCE_YAML+='
-            - key: "rdma"
-              operator: "Exists"
-              effect: "NoSchedule"
-'
-  fi
-  export RDMA_YAML="rdma/rdma_shared_device_a: \"${RDMA_REQUESTS}\""
+#   export TOLERENCE_YAML='tolerations:
+#             - key: "nvidia.com/gpu"
+#               operator: "Exists"
+#               effect: "NoSchedule"
+# '
+#   # if RDMA_REQUESTS is 1 then add nvidia gpu toleration as well
+#   if [[ "${RDMA_REQUESTS}" -eq 1 ]]; then
+#     TOLERENCE_YAML+='
+#             - key: "rdma"
+#               operator: "Exists"
+#               effect: "NoSchedule"
+# '
+#   fi
+#   export RDMA_YAML="rdma/rdma_shared_device_a: \"${RDMA_REQUESTS}\""
+  echo "GPU devbox is not permitted on this cluster, use --cpu option" >&2
+  echo "Usage: $0 [--cpu]" >&2
+  exit 1
 else
   if [[ "$1" == "--cpu" ]]; then
     # CPU only devbox

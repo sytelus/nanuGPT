@@ -24,9 +24,9 @@ model:
     n_head: 12
     context_length: 1024
 
-# scaler:
-#   module: 'nanugpt.scalers.keller_scaler.get_scaler'
-#   module_kwargs: {}
+scaler:
+  module: 'nanugpt.scalers.keller_scaler.get_scaler'
+  module_kwargs: {}
 
 training:
   device_batch_size: 64
