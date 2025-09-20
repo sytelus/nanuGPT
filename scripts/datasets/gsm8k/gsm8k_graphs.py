@@ -919,6 +919,7 @@ class Runner:
             graph, raw, errors, attempts = await self.build_or_repair_graph(question, rid=rid)
         except TransientNetworkError as ne:
             self.net_fail += 1
+            self.done += 1
             await self._report_progress()
             await self._print_worker(rid, f"NetworkError: {ne}", style="red")
             return {
@@ -942,6 +943,7 @@ class Runner:
 
         if graph is None:
             self.content_fail += 1
+            self.done += 1
             await self._report_progress()
             await self._print_worker(rid, f"Bad graph; {len(errors)} error(s)", style="red")
             record.update({
@@ -981,6 +983,7 @@ class Runner:
         })
 
         self.success += 1
+        self.done += 1
         await self._report_progress()
         await self._print_worker(rid, f"Done. valid={bool(valid)} match={bool(match)} attempts={attempts}", style="green" if valid else "yellow")
         return record
@@ -1003,8 +1006,6 @@ class Runner:
                 await self._print_worker(rid, "Acquired worker slot", style="blue")
                 rec = await self.process_one(split, rid, row["question"], row["answer"])
                 self.save_record(split, rid, rec)
-                self.done += 1
-                await self._report_progress()
 
         tasks = []
         for idx, row in enumerate(ds):
