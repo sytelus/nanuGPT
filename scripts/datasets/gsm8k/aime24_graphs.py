@@ -2,12 +2,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-GSM8K → Computational Graphs (DAG) via Azure OpenAI (GPT-5)
-==========================================================
+AIME 2024 → Computational Graphs (DAG) via Azure OpenAI (GPT-5)
+==============================================================
 
 What this script does
 ---------------------
-1) Downloads the GSM8K dataset from Hugging Face ("main" config; train & test splits).
+1) Downloads the AIME 2024 dataset from Hugging Face (`HuggingFaceH4/aime_2024`).
 2) For each problem, asks a GPT-5 model (via Azure OpenAI) to emit a *computational graph*
    as JSON using a constrained function-call ("tools") schema.
 3) Validates:
@@ -20,7 +20,7 @@ What this script does
    Hugging Face Arrow dataset on disk with the original columns + graph + metadata.
 
 Key features for robustness
----------------------------
+--------------------------
 - Exponential backoff + jitter for transient API failures (rate limiting, timeouts).
 - Content-repair loop if the model returns invalid JSON/graph (up to N attempts).
 - Parallelism (async) with a bounded concurrency semaphore.
@@ -47,21 +47,16 @@ You must provide Azure OpenAI details either via environment variables or comman
 
 Example
 -------
-python gsm8k_graphs_pipeline.py \
-  --outdir ./out/gsm8k_graphs \
-  --dataset gsm8k --config main \
-  --splits train test \
-  --max-workers 8 \
-  --dry-run 50
+python aime24_graphs.py   --outdir ./out/aime24_graphs   --max-workers 8   --dry-run 10
 
 At the end, you can build the Arrow dataset:
-python gsm8k_graphs_pipeline.py --outdir ./out/gsm8k_graphs --build-arrow
+python aime24_graphs.py --outdir ./out/aime24_graphs --build-arrow
 
 Notes
 -----
 - This script targets Azure OpenAI Chat Completions API with "tools" (function calling).
 - If your Azure deployment or API version differs, set them via flags or environment.
-- The validator/evaluator supports typical middle-school math ops; unknown ops won't crash
+- The validator/evaluator supports typical competition math ops; unknown ops won't crash
   validation but will likely prevent evaluation; the script records those gracefully.
 
 """
@@ -117,10 +112,10 @@ class Config:
 
     # Run controls
     # Final output directory. If not provided, we derive it at runtime as:
-    #   os.environ.get('OUT_DIR', '~/out_dir') + '/gsm8k_graphs'
+    #   os.environ.get('OUT_DIR', '~/out_dir') + '/aime24_graphs'
     out_dir: Optional[str] = None
-    dataset_name: str = "gsm8k"
-    dataset_config: str = "main"
+    dataset_name: str = "HuggingFaceH4/aime_2024"
+    dataset_config: str = "default"
     splits: Optional[Tuple[str, ...]] = None  # if None, auto-detect all dataset splits
     max_workers: int = 8
     request_timeout_s: Optional[int] = None
@@ -135,6 +130,12 @@ class Config:
 
     # Build Arrow dataset from cached jsonl even without calling the API
     build_arrow_only: bool = False
+
+    # Dataset column mapping
+    question_field: str = "problem"
+    answer_field: str = "answer"
+    solution_field: Optional[str] = "solution"
+    source_meta_fields: Tuple[str, ...] = ("id", "url", "year")
 
 
 # -----------------------------
@@ -514,7 +515,7 @@ def json_dumps(obj: Any) -> str:
 
 def parse_gold_answer(ans: str) -> Optional[float]:
     """
-    GSM8K answers often end with '#### 42'. Extract the trailing number.
+    AIME-style answers often end with '#### 42'. Extract the trailing number.
     If not found, fallback to the last number in the string.
     """
     if not ans:
@@ -895,10 +896,15 @@ class Runner:
 
         self.splits = tuple(self.cfg.splits)
 
+        self.question_field = self.cfg.question_field
+        self.answer_field = self.cfg.answer_field
+        self.solution_field = self.cfg.solution_field
+        self.source_meta_fields = self.cfg.source_meta_fields
+
         # cache dirs
         if not cfg.out_dir or not str(cfg.out_dir).strip():
             base_out = os.environ.get("OUT_DIR", os.path.expanduser("~/out_dir"))
-            final_out = os.path.join(base_out, "gsm8k_graphs")
+            final_out = os.path.join(base_out, "aime24_graphs")
         else:
             # Respect explicit CLI value as the final directory
             final_out = cfg.out_dir
@@ -924,7 +930,7 @@ class Runner:
             handlers=[RichHandler(console=self.console, rich_tracebacks=True),
                       logging.FileHandler(log_path, encoding="utf-8")]
         )
-        self.log = logging.getLogger("gsm8k-graphs")
+        self.log = logging.getLogger("aime24-graphs")
         self.log.info("Splits to process: %s", ", ".join(self.splits))
 
         # Silence noisy network libraries while the dashboard handles live updates.
@@ -1274,7 +1280,16 @@ class Runner:
         return None, raw_resp if 'raw_resp' in locals() else {}, errors_all, attempts
 
     # ---------- per-record processing ----------
-    async def process_one(self, split: str, rid: str, question: str, answer: str, worker_slot: int) -> Dict[str, Any]:
+    async def process_one(self, split: str, rid: str, row: Dict[str, Any], worker_slot: int) -> Dict[str, Any]:
+        question_raw = row.get(self.question_field)
+        answer_raw = row.get(self.answer_field)
+        if question_raw is None:
+            raise ValueError(f"Row {rid} missing question field '{self.question_field}'.")
+        if answer_raw is None:
+            raise ValueError(f"Row {rid} missing answer field '{self.answer_field}'.")
+
+        question = str(question_raw)
+        answer = str(answer_raw)
         try:
             await self.dashboard.update_worker(worker_slot, status="Start", problem=rid)
             await self._print_worker(rid, "Starting problem")
@@ -1285,7 +1300,7 @@ class Runner:
             await self._report_progress()
             await self.dashboard.update_worker(worker_slot, status="NetErr", failures_delta=1)
             await self._print_worker(rid, f"NetworkError: {ne}", style="red")
-            return {
+            failure_record: Dict[str, Any] = {
                 "id": rid,
                 "split": split,
                 "question": question,
@@ -1294,6 +1309,17 @@ class Runner:
                 "attempts": 0,
                 "ts": dt.datetime.utcnow().isoformat()
             }
+            if self.question_field != "question":
+                failure_record[self.question_field] = question
+            if self.answer_field != "answer":
+                failure_record[self.answer_field] = answer
+            if self.solution_field and self.solution_field in row and row[self.solution_field] is not None:
+                failure_record[self.solution_field] = row[self.solution_field]
+                failure_record["reference_solution"] = str(row[self.solution_field])
+            for field in self.source_meta_fields:
+                if field in row and row[field] is not None:
+                    failure_record[f"source_{field}"] = row[field]
+            return failure_record
 
         record: Dict[str, Any] = {
             "id": rid,
@@ -1303,6 +1329,21 @@ class Runner:
             "ts": dt.datetime.utcnow().isoformat(),
             "attempts": attempts,
         }
+
+        if self.question_field != "question":
+            record[self.question_field] = question
+        if self.answer_field != "answer":
+            record[self.answer_field] = answer
+
+        # Preserve additional dataset metadata when available so downstream analysis has context.
+        if self.solution_field and self.solution_field in row:
+            solution_val = row.get(self.solution_field)
+            if solution_val is not None:
+                record[self.solution_field] = solution_val
+                record["reference_solution"] = str(solution_val)
+        for field in self.source_meta_fields:
+            if field in row and row[field] is not None:
+                record[f"source_{field}"] = row[field]
 
         if graph is None:
             self.content_fail += 1
@@ -1428,7 +1469,7 @@ class Runner:
                 await self.dashboard.update_worker(slot, status="Ready", problem=rid)
                 await self._print_worker(rid, "Acquired worker slot", style="blue")
                 try:
-                    rec = await self.process_one(split, rid, row["question"], row["answer"], worker_slot=slot)
+                    rec = await self.process_one(split, rid, row, worker_slot=slot)
                     self.save_record(split, rid, rec)
                 except Exception as exc:
                     self.log.exception("Unhandled exception during processing | split=%s | rid=%s", split, rid)
@@ -1576,12 +1617,12 @@ class Runner:
 # -----------------------------
 
 def parse_args(argv: Optional[List[str]] = None) -> Config:
-    p = argparse.ArgumentParser(description="GSM8K → computational graphs via Azure OpenAI (GPT-5).")
+    p = argparse.ArgumentParser(description="AIME 2024 → computational graphs via Azure OpenAI (GPT-5).")
     # Standardize to --out_dir; keep --outdir as a backward-compatible alias
     p.add_argument("--out_dir", "--outdir", dest="out_dir", type=str, default=None,
-                   help="Output directory (cache + logs + arrow). If not set, uses $OUT_DIR or ~/out_dir, with subdir 'gsm8k_graphs'.")
-    p.add_argument("--dataset", type=str, default=None, help="Hugging Face dataset name (default: gsm8k).")
-    p.add_argument("--config", type=str, default=None, help="Dataset config (default: main).")
+                   help="Output directory (cache + logs + arrow). If not set, uses $OUT_DIR or ~/out_dir, with subdir 'aime24_graphs'.")
+    p.add_argument("--dataset", type=str, default=None, help="Hugging Face dataset name (default: HuggingFaceH4/aime_2024).")
+    p.add_argument("--config", type=str, default=None, help="Dataset config (default: default).")
     p.add_argument("--splits", type=str, nargs="+", default=None,
                    help="Splits to process. If omitted, all dataset splits are used.")
     p.add_argument("--max-workers", type=int, default=None, help="Max concurrent API calls.")
