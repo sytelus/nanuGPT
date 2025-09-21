@@ -389,6 +389,31 @@ def select_extremes(
     return lows, highs
 
 
+def select_nearest(
+    records: Sequence[Dict[str, Any]],
+    key: str,
+    target: Optional[float],
+) -> Optional[Dict[str, Any]]:
+    if target is None or math.isnan(target) or math.isinf(target):
+        return None
+
+    closest: Optional[Dict[str, Any]] = None
+    best_delta = float("inf")
+    for rec in records:
+        value = rec.get(key)
+        if value is None:
+            continue
+        try:
+            as_float = float(value)
+        except (TypeError, ValueError):
+            continue
+        delta = abs(as_float - target)
+        if delta < best_delta:
+            best_delta = delta
+            closest = rec
+    return closest
+
+
 def summarise_boolean(values: Iterable[bool]) -> Tuple[int, int, float]:
     total = 0
     positives = 0
@@ -700,7 +725,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         lows, highs = select_extremes(records, qty.key, count=args.extreme_samples)
 
         def describe_examples(label: str, examples: List[Dict[str, Any]]) -> None:
-            section_lines.append(f"**{label} examples**")
+            heading = "example" if len(examples) == 1 else "examples"
+            section_lines.append(f"**{label} {heading}**")
             if not examples:
                 section_lines.append("")
                 section_lines.append("_No examples available._")
@@ -744,7 +770,22 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                     section_lines.append("  - Graph diagram unavailable.")
             section_lines.append("")
 
+        central_label: Optional[str] = None
+        central_example: Optional[Dict[str, Any]] = None
+        if stats is not None:
+            target_value = stats.median
+            central_label = "Median"
+            if math.isnan(target_value) or math.isinf(target_value):
+                target_value = stats.mean
+                central_label = "Mean"
+            central_example = select_nearest(records, qty.key, target_value)
+            if central_example is None and central_label == "Median":
+                central_label = "Mean"
+                central_example = select_nearest(records, qty.key, stats.mean)
+
         describe_examples("Minimum", lows)
+        if central_example and central_label:
+            describe_examples(central_label, [central_example])
         describe_examples("Maximum", highs)
 
         quantity_sections.extend(section_lines)
