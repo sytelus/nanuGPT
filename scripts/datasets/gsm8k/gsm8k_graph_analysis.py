@@ -117,6 +117,11 @@ def ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
 
+def log(message: str) -> None:
+    """Lightweight progress logging to stdout."""
+    print(f"[gsm8k_analysis] {message}")
+
+
 def load_arrow_dataset(out_dir: str):
     arrow_path = os.path.join(out_dir, "out_final", "arrow_dataset")
     if not os.path.exists(arrow_path):
@@ -395,8 +400,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     images_dir = os.path.join(report_dir, "images")
     ensure_dir(images_dir)
 
+    log(f"Resolved output directory: {out_dir}")
+    log(f"Report directory: {report_dir}")
+
     dataset, arrow_path = load_arrow_dataset(out_dir)
+    log(f"Loading Arrow dataset from {arrow_path} ...")
     records: List[Dict[str, Any]] = [dict(row) for row in dataset]
+    log(f"Loaded {len(records)} records. Deriving per-graph metrics...")
 
     # Global accumulators for cross-cutting analysis.
     ops_counter: Counter[str] = Counter()
@@ -491,6 +501,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             rec["max_inputs_per_node"] = None
             rec["input_const_ratio"] = None
 
+    log("Derived metrics complete.")
     total_records = len(records)
 
     quantities: List[Quantity] = [
@@ -589,6 +600,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     ]
 
     for qty in quantities:
+        log(f"Analyzing metric: {qty.title}")
         values = safe_float_list(rec.get(qty.key) for rec in records)
         stats = compute_statistics(values)
         stat_rows.append((qty.title, stats))
@@ -604,6 +616,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         if values:
             hist_fname = f"{qty.key}_hist.png"
             hist_path = os.path.join(images_dir, hist_fname)
+            log(f"  - Writing histogram to {hist_path}")
             histogram(values, title=f"Distribution of {qty.title}", xlabel=qty.title, path=hist_path)
             section_lines.append(f"![Distribution of {qty.title}](images/{hist_fname})")
             section_lines.append("")
@@ -657,6 +670,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         quantity_sections.extend(section_lines)
 
     # Operator usage overview
+    log("Summarizing operator usage ...")
     operator_sections: List[str] = [
         "## Operator Landscape",
         "",
@@ -685,6 +699,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     quantity_sections.extend(operator_sections)
 
     # Compare outcomes (answer match) across metrics
+    log("Comparing metrics across answer outcomes ...")
     outcome_sections: List[str] = [
         "## Outcome Comparison",
         "",
@@ -743,6 +758,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     quantity_sections.extend(outcome_sections)
 
     report_path = os.path.join(report_dir, "report.md")
+    log(f"Rendering markdown report to {report_path}")
     render_markdown(
         report_path=report_path,
         arrow_path=arrow_path,
@@ -766,6 +782,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         for img in image_files:
             artifacts.append(("Image", img))
 
+    log("Markdown report and image assets generated.")
     print("Analysis complete. Artifacts:")
     for label, path in artifacts:
         print(f"  - {label}: {path}")
