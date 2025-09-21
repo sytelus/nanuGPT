@@ -85,6 +85,8 @@ from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
 import orjson
+import httpx
+import httpcore
 from tenacity import retry, stop_after_attempt, wait_exponential_jitter, retry_if_exception_type
 
 # Rich for pretty progress and logs
@@ -317,7 +319,7 @@ class Dashboard:
 # Azure OpenAI client (async)
 # -----------------------------
 
-from openai import AsyncAzureOpenAI
+from openai import AsyncAzureOpenAI, APITimeoutError
 
 
 class AOAI:
@@ -850,9 +852,36 @@ class TransientNetworkError(Exception):
 
 
 def _is_transient_exception(exc: BaseException) -> bool:
-    text = str(exc).lower()
-    for needle in ["timeout", "temporarily unavailable", "rate limit", "429", "connection reset",
-                   "service unavailable", "gateway timeout", "502", "503", "504", "dns", "retry"]:
+    if isinstance(
+        exc,
+        (
+            asyncio.TimeoutError,
+            asyncio.CancelledError,
+            httpx.TimeoutException,
+            httpcore.TimeoutException,
+            APITimeoutError,
+        ),
+    ):
+        return True
+
+    text = (str(exc) or "").lower()
+    if not text and exc.args:
+        text = " ".join(str(arg).lower() for arg in exc.args if isinstance(arg, (str, bytes)))
+
+    for needle in [
+        "timeout",
+        "temporarily unavailable",
+        "rate limit",
+        "429",
+        "connection reset",
+        "service unavailable",
+        "gateway timeout",
+        "502",
+        "503",
+        "504",
+        "dns",
+        "retry",
+    ]:
         if needle in text:
             return True
     return False
