@@ -768,6 +768,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 value = rec.get(qty.key)
                 rid = rec.get("id") or "?"
                 question = rec.get("question") or "(question unavailable)"
+                answer = rec.get("answer") or "(answer unavailable)"
                 graph_json = rec.get("graph_json")
                 image_rel = None
                 if graph_json:
@@ -792,6 +793,15 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 question_text = question if isinstance(question, str) else str(question)
                 question_lines = question_text.splitlines() or [question_text]
                 for line in question_lines:
+                    section_lines.append(f"    {line}")
+                section_lines.append("    ```")
+                section_lines.append("")
+                section_lines.append("  - Answer:")
+                section_lines.append("")
+                section_lines.append("    ```text")
+                answer_text = answer if isinstance(answer, str) else str(answer)
+                answer_lines = answer_text.splitlines() or [answer_text]
+                for line in answer_lines:
                     section_lines.append(f"    {line}")
                 section_lines.append("    ```")
                 section_lines.append("")
