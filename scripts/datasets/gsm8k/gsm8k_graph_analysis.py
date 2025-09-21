@@ -752,7 +752,23 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         quantity_sections=quantity_sections,
     )
 
-    print(f"Report written to {report_path}")
+    artifacts = [
+        ("Report", report_path),
+    ]
+
+    # Collect generated images for quick visibility.
+    if os.path.isdir(images_dir):
+        image_files = sorted(
+            os.path.join(images_dir, name)
+            for name in os.listdir(images_dir)
+            if name.lower().endswith(".png")
+        )
+        for img in image_files:
+            artifacts.append(("Image", img))
+
+    print("Analysis complete. Artifacts:")
+    for label, path in artifacts:
+        print(f"  - {label}: {path}")
 
 
 if __name__ == "__main__":
