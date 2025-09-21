@@ -154,11 +154,34 @@ RNG_SEED = None  # set to int for reproducibility; None mixes in system entropy
 
 # ------------------------------ Configuration ------------------------------
 
-COMBINE_PROMPT_TEMPLATE = """Consider below {n} math problems. Each of these problems have one or many input values and only one output value. Only the direct numerical values specified in the problem can be considered as input value. We want to combine these {n} problems to form a one single problem in the following way:
+GRAPH_INSTRUCTIONS= [
+    # n_problems = 1
+    "",
 
-- Output of Problem 1 should become input for problem 3 as well as {n}.
-- Output of Problem 2 should become input for problem 3 as well as {n}.
-- Output of Problem 3 should become input for problem {n}.
+    # n_problems = 2
+    """- Output of Problem 1 should become input for Problem {n}.""",
+
+    # n_problems = 3
+    """- Output of Problem 1 should become input for Problem 2 as well as Problem {n}.
+- Output of Problem 2 should become input for Problem {n}.""",
+
+    # n_problems = 4
+    """- Output of Problem 1 should become input for Problem 3 as well as Problem {n}.
+- Output of Problem 2 should become input for Problem 3 as well as Problem {n}.
+- Output of Problem 3 should become input for Problem {n}.""",
+
+    # n_problems = 5
+    """- Output of Problem 1 should become input for Problem 2 as well as Problem {n}.
+- Output of Problem 2 should become input for Problem 4 as well as Problem {n}.
+- Output of Problem 3 should become input for Problem 4.
+- Output of Problem 4 should become input for Problem {n}.""",
+]
+
+COMBINE_PROMPT_TEMPLATE = """Consider below {n} math problems. Each of these problems have one or many input values and only one output value. Only the direct numerical values specified in the problem can be considered as input value.
+
+We want to combine these {n} problems to form a one single problem in the following way:
+
+{graph_instructions}
 - Output of Problem {n} should become the final output of the combined problem and this output value should remain exactly same as it is in original Problem {n}.
 
 When replacing input of a problem with output of another problem, you must make sure that final input value of the problem remains same as in original problem. To achieve this goal, you might chose to transform output value of a problem by adding some constant or multiplying with some constant to convert it before making it as an input value for the another problem.
@@ -838,6 +861,7 @@ def build_combine_prompt(problem_texts: List[str]) -> str:
         problem_blocks.append(block)
     return COMBINE_PROMPT_TEMPLATE.format(
         n=len(problem_texts),
+        graph_instructions=GRAPH_INSTRUCTIONS[len(problem_texts)-1].format(n=len(problem_texts)),
         problem_blocks="\n\n".join(problem_blocks),
     )
 

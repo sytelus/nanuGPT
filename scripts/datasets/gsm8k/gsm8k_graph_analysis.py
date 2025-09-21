@@ -274,7 +274,7 @@ def draw_graph_diagram(graph: Dict[str, Any], path: str, title: str) -> bool:
     fig_w = max(6.0, x_span * 1.6 + 2.5)
     fig_h = max(4.0, y_span * 1.6 + 2.5)
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
-    ax.set_aspect("equal", adjustable="datalim")
+    ax.set_aspect("equal", adjustable="box")
 
     node_radius = 0.22
 
