@@ -5,17 +5,17 @@ gsm8k_nprobs.py
 
 Purpose
 -------
-Create a new dataset by *combining* `n_vars` randomly chosen GSM8K train problems into a single
+Create a new dataset by *combining* `n_problems` randomly chosen GSM8K train problems into a single
 problem whose final answer is guaranteed to match the original answer of the final selected problem.
 For each attempt we:
-  1) Pick `n_vars` random, distinct problems from GSM8K (train).
+  1) Pick `n_problems` random, distinct problems from GSM8K (train).
   2) Ask Azure OpenAI to *rewrite* (i.e., combine) those problems into one using a strict template.
   3) Ask Azure OpenAI to *solve* the combined problem, returning only the final numeric answer.
   4) Validate that the final numeric answer equals the GSM8K final answer of the last selected problem.
-  5) If valid, append to `out_dataset/problems{n_vars}_success/train.jsonl` in GSM8K format
+  5) If valid, append to `out_dataset/problems{n_problems}_success/train.jsonl` in GSM8K format
      (fields: {"question": <combined problem>, "answer": "#### <final_number>"}).
-     We also log provenance in `out_dataset/problems{n_vars}_success/meta.jsonl`.
-  6) Otherwise, append a detailed record to `out_dataset/problems{n_vars}_fail/train.jsonl` for debugging.
+     We also log provenance in `out_dataset/problems{n_problems}_success/meta.jsonl`.
+  6) Otherwise, append a detailed record to `out_dataset/problems{n_problems}_fail/train.jsonl` for debugging.
 
 The script is designed to be:
   - **Robust**: Retries with exponential backoff for Azure API calls and file writes.
@@ -33,7 +33,7 @@ Non-obvious design choices (and deviations from the user guideline)
    corpus contract that the final answer follows `####` while avoiding unnecessary content.
 
 2) **Provenance logging**: To fulfill the requirement to "log unique IDs" of the base problems
-   in the *final output*, we add `out_dataset/problems{n_vars}_success/meta.jsonl` with, for each
+   in the *final output*, we add `out_dataset/problems{n_problems}_success/meta.jsonl` with, for each
    generated item, the ordered list of source problem IDs, a content hash of the combined problem, and
    timestamps. This keeps the success dataset strictly GSM8K-formatted while still shipping the
    needed debug info alongside it.
@@ -63,13 +63,13 @@ Quick Start
    export OPENAI_API_VERSION="2024-10-01-preview"   # or the version you use
    export AZURE_OPENAI_DEPLOYMENT="<your-chat-deployment-name>"
 
-3) Optional: choose where to write output (default: ./gsm8k_{n_vars}probs in current dir)
+3) Optional: choose where to write output (default: ./gsm8k_{n_problems}probs in current dir)
    export OUT_DIR="/path/to/output_root"
 
 4) Run:
-   python gsm8k_nprobs.py --max_problem 200 --max_workers 8 --n_vars 3
+   python gsm8k_nprobs.py --max_samples 200 --max_workers 8 --n_problems 3
 
-Directory Layout (created under OUT_DIR/gsm8k_{n_vars}probs)
+Directory Layout (created under OUT_DIR/gsm8k_{n_problems}probs)
 -----------------------------------------------------
 in_dataset/
   gsm8k_train.jsonl             # input GSM8K train data with sequential IDs for reference
@@ -77,10 +77,10 @@ working_dir/
   attempts.jsonl                # every attempt appended here (success or fail), for provenance
   seen_combos.txt               # set of processed combinations (one "i,j,k,..." per line) to avoid repeats
 out_dataset/
-  problems{n_vars}_success/
+  problems{n_problems}_success/
     train.jsonl                 # GSM8K-format output (question, answer)
     meta.jsonl                  # provenance: source problem IDs, hashes
-  problems{n_vars}_fail/
+  problems{n_problems}_fail/
     train.jsonl                 # detailed diagnostics for failed attempts
 
 Notes
@@ -173,7 +173,8 @@ SYSTEM_SOLVE = "You are a careful math solver. Return only the final numeric ans
 
 
 # Reasonable defaults; can be overridden by CLI flags
-DEFAULT_MAX_PROBLEM = 2000
+DEFAULT_MAX_SAMPLES = 2000
+DEFAULT_N_PROBLEMS = 4
 DEFAULT_MAX_WORKERS = 8
 DEFAULT_MAX_RETRIES = 8
 DEFAULT_REQ_TIMEOUT = 300.0  # 5 minutes
@@ -1382,7 +1383,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Combine GSM8K problems in parallel via Azure OpenAI.")
     p.add_argument("--out_dir", type=str, default=os.environ.get("OUT_DIR", "."),
                    help="Root directory for outputs (default: $OUT_DIR or current directory).")
-    p.add_argument("--max_problem", type=int, default=DEFAULT_MAX_PROBLEM,
+    p.add_argument("--max_samples", type=int, default=DEFAULT_MAX_SAMPLES,
                    help="Number of successful combined problems to generate (default: 200).")
     p.add_argument("--max_workers", type=int, default=DEFAULT_MAX_WORKERS,
                    help=f"Number of parallel workers (default: {DEFAULT_MAX_WORKERS}).")
@@ -1390,7 +1391,7 @@ def parse_args() -> argparse.Namespace:
                    help=f"Max retries per Azure API call (default: {DEFAULT_MAX_RETRIES}).")
     p.add_argument("--timeout", type=float, default=DEFAULT_REQ_TIMEOUT,
                    help=f"Azure API request timeout in seconds (default: {DEFAULT_REQ_TIMEOUT}).")
-    p.add_argument("--n_vars", type=int, default=3,
+    p.add_argument("--n_problems", type=int, default=DEFAULT_N_PROBLEMS,
                    help="Number of GSM8K problems to combine per attempt (default: 3).")
     p.add_argument("--quiet", action="store_true", help="Reduce console output (hides the live dashboard).")
     p.add_argument("--combine-temperature", type=float, default=None,
@@ -1412,9 +1413,9 @@ def main() -> None:
         raise RuntimeError("The `rich` package is required. Install with: pip install rich")
     console = Console()
 
-    combo_size = int(args.n_vars)
+    combo_size = int(args.n_problems)
     if combo_size < 2:
-        console.print("[red]--n_vars must be at least 2 so there is something to combine.[/]")
+        console.print("[red]--n_problems must be at least 2 so there is something to combine.[/]")
         sys.exit(2)
 
     # Logging
@@ -1457,7 +1458,7 @@ def main() -> None:
     )
 
     # Ctrl-C handling for graceful stop
-    state = SharedState(target_success=int(args.max_problem), max_workers=int(args.max_workers))
+    state = SharedState(target_success=int(args.max_samples), max_workers=int(args.max_workers))
 
     def handle_sigint(signum, frame):
         if not state.stop_event.is_set():
@@ -1479,7 +1480,7 @@ def main() -> None:
     items = download_or_load_gsm8k_train(paths.in_dataset, console)
     if combo_size > len(items):
         console.print(
-            f"[red]--n_vars of {combo_size} exceeds available GSM8K items ({len(items)}).[/]"
+            f"[red]--n_problems of {combo_size} exceeds available GSM8K items ({len(items)}).[/]"
         )
         sys.exit(2)
 
