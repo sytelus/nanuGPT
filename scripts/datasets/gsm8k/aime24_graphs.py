@@ -134,8 +134,6 @@ class Config:
     # Dataset column mapping
     question_field: str = "problem"
     answer_field: str = "answer"
-    solution_field: Optional[str] = "solution"
-    source_meta_fields: Tuple[str, ...] = ("id", "url", "year")
 
 
 # -----------------------------
@@ -898,8 +896,6 @@ class Runner:
 
         self.question_field = self.cfg.question_field
         self.answer_field = self.cfg.answer_field
-        self.solution_field = self.cfg.solution_field
-        self.source_meta_fields = self.cfg.source_meta_fields
 
         # cache dirs
         if not cfg.out_dir or not str(cfg.out_dir).strip():
@@ -1309,16 +1305,6 @@ class Runner:
                 "attempts": 0,
                 "ts": dt.datetime.utcnow().isoformat()
             }
-            if self.question_field != "question":
-                failure_record[self.question_field] = question
-            if self.answer_field != "answer":
-                failure_record[self.answer_field] = answer
-            if self.solution_field and self.solution_field in row and row[self.solution_field] is not None:
-                failure_record[self.solution_field] = row[self.solution_field]
-                failure_record["reference_solution"] = str(row[self.solution_field])
-            for field in self.source_meta_fields:
-                if field in row and row[field] is not None:
-                    failure_record[f"source_{field}"] = row[field]
             return failure_record
 
         record: Dict[str, Any] = {
@@ -1330,20 +1316,6 @@ class Runner:
             "attempts": attempts,
         }
 
-        if self.question_field != "question":
-            record[self.question_field] = question
-        if self.answer_field != "answer":
-            record[self.answer_field] = answer
-
-        # Preserve additional dataset metadata when available so downstream analysis has context.
-        if self.solution_field and self.solution_field in row:
-            solution_val = row.get(self.solution_field)
-            if solution_val is not None:
-                record[self.solution_field] = solution_val
-                record["reference_solution"] = str(solution_val)
-        for field in self.source_meta_fields:
-            if field in row and row[field] is not None:
-                record[f"source_{field}"] = row[field]
 
         if graph is None:
             self.content_fail += 1
