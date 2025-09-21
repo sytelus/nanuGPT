@@ -53,6 +53,8 @@ Extensibility Notes
   only require changes in one place.
 * This script deliberately avoids relying on private structures from
   ``gsm8k_graphs.py``; it only consumes data persisted in the Arrow dataset.
+* Lightweight console logging is handled via the ``log`` helper; replace with a
+  richer logger if structured output is required.
 """
 
 from __future__ import annotations
