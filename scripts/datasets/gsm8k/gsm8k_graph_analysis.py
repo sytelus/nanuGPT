@@ -72,7 +72,7 @@ import numpy as np
 
 try:
     import matplotlib.pyplot as plt
-    from matplotlib.patches import FancyArrowPatch
+    from matplotlib.patches import FancyArrowPatch, Circle
 except Exception as exc:  # pragma: no cover - guarded import
     raise SystemExit(
         "matplotlib is required for plotting. Install it before running this script."
@@ -256,37 +256,108 @@ def draw_graph_diagram(graph: Dict[str, Any], path: str, title: str) -> bool:
     if not isinstance(nodes, list) or not nodes:
         return False
 
+    node_lookup = {
+        node.get("id"): node
+        for node in nodes
+        if isinstance(node, dict) and isinstance(node.get("id"), str)
+    }
+
     edges = build_edges(nodes)
     positions = layout_positions(nodes)
+    if not positions:
+        return False
 
-    fig_w = max(6.0, len(set(level for _, level in positions.items())) * 2.0)
-    fig_h = max(5.0, len(nodes) * 0.4)
+    xs = [pos[0] for pos in positions.values()]
+    ys = [pos[1] for pos in positions.values()]
+    x_span = (max(xs) - min(xs)) if xs else 1.0
+    y_span = (max(ys) - min(ys)) if ys else 1.0
+    fig_w = max(6.0, x_span * 1.6 + 2.5)
+    fig_h = max(4.0, y_span * 1.6 + 2.5)
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    ax.set_aspect("equal", adjustable="datalim")
+
+    node_radius = 0.22
 
     # Draw edges first so nodes overlay them.
     for src, dst in edges:
         if src not in positions or dst not in positions:
             continue
         sx, sy = positions[src]
-        dx, dy = positions[dst]
+        tx, ty = positions[dst]
+        vec_x = tx - sx
+        vec_y = ty - sy
+        distance = math.hypot(vec_x, vec_y)
+        if distance == 0:
+            continue
+        norm_x = vec_x / distance
+        norm_y = vec_y / distance
+        start = (sx + norm_x * (node_radius + 0.02), sy + norm_y * (node_radius + 0.02))
+        end = (tx - norm_x * (node_radius + 0.04), ty - norm_y * (node_radius + 0.04))
         arrow = FancyArrowPatch(
-            (sx, sy),
-            (dx, dy),
-            arrowstyle="->",
-            color="#888888",
-            linewidth=1.5,
-            mutation_scale=12,
+            start,
+            end,
+            arrowstyle="-|>",
+            color="#6b6f72",
+            linewidth=1.6,
+            mutation_scale=15,
             alpha=0.9,
+            zorder=1,
         )
         ax.add_patch(arrow)
 
-    # Draw nodes with labels.
+    # Draw nodes with orbiting labels so longer text remains readable.
     for nid, (x, y) in positions.items():
-        node = next((n for n in nodes if n.get("id") == nid), None)
-        op = node.get("op") if isinstance(node, dict) else "?"
-        display = f"{nid}\n{op}"
-        ax.scatter([x], [y], s=300, color="#4a90e2", edgecolor="black", linewidth=1.0)
-        ax.text(x, y, display, ha="center", va="center", fontsize=9, color="white")
+        circle = Circle(
+            (x, y),
+            radius=node_radius,
+            facecolor="#4a90e2",
+            edgecolor="#1f4b75",
+            linewidth=1.2,
+            alpha=0.95,
+            zorder=2,
+        )
+        ax.add_patch(circle)
+
+        node = node_lookup.get(nid)
+        op = node.get("op") if isinstance(node, dict) else None
+        op_label = str(op) if op is not None else "?"
+        display = f"{nid}\n{op_label}"
+        label_lines = display.splitlines()
+        max_chars = max((len(line) for line in label_lines), default=0)
+        if max_chars <= 8:
+            label_fontsize = 11
+        elif max_chars <= 16:
+            label_fontsize = 10
+        elif max_chars <= 28:
+            label_fontsize = 9
+        else:
+            label_fontsize = 8
+
+        text_x = x + node_radius + 0.12
+        ax.text(
+            text_x,
+            y,
+            display,
+            ha="left",
+            va="center",
+            fontsize=label_fontsize,
+            color="#1b1b1b",
+            linespacing=1.2,
+            bbox={
+                "boxstyle": "round,pad=0.25",
+                "fc": "#ffffff",
+                "ec": "#d0d4d8",
+                "alpha": 0.95,
+            },
+            zorder=3,
+        )
+
+    margin_x = max(0.6, node_radius + 0.4)
+    margin_y = max(0.6, node_radius + 0.4)
+    if xs:
+        ax.set_xlim(min(xs) - margin_x, max(xs) + margin_x)
+    if ys:
+        ax.set_ylim(min(ys) - margin_y, max(ys) + margin_y)
 
     ax.set_title(title)
     ax.axis("off")
@@ -640,7 +711,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 value = rec.get(qty.key)
                 rid = rec.get("id") or "?"
                 question = rec.get("question") or "(question unavailable)"
-                question_preview = textwrap.shorten(question.replace("\n", " "), width=160)
                 graph_json = rec.get("graph_json")
                 image_rel = None
                 if graph_json:
@@ -659,7 +729,15 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                         image_rel = None
 
                 section_lines.append(f"- **{rid}** — {qty.title.lower()} = {format_float(value)}")
-                section_lines.append(f"  - Question: {question_preview}")
+                section_lines.append("  - Question:")
+                section_lines.append("")
+                section_lines.append("    ```text")
+                question_text = question if isinstance(question, str) else str(question)
+                question_lines = question_text.splitlines() or [question_text]
+                for line in question_lines:
+                    section_lines.append(f"    {line}")
+                section_lines.append("    ```")
+                section_lines.append("")
                 if image_rel:
                     section_lines.append(f"  - ![Graph for {rid}]({image_rel})")
                 else:
