@@ -3,18 +3,20 @@
 
 Purpose
 -------
-Transform the cached Arrow dataset produced by ``gsm8k_graphs.py`` into a
-curated markdown report that highlights structural properties of the
-generated computational graphs. The intent is to provide a quick, repeatable
-overview of run quality and interesting edge cases without re-reading raw
-JSON caches.
+Transform the cached Arrow dataset produced by graph generation scripts (e.g.,
+``gsm8k_graphs.py`` or ``aime24_graphs.py``) into a curated markdown report
+that highlights structural properties of the generated computational graphs.
+The intent is to provide a quick, repeatable overview of run quality and
+interesting edge cases without re-reading raw JSON caches.
 
 Inputs & Discovery
 ------------------
-The script searches for the dataset using the same resolution rules as
-``gsm8k_graphs.py``: an explicit ``--out_dir`` overrides environment
-``$OUT_DIR`` (defaulting to ``~/out_dir/gsm8k_graphs``). It expects the Arrow
-dataset directory at ``<out_dir>/out_final/arrow_dataset``.
+The script searches for the dataset using the same resolution rules as the
+graph-generation scripts: an explicit ``--out_dir`` overrides environment
+``$OUT_DIR``. When ``--out_dir`` is omitted, the directory defaults to
+``~/out_dir/<run-subdir>`` with ``run-subdir`` defaulting to
+``gsm8k_graphs``. It expects the Arrow dataset directory at
+``<out_dir>/out_final/arrow_dataset``.
 
 Outputs
 -------
@@ -51,8 +53,8 @@ Extensibility Notes
   providing any additional derived fields necessary in the preprocessing loop.
 * The plotting utilities centralise styling so future tweaks (e.g., seaborn)
   only require changes in one place.
-* This script deliberately avoids relying on private structures from
-  ``gsm8k_graphs.py``; it only consumes data persisted in the Arrow dataset.
+* This script deliberately avoids relying on private structures from the
+  generator scripts; it only consumes data persisted in the Arrow dataset.
 * Lightweight console logging is handled via the ``log`` helper; replace with a
   richer logger if structured output is required.
 """
@@ -104,15 +106,24 @@ class StatSummary:
     maximum: float
 
 
-def resolve_output_dir(cli_out_dir: Optional[str]) -> str:
-    """Match the directory resolution logic from gsm8k_graphs."""
+def normalize_run_subdir(value: Optional[str]) -> str:
+    """Produce a stable subdirectory name for run artefacts."""
 
+    candidate = str(value).strip() if value is not None else ""
+    candidate = candidate.strip("/\\")
+    return candidate or "gsm8k_graphs"
+
+
+def resolve_output_dir(cli_out_dir: Optional[str], run_subdir: str) -> Tuple[str, str]:
+    """Match the directory resolution logic used by graph-generation scripts."""
+
+    normalized = normalize_run_subdir(run_subdir)
     if cli_out_dir and str(cli_out_dir).strip():
         target = cli_out_dir
     else:
         base = os.environ.get("OUT_DIR", os.path.expanduser("~/out_dir"))
-        target = os.path.join(base, "gsm8k_graphs")
-    return os.path.abspath(target)
+        target = os.path.join(base, normalized)
+    return os.path.abspath(target), normalized
 
 
 def ensure_dir(path: str) -> None:
@@ -124,11 +135,17 @@ def log(message: str) -> None:
     print(f"[gsm8k_analysis] {message}")
 
 
-def load_arrow_dataset(out_dir: str):
+def load_arrow_dataset(out_dir: str, run_label: str):
     arrow_path = os.path.join(out_dir, "out_final", "arrow_dataset")
     if not os.path.exists(arrow_path):
+        hint = "Run the corresponding graph generation script first."
+        if run_label:
+            hint = (
+                "Run the graph generation script that produces the "
+                f"'{run_label}' outputs first."
+            )
         raise FileNotFoundError(
-            f"Arrow dataset not found at {arrow_path}. Run gsm8k_graphs.py first."
+            f"Arrow dataset not found at {arrow_path}. {hint}"
         )
     return load_from_disk(arrow_path), arrow_path
 
@@ -446,14 +463,17 @@ def summarise_boolean(values: Iterable[bool]) -> Tuple[int, int, float]:
 def render_markdown(
     report_path: str,
     arrow_path: str,
+    run_label: str,
     total_records: int,
     summary_lines: List[str],
     stat_rows: List[Tuple[str, Optional[StatSummary]]],
     quantity_sections: List[str],
 ) -> None:
     lines: List[str] = []
-    lines.append("# GSM8K Graph Analysis Report")
+    lines.append("# Graph Analysis Report")
     lines.append("")
+    if run_label:
+        lines.append(f"*Run subdirectory*: `{run_label}`")
     lines.append(f"*Dataset source*: `{arrow_path}`")
     lines.append(f"*Total problems analysed*: **{total_records}**")
     lines.append("")
@@ -515,24 +535,51 @@ def render_markdown(
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
-    parser = argparse.ArgumentParser(description="Analyse GSM8K computational graph dataset.")
-    parser.add_argument("--out_dir", "--outdir", dest="out_dir", type=str, default=None,
-                        help="Base output directory (defaults to gsm8k_graphs resolve logic).")
-    parser.add_argument("--report-subdir", type=str, default="report",
-                        help="Name of the subdirectory to hold the report (default: report).")
-    parser.add_argument("--extreme-samples", type=int, default=3,
-                        help="Number of extreme examples to showcase per metric (default: 3).")
+    parser = argparse.ArgumentParser(
+        description="Analyse computational graph datasets generated from problem sets."
+    )
+    parser.add_argument(
+        "--out_dir",
+        "--outdir",
+        dest="out_dir",
+        type=str,
+        default=None,
+        help="Base output directory (overrides $OUT_DIR + run subdir resolution).",
+    )
+    parser.add_argument(
+        "--run-subdir",
+        dest="run_subdir",
+        type=str,
+        default="gsm8k_graphs",
+        help=(
+            "Directory name under $OUT_DIR to inspect when --out_dir is omitted "
+            "(default: gsm8k_graphs)."
+        ),
+    )
+    parser.add_argument(
+        "--report-subdir",
+        type=str,
+        default="report",
+        help="Name of the subdirectory to hold the report (default: report).",
+    )
+    parser.add_argument(
+        "--extreme-samples",
+        type=int,
+        default=3,
+        help="Number of extreme examples to showcase per metric (default: 3).",
+    )
     args = parser.parse_args(argv)
 
-    out_dir = resolve_output_dir(args.out_dir)
+    out_dir, run_subdir = resolve_output_dir(args.out_dir, args.run_subdir)
     report_dir = os.path.join(out_dir, args.report_subdir)
     images_dir = os.path.join(report_dir, "images")
     ensure_dir(images_dir)
 
     log(f"Resolved output directory: {out_dir}")
+    log(f"Active run subdirectory: {run_subdir}")
     log(f"Report directory: {report_dir}")
 
-    dataset, arrow_path = load_arrow_dataset(out_dir)
+    dataset, arrow_path = load_arrow_dataset(out_dir, run_subdir)
     log(f"Loading Arrow dataset from {arrow_path} ...")
     records: List[Dict[str, Any]] = [dict(row) for row in dataset]
     log(f"Loaded {len(records)} records. Deriving per-graph metrics...")
@@ -924,6 +971,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     render_markdown(
         report_path=report_path,
         arrow_path=arrow_path,
+        run_label=run_subdir,
         total_records=total_records,
         summary_lines=summary_lines,
         stat_rows=stat_rows,
