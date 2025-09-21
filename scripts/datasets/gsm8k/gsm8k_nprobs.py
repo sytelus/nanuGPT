@@ -5,17 +5,17 @@ gsm8k_nprobs.py
 
 Purpose
 -------
-Create a new dataset by *combining* `n_problems` randomly chosen GSM8K train problems into a single
+Create a new dataset by *combining* `n_problems` randomly chosen GSM8K problems from the selected split into a single
 problem whose final answer is guaranteed to match the original answer of the final selected problem.
 For each attempt we:
-  1) Pick `n_problems` random, distinct problems from GSM8K (train).
+  1) Pick `n_problems` random, distinct problems from GSM8K (train by default; `--split test` supported).
   2) Ask Azure OpenAI to *rewrite* (i.e., combine) those problems into one using a strict template.
   3) Ask Azure OpenAI to *solve* the combined problem, returning only the final numeric answer.
   4) Validate that the final numeric answer equals the GSM8K final answer of the last selected problem.
-  5) If valid, append to `out_dataset/problems{n_problems}_success/train.jsonl` in GSM8K format
+  5) If valid, append to `out_dataset/problems{n_problems}_success/<split>.jsonl` (train.jsonl by default) in GSM8K format
      (fields: {"question": <combined problem>, "answer": "#### <final_number>"}).
-     We also log provenance in `out_dataset/problems{n_problems}_success/meta.jsonl`.
-  6) Otherwise, append a detailed record to `out_dataset/problems{n_problems}_fail/train.jsonl` for debugging.
+     We also log provenance in `out_dataset/problems{n_problems}_success/meta<split>.jsonl` (`meta.jsonl` when split=train).
+  6) Otherwise, append a detailed record to `out_dataset/problems{n_problems}_fail/<split>.jsonl` (train.jsonl by default) for debugging.
 
 The script is designed to be:
   - **Robust**: Retries with exponential backoff for Azure API calls and file writes.
@@ -67,25 +67,25 @@ Quick Start
    export OUT_DIR="/path/to/output_root"
 
 4) Run:
-   python gsm8k_nprobs.py --max_samples 200 --max_workers 8 --n_problems 3
+   python gsm8k_nprobs.py --max_samples 200 --max_workers 8 --n_problems 3 [--split test]
 
 Directory Layout (created under OUT_DIR/gsm8k_{n_problems}probs)
 -----------------------------------------------------
 in_dataset/
-  gsm8k_train.jsonl             # input GSM8K train data with sequential IDs for reference
+  gsm8k_<split>.jsonl           # input GSM8K data with sequential IDs for reference
 working_dir/
-  attempts.jsonl                # every attempt appended here (success or fail), for provenance
-  seen_combos.txt               # set of processed combinations (one "i,j,k,..." per line) to avoid repeats
+  attempts<suffix>.jsonl        # every attempt appended here (suffix omitted for train)
+  seen_combos<suffix>.txt       # set of processed combinations (suffix omitted for train)
 out_dataset/
   problems{n_problems}_success/
-    train.jsonl                 # GSM8K-format output (question, answer)
-    meta.jsonl                  # provenance: source problem IDs, hashes
+    <split>.jsonl               # GSM8K-format output (question, answer); train.jsonl by default
+    meta<suffix>.jsonl          # provenance: source problem IDs, hashes; meta.jsonl when split=train
   problems{n_problems}_fail/
-    train.jsonl                 # detailed diagnostics for failed attempts
+    <split>.jsonl               # detailed diagnostics for failed attempts; train.jsonl by default
 
 Notes
 -----
-- The script only uses the GSM8K *train* split.
+- The script uses the GSM8K train split by default but accepts `--split test` when needed.
 - We never persist the Azure API raw responses beyond the minimum needed; only derived, non-PII
   content is saved.
 - The dashboard updates at a steady cadence; if you prefer quieter operation, add `--quiet`.
@@ -515,15 +515,19 @@ def answers_match(a: Fraction, b: Fraction) -> bool:
 
 # ------------------------------ I/O: GSM8K ------------------------------
 
-def download_or_load_gsm8k_train(dst_in_dataset_dir: Path, console: Optional[Console]) -> List[GSMItem]:
+def download_or_load_gsm8k_split(
+    dst_in_dataset_dir: Path,
+    console: Optional[Console],
+    split: str,
+) -> List[GSMItem]:
     """
-    Load GSM8K train split from Hugging Face datasets.
-    If already materialized as JSONL under in_dataset/gsm8k_train.jsonl, load from there.
+    Load a GSM8K split from Hugging Face datasets.
+    If already materialized as JSONL under in_dataset/gsm8k_<split>.jsonl, load from there.
     Otherwise, download via `datasets`, assign sequential IDs, and save.
     Returns the in-memory list of GSMItem with parsed expected answers.
     """
     ensure_dir(dst_in_dataset_dir)
-    jsonl_path = dst_in_dataset_dir / "gsm8k_train.jsonl"
+    jsonl_path = dst_in_dataset_dir / f"gsm8k_{split}.jsonl"
 
     items: List[GSMItem] = []
 
@@ -545,7 +549,9 @@ def download_or_load_gsm8k_train(dst_in_dataset_dir: Path, console: Optional[Con
                                      expected_final_raw=exp_raw,
                                      expected_final_fraction=exp_frac))
         if console:
-            console.log(f"[green]Loaded cached GSM8K train[/] from {jsonl_path} ({len(items)} items).")
+            console.log(
+                f"[green]Loaded cached GSM8K {split}[/] from {jsonl_path} ({len(items)} items)."
+            )
         return items
 
     # Need to download
@@ -556,10 +562,12 @@ def download_or_load_gsm8k_train(dst_in_dataset_dir: Path, console: Optional[Con
         )
 
     if console:
-        console.log("[cyan]Downloading GSM8K (train split, 'main' config) from Hugging Face...[/]")
+        console.log(
+            f"[cyan]Downloading GSM8K ({split} split, 'main' config) from Hugging Face...[/]"
+        )
 
     try:
-        ds = load_dataset("gsm8k", "main", split="train")
+        ds = load_dataset("gsm8k", "main", split=split)
     except Exception as e:
         raise RuntimeError(
             f"Failed to load GSM8K via `datasets`: {e}.\n"
@@ -583,7 +591,7 @@ def download_or_load_gsm8k_train(dst_in_dataset_dir: Path, console: Optional[Con
                                ensure_ascii=False) + "\n")
 
     if console:
-        console.log(f"[green]Saved GSM8K train[/] to {jsonl_path} ({len(items)} items).")
+        console.log(f"[green]Saved GSM8K {split}[/] to {jsonl_path} ({len(items)} items).")
     return items
 
 
@@ -707,21 +715,22 @@ class AOAIClient:
 
 @dataclass
 class Paths:
+    split: str
     root: Path
     in_dataset: Path
     working_dir: Path
     out_dataset: Path
     success_dir: Path
     fail_dir: Path
-    success_train: Path
+    success_jsonl: Path
     success_meta: Path
-    fail_train: Path
+    fail_jsonl: Path
     attempts: Path
     seen_combos: Path
     combo_size: int
 
 
-def make_paths(root: Path, combo_size: int) -> Paths:
+def make_paths(root: Path, combo_size: int, split: str) -> Paths:
     base = root / f"gsm8k_{combo_size}probs"
     in_dataset = base / "in_dataset"
     working_dir = base / "working_dir"
@@ -732,18 +741,20 @@ def make_paths(root: Path, combo_size: int) -> Paths:
     ensure_dir(working_dir)
     ensure_dir(success_dir)
     ensure_dir(fail_dir)
+    split_suffix = "" if split == "train" else f"_{split}"
     return Paths(
+        split=split,
         root=base,
         in_dataset=in_dataset,
         working_dir=working_dir,
         out_dataset=out_dataset,
         success_dir=success_dir,
         fail_dir=fail_dir,
-        success_train=success_dir / "train.jsonl",
-        success_meta=success_dir / "meta.jsonl",
-        fail_train=fail_dir / "train.jsonl",
-        attempts=working_dir / "attempts.jsonl",
-        seen_combos=working_dir / "seen_combos.txt",
+        success_jsonl=success_dir / ("train.jsonl" if split == "train" else f"{split}.jsonl"),
+        success_meta=success_dir / ("meta.jsonl" if split == "train" else f"meta{split_suffix}.jsonl"),
+        fail_jsonl=fail_dir / ("train.jsonl" if split == "train" else f"{split}.jsonl"),
+        attempts=working_dir / ("attempts.jsonl" if split == "train" else f"attempts{split_suffix}.jsonl"),
+        seen_combos=working_dir / ("seen_combos.txt" if split == "train" else f"seen_combos{split_suffix}.txt"),
         combo_size=combo_size,
     )
 
@@ -1008,6 +1019,7 @@ def writer_success(paths: Paths, res: AttemptResult, lock: threading.Lock) -> No
     }
     meta_row = {
         "timestamp": now_iso(),
+        "split": paths.split,
         "source_ids": list(res.problem_ids),
         "combined_hash": sha256_text(res.combined_problem or ""),
         "expected_answer_raw": res.expected_answer_raw,
@@ -1019,7 +1031,7 @@ def writer_success(paths: Paths, res: AttemptResult, lock: threading.Lock) -> No
         "solver_outputs": res.solver_outputs,
     }
     with lock:
-        append_jsonl(paths.success_train, out_row)
+        append_jsonl(paths.success_jsonl, out_row)
         append_jsonl(paths.success_meta, meta_row)
         append_jsonl(paths.attempts, {"success": True, **meta_row})
 
@@ -1049,6 +1061,7 @@ def writer_fail(paths: Paths, res: AttemptResult, lock: threading.Lock) -> None:
     ]
     row = {
         "timestamp": now_iso(),
+        "split": paths.split,
         "source_ids": list(res.problem_ids),
         "problems": problems_payload,
         "target_problem_sequence": len(res.problems),
@@ -1067,7 +1080,7 @@ def writer_fail(paths: Paths, res: AttemptResult, lock: threading.Lock) -> None:
         "solver_outputs": res.solver_outputs,
     }
     with lock:
-        append_jsonl(paths.fail_train, row)
+        append_jsonl(paths.fail_jsonl, row)
         append_jsonl(paths.attempts, {"success": False, **row})
 
 
@@ -1417,6 +1430,8 @@ def parse_args() -> argparse.Namespace:
                    help=f"Azure API request timeout in seconds (default: {DEFAULT_REQ_TIMEOUT}).")
     p.add_argument("--n_problems", type=int, default=DEFAULT_N_PROBLEMS,
                    help="Number of GSM8K problems to combine per attempt (default: 3).")
+    p.add_argument("--split", choices=("train", "test"), default="train",
+                   help="GSM8K split to use as the source problems (default: train).")
     p.add_argument("--quiet", action="store_true", help="Reduce console output (hides the live dashboard).")
     p.add_argument("--combine-temperature", type=float, default=None,
                    help="Temperature to use for the combine request (default: provider default).")
@@ -1448,7 +1463,7 @@ def main() -> None:
 
     # Paths
     out_root = Path(args.out_dir).expanduser().resolve()
-    paths = make_paths(out_root, combo_size)
+    paths = make_paths(out_root, combo_size, args.split)
 
     # Chat parameter overrides
     combine_chat_kwargs: Optional[Dict[str, Any]] = {}
@@ -1501,7 +1516,7 @@ def main() -> None:
     worker_rngs = [random.Random(seed_source.randrange(2**63)) for _ in range(state.max_workers)]
 
     # Load or download GSM8K train
-    items = download_or_load_gsm8k_train(paths.in_dataset, console)
+    items = download_or_load_gsm8k_split(paths.in_dataset, console, args.split)
     if combo_size > len(items):
         console.print(
             f"[red]--n_problems of {combo_size} exceeds available GSM8K items ({len(items)}).[/]"
@@ -1509,10 +1524,10 @@ def main() -> None:
         sys.exit(2)
 
     # Count existing successes (resumable)
-    existing_success = read_jsonl(paths.success_train)
+    existing_success = read_jsonl(paths.success_jsonl)
     state.successes = len(existing_success)
     state.initial_successes = state.successes
-    existing_failures = count_jsonl(paths.fail_train)
+    existing_failures = count_jsonl(paths.fail_jsonl)
     state.failures = existing_failures
     state.initial_failures = existing_failures
     console.log(f"[green]Resuming[/]: found {state.successes} existing successes. Target: {state.target_success}.")
@@ -1558,9 +1573,9 @@ def main() -> None:
     console.print(f"Successes: {state.successes} / Target: {state.target_success}")
     console.print(f"Failures:  {state.failures}")
     console.print(f"Outputs:")
-    console.print(f"  - Success dataset: [link=file://{paths.success_train}] {paths.success_train}")
+    console.print(f"  - Success dataset: [link=file://{paths.success_jsonl}] {paths.success_jsonl}")
     console.print(f"  - Success meta:    [link=file://{paths.success_meta}] {paths.success_meta}")
-    console.print(f"  - Fail dataset:    [link=file://{paths.fail_train}] {paths.fail_train}")
+    console.print(f"  - Fail dataset:    [link=file://{paths.fail_jsonl}] {paths.fail_jsonl}")
 
 
 if __name__ == "__main__":
