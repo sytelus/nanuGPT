@@ -144,27 +144,23 @@ except Exception:
 
 # ------------------------------ Configuration ------------------------------
 
-COMBINE_PROMPT_TEMPLATE = """Consider the {n} math problems below. Each problem has one or many input values and only one output value.
-Only the direct numerical values specified in the problem can be treated as input values.
+COMBINE_PROMPT_TEMPLATE = """Consider below {n} math problems. Each of these problems have one or many input values and only one output value. Only the direct numerical values specified in the problem can be considered as input value. We want to combine these {n} problems to form a one single problem in the following way:
 
-We want to combine these problems to form a single problem under the following conditions.
-The output of each earlier problem should be reused so it meaningfully influences at least one later step.
-The final combined problem must produce exactly the same output value as the original Problem {final_problem}.
+- Output of Problem 1 should become input for problem {n-1} as well as {n}.
+- Output of Problem 2 should become input for problem {n-1} as well as {n}.
+- Output of Problem {n-1} should become input for problem {n}.
+- Output of Problem {n} should become the final output of the combined problem and this output value should remain exactly same as it is in original Problem {n}.
 
-When replacing the input of a problem with the output of another problem, you must ensure that the final input value remains the same as in the original wording.
-To achieve this, you may transform the output value of a problem (for example, by adding or multiplying by a constant) before using it as an input elsewhere.
+When replacing input of a problem with output of another problem, you must make sure that final input value of the problem remains same as in original problem. To achieve this goal, you might chose to transform output value of a problem by adding some constant or multiplying with some constant to convert it before making it as an input value for the another problem.
 
-If the final problem does not have enough distinct inputs to accommodate the reused outputs, combine the necessary earlier outputs (for example, by adding them) and then transform them so that the resulting numeric value matches the original input.
-Whenever sufficient distinct inputs exist, map different reused outputs to different inputs.
+It may happen that a problem does not enough inputs available for replacement from the output of other problems as specified above. In this case, you should combine outputs of those problems using sum operator to produce same number of different aggregated values as equal to number of inputs available in target problem. These aggregated values should be transformed as needed by adding a constant or multiplying with a constant so that it matches the original input values of the target problem. If target problem has different input values available then you should use one for each outputs of source problems.
 
-Keep each problem statement as close to the original wording as possible, making only the minimal changes required.
-You may name intermediate values (for example, "Let's call this value T") so you can reference them later, but do not refer to them with tags like "Problem 1" in the final combined statement.
+You should keep the problem statements of each of the problem as close to the original problem statement as possible and make only the minimal number of changes required to satisfy above requirements. You can label output of each problem using a letter so that you can reference it later for the input for the another problem. Your final problem statement should not include any problem labels such as "Problem A" etc but it can include modifications such as "Let's call this value T" or any other alternative that you may find more readable, natural and faithful to original problem statement.
 
-Using these conditions, produce the final combined problem.
-Return only the combined problem as plain text with no markdown or LaTeX.
-If you cannot produce the combined problem, output "ERROR: <reason>" where <reason> explains why you cannot complete the task.
+Using these conditions, produce the final combined problem. In your response only include this final combined problem statement in only text form and do not use any markdown or latex syntax. If for some reason, you cannot produce the combined problem then output the text "ERROR: <reason>" where <reason> is the reason why you cannot complete this task.
 
-{problem_blocks}"""
+{problem_blocks}
+"""
 
 SOLVE_PROMPT = """Solve the following math problem. Output ONLY the final numeric answer with no words, no units, no punctuation, and no explanation. If the exact answer is a fraction, return the simplest fraction like 7/3. If the answer is a mixed number, convert it to an improper fraction. If the answer is a monetary amount, return only the number (e.g., 12.50).
 
@@ -841,7 +837,6 @@ def build_combine_prompt(problem_texts: List[str]) -> str:
         problem_blocks.append(block)
     return COMBINE_PROMPT_TEMPLATE.format(
         n=len(problem_texts),
-        final_problem=len(problem_texts),
         problem_blocks="\n\n".join(problem_blocks),
     )
 

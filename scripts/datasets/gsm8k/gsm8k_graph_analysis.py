@@ -375,6 +375,23 @@ def format_float(value: Optional[float]) -> str:
     return f"{value:.3f}"
 
 
+def github_slug(text: str) -> str:
+    slug_chars: List[str] = []
+    last_dash = False
+    for ch in text.lower():
+        if ch.isalnum():
+            slug_chars.append(ch)
+            last_dash = False
+        elif ch in {" ", "-", "_"}:
+            if not last_dash:
+                slug_chars.append("-")
+                last_dash = True
+        else:
+            continue
+    slug = "".join(slug_chars).strip("-")
+    return slug or "section"
+
+
 def select_extremes(
     records: Sequence[Dict[str, Any]],
     key: str,
@@ -439,6 +456,20 @@ def render_markdown(
     lines.append("")
     lines.append(f"*Dataset source*: `{arrow_path}`")
     lines.append(f"*Total problems analysed*: **{total_records}**")
+    lines.append("")
+
+    lines.append("## Table of Contents")
+    lines.append("")
+    if summary_lines:
+        lines.append("- [Summary](#summary)")
+    lines.append("- [Descriptive Statistics](#descriptive-statistics)")
+    lines.append("- [Metric Deep Dives](#metric-deep-dives)")
+    if stat_rows:
+        for title, _ in stat_rows:
+            slug = github_slug(title)
+            lines.append(f"  - [{title}](#{slug})")
+    lines.append("- [Operator Landscape](#operator-landscape)")
+    lines.append("- [Outcome Comparison](#outcome-comparison)")
     lines.append("")
 
     if summary_lines:
