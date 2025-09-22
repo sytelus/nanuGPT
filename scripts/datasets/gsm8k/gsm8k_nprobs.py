@@ -312,6 +312,25 @@ def count_jsonl(path: Path) -> int:
     return count
 
 
+def count_valid_jsonl_records(path: Path) -> Tuple[int, int]:
+    """Return (valid_records, malformed_records) for a JSONL file."""
+    valid = 0
+    malformed = 0
+    if not path.exists():
+        return valid, malformed
+    with path.open("r", encoding="utf-8") as f:
+        for raw_line in f:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                json.loads(line)
+                valid += 1
+            except Exception:
+                malformed += 1
+    return valid, malformed
+
+
 def ensure_text_parts(content: Any, part_type: str) -> List[Dict[str, str]]:
     if isinstance(content, str):
         return [{"type": part_type, "text": content}]
@@ -1524,9 +1543,19 @@ def main() -> None:
         sys.exit(2)
 
     # Count existing successes (resumable)
-    existing_success = read_jsonl(paths.success_jsonl)
-    state.successes = len(existing_success)
+    success_valid, success_malformed = count_valid_jsonl_records(paths.success_jsonl)
+    state.successes = success_valid
     state.initial_successes = state.successes
+    if success_malformed:
+        console.log(
+            f"[yellow]Warning[/]: ignored {success_malformed} malformed line(s) in {paths.success_jsonl}. "
+            "They may have been left behind by an interrupted previous run."
+        )
+    elif success_valid == 0 and paths.success_jsonl.exists():
+        console.log(
+            f"[yellow]Warning[/]: {paths.success_jsonl} exists but no valid JSON records were parsed. "
+            "If this file was truncated, delete or fix it before resuming."
+        )
     existing_failures = count_jsonl(paths.fail_jsonl)
     state.failures = existing_failures
     state.initial_failures = existing_failures
