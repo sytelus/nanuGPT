@@ -166,12 +166,12 @@ GRAPH_INSTRUCTIONS= [
 - Output of Problem 2 should become input for Problem {n}.""",
 
     # n_problems = 4
-    """- Output of Problem 1 should become input for Problem 3 as well as Problem {n}.
+    """- Output of Problem 1 should become input for Problem 2, Problem 3 as well as Problem {n}.
 - Output of Problem 2 should become input for Problem 3 as well as Problem {n}.
 - Output of Problem 3 should become input for Problem {n}.""",
 
     # n_problems = 5
-    """- Output of Problem 1 should become input for Problem 2 as well as Problem {n}.
+    """- Output of Problem 1 should become input for Problem 2, Problem 4 as well as Problem {n}.
 - Output of Problem 2 should become input for Problem 4 as well as Problem {n}.
 - Output of Problem 3 should become input for Problem 4.
 - Output of Problem 4 should become input for Problem {n}.""",
@@ -1429,7 +1429,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--timeout", type=float, default=DEFAULT_REQ_TIMEOUT,
                    help=f"Azure API request timeout in seconds (default: {DEFAULT_REQ_TIMEOUT}).")
     p.add_argument("--n_problems", type=int, default=DEFAULT_N_PROBLEMS,
-                   help="Number of GSM8K problems to combine per attempt (default: 3).")
+                   help=f"Number of GSM8K problems to combine per attempt (default: {DEFAULT_N_PROBLEMS}).")
     p.add_argument("--split", choices=("train", "test"), default="train",
                    help="GSM8K split to use as the source problems (default: train).")
     p.add_argument("--quiet", action="store_true", help="Reduce console output (hides the live dashboard).")

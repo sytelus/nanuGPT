@@ -15,8 +15,9 @@ The script searches for the dataset using the same resolution rules as the
 graph-generation scripts: an explicit ``--out_dir`` overrides environment
 ``$OUT_DIR``. When ``--out_dir`` is omitted, the directory defaults to
 ``~/out_dir/<run-subdir>`` with ``run-subdir`` defaulting to
-``gsm8k_graphs``. It expects the Arrow dataset directory at
-``<out_dir>/out_final/arrow_dataset``.
+``gsm8k_graphs``. If ``--out_dir`` points to the parent directory (e.g.,
+``~/out_dir``), the script also checks ``<out_dir>/<run-subdir>``. It expects
+the Arrow dataset directory at ``<resolved>/out_final/arrow_dataset``.
 
 Outputs
 -------
@@ -115,15 +116,27 @@ def normalize_run_subdir(value: Optional[str]) -> str:
 
 
 def resolve_output_dir(cli_out_dir: Optional[str], run_subdir: str) -> Tuple[str, str]:
-    """Match the directory resolution logic used by graph-generation scripts."""
+    """Locate the dataset directory, accommodating nested run subdirectories."""
 
     normalized = normalize_run_subdir(run_subdir)
     if cli_out_dir and str(cli_out_dir).strip():
-        target = cli_out_dir
+        explicit = os.path.abspath(str(cli_out_dir).strip())
+        explicit_marker = os.path.join(explicit, "out_final", "arrow_dataset")
+        nested = os.path.join(explicit, normalized)
+        nested_marker = os.path.join(nested, "out_final", "arrow_dataset")
+
+        if os.path.exists(explicit_marker):
+            resolved = explicit
+        elif os.path.exists(nested_marker):
+            resolved = os.path.abspath(nested)
+        elif os.path.basename(explicit.rstrip(os.sep)) != normalized and os.path.isdir(nested):
+            resolved = os.path.abspath(nested)
+        else:
+            resolved = explicit
     else:
         base = os.environ.get("OUT_DIR", os.path.expanduser("~/out_dir"))
-        target = os.path.join(base, normalized)
-    return os.path.abspath(target), normalized
+        resolved = os.path.join(base, normalized)
+    return os.path.abspath(resolved), normalized
 
 
 def ensure_dir(path: str) -> None:
@@ -571,6 +584,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     args = parser.parse_args(argv)
 
     out_dir, run_subdir = resolve_output_dir(args.out_dir, args.run_subdir)
+    if args.out_dir:
+        requested = os.path.abspath(str(args.out_dir).strip())
+        if os.path.normpath(requested) != os.path.normpath(out_dir):
+            log(
+                "Detected nested run directory; writing analysis alongside "
+                f"'{run_subdir}' at {out_dir}"
+            )
     report_dir = os.path.join(out_dir, args.report_subdir)
     images_dir = os.path.join(report_dir, "images")
     ensure_dir(images_dir)
