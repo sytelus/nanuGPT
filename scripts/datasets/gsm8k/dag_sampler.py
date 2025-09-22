@@ -1,212 +1,292 @@
-import heapq
+from __future__ import annotations
+
+from dataclasses import dataclass
+from itertools import permutations, product
 import random
-from functools import lru_cache
-from itertools import permutations
-from collections import deque
+from typing import Dict, Iterable, Iterator, List, Tuple
 
-# ---------- Core helpers (enumeration, checks, canonicalization) ----------
 
-def _enumerate_forward_dags(N):
+def _enumerate_forward_dags(N: int) -> Iterable[List[int]]:
     """
-    Generate all DAGs on {0,...,N-1} whose edges go only i->j for i<j.
-    Every DAG has at least one topological order, so this covers at least
-    one labeled representative of every unlabeled DAG.
-    Yields: tuple of edges (u,v) with 0<=u<v<N.
-    """
-    edges = [(i, j) for i in range(N) for j in range(i+1, N)]
-    M = len(edges)
-    for mask in range(1 << M):
-        E, mm = [], mask
-        for idx in range(M):
-            if mm & 1:
-                E.append(edges[idx])
-            mm >>= 1
-        yield tuple(E)
+    Enumerate all labeled DAGs on vertices 0..N-1 where edges are only allowed
+    from lower to higher indices (i -> j only if i < j), and where each vertex
+    i < N-1 has a non-empty set of successors among {i+1, ..., N-1}.
 
-def _indeg_outdeg(N, edges):
-    indeg = [0]*N
-    outdeg = [0]*N
-    for u, v in edges:
-        outdeg[u] += 1
-        indeg[v] += 1
-    return indeg, outdeg
+    Representation: return a list `rows` of length N, where rows[i] is an
+    integer bitmask over 0..N-1 indicating the outgoing neighbors of i.
+    Because edges only go forward, rows[N-1] == 0.
+    """
+    rows = [0] * N
 
-def _everyone_reaches_sink(N, edges, sink):
-    """
-    Check that every vertex reaches 'sink'. (Redundant if 'sink' is the only sink,
-    but kept for safety and clarity.)
-    """
-    rev = [[] for _ in range(N)]
-    for u, v in edges:
-        rev[v].append(u)
-    seen = [False]*N
-    seen[sink] = True
-    dq = deque([sink])
-    while dq:
-        x = dq.popleft()
-        for y in rev[x]:
-            if not seen[y]:
-                seen[y] = True
-                dq.append(y)
-    return all(seen)
+    def rec(i: int) -> Iterable[List[int]]:
+        if i == N - 1:
+            # All earlier rows chosen; sink row is 0 by construction.
+            yield list(rows)
+            return
+        succs = list(range(i + 1, N))
+        m = len(succs)
+        # Non-empty subsets of successors:
+        # mask runs from 1 to (1<<m)-1
+        for mask in range(1, 1 << m):
+            bitset = 0
+            for k in range(m):
+                if (mask >> k) & 1:
+                    bitset |= (1 << succs[k])
+            rows[i] = bitset
+            yield from rec(i + 1)
+        rows[i] = 0
 
-def _is_one_sink_dag(N, edges):
-    """
-    Our class: exactly one sink and every vertex reaches it.
-    """
-    indeg, outdeg = _indeg_outdeg(N, edges)
-    sinks = [i for i in range(N) if outdeg[i] == 0]
-    if len(sinks) != 1:
-        return False
-    return _everyone_reaches_sink(N, edges, sinks[0])
+    yield from rec(0)
 
-def _canonical_form_with_sink_last(N, edges):
+
+def _compute_in_neighbors(rows: List[int]) -> List[List[int]]:
+    N = len(rows)
+    in_nbrs: List[List[int]] = [[] for _ in range(N)]
+    for i in range(N):
+        x = rows[i]
+        while x:
+            lsb = x & -x
+            j = (lsb.bit_length() - 1)
+            in_nbrs[j].append(i)
+            x ^= lsb
+    return in_nbrs
+
+
+def _compute_out_neighbors(rows: List[int]) -> List[List[int]]:
+    N = len(rows)
+    out_nbrs: List[List[int]] = [[] for _ in range(N)]
+    for i in range(N):
+        x = rows[i]
+        while x:
+            lsb = x & -x
+            j = (lsb.bit_length() - 1)
+            out_nbrs[i].append(j)
+            x ^= lsb
+    return out_nbrs
+
+
+def _min_distance_to_sink(rows: List[int]) -> List[int]:
     """
-    Compute a canonical labeling for 'edges' under vertex relabelings,
-    restricting to permutations that map the unique sink to position N-1.
+    Minimal distance (number of edges) to the unique sink (vertex N-1),
+    exploiting the forward-only orientation (topological order).
+    dist[N-1] = 0; for i < N-1, dist[i] = 1 + min(dist[j] for j in succ(i)).
+    """
+    N = len(rows)
+    dist = [0] * N
+    dist[N - 1] = 0
+    for i in range(N - 2, -1, -1):
+        x = rows[i]
+        best = None
+        while x:
+            lsb = x & -x
+            j = (lsb.bit_length() - 1)
+            d = dist[j]
+            best = d if best is None else min(best, d)
+            x ^= lsb
+        # non-empty successors guaranteed; best cannot be None
+        dist[i] = 1 + (best if best is not None else 0)
+    return dist
+
+
+def _wl_partition(rows: List[int]) -> Tuple[List[int], List[List[int]]]:
+    """
+    Weisfeiler–Lehman (1-dim) refinement for directed graphs, starting from
+    initial colors based on (min distance to sink, indegree, outdegree).
     Returns:
-        key (str): lexicographically minimal adjacency bitstring (i!=j order).
-        edges_can (tuple[(u,v)]): edges under the canonical permutation, with sink at N-1.
-    Complexity: O((N-1)! * N^2) per graph (much faster than N! thanks to fixing the sink).
+      - a list of stable color ids (0..K-1) in canonical order (not used directly),
+      - an ordered list of color classes (each a list of vertex indices).
+    The color ids are assigned deterministically by sorting the signature keys.
     """
-    # Identify the current sink (unique, by our filter).
-    _, outdeg = _indeg_outdeg(N, edges)
-    sink = next(i for i in range(N) if outdeg[i] == 0)
+    N = len(rows)
+    in_n = _compute_in_neighbors(rows)
+    out_n = _compute_out_neighbors(rows)
+    indeg = [len(in_n[i]) for i in range(N)]
+    outdeg = [len(out_n[i]) for i in range(N)]
+    dist = _min_distance_to_sink(rows)
 
-    E = set(edges)
-    best_key = None
-    best_perm = None
+    # Initial color key for each vertex; map unique sorted keys to ids deterministically.
+    base_keys = [(dist[i], indeg[i], outdeg[i]) for i in range(N)]
+    uniq = sorted(set(base_keys))
+    color = [uniq.index(base_keys[i]) for i in range(N)]
 
-    # Permute only the N-1 non-sink vertices; sink -> N-1.
-    others = [v for v in range(N) if v != sink]
-    for idx_order, p_others in enumerate(permutations(others)):
-        p = [None]*N
-        # Map the non-sink vertices to 0..N-2 in order of p_others; sink -> N-1.
-        for new_label, old_v in enumerate(p_others):
-            p[old_v] = new_label
-        p[sink] = N-1
-
-        # Build adjacency bitstring in row-major (i!=j) for the permuted graph.
-        bits = []
-        # Fast membership test: apply permutation and check edges
-        # (u,v) maps to (p[u], p[v]).
-        Pe = {(p[u], p[v]) for (u, v) in E}
+    while True:
+        # Signature = (current color, multiset of out-neighbor colors, multiset of in-neighbor colors)
+        sigs = []
         for i in range(N):
-            for j in range(N):
-                if i == j:
-                    continue
-                bits.append('1' if (i, j) in Pe else '0')
-        s = ''.join(bits)
+            ocols = tuple(sorted(color[j] for j in out_n[i]))
+            icols = tuple(sorted(color[j] for j in in_n[i]))
+            sigs.append((color[i], ocols, icols))
+        uniq = sorted(set(sigs))
+        new_color = [uniq.index(sigs[i]) for i in range(N)]
+        if new_color == color:
+            break
+        color = new_color
 
-        if best_key is None or s < best_key:
-            best_key = s
-            best_perm = p
+    # Build groups (color classes) in the canonical order of color ids.
+    groups_dict: Dict[int, List[int]] = {}
+    for v, c in enumerate(color):
+        groups_dict.setdefault(c, []).append(v)
+    ordered_ids = sorted(groups_dict.keys())
+    ordered_groups = [groups_dict[c] for c in ordered_ids]
+    return ordered_ids, ordered_groups
 
-    # Apply best_perm to produce canonical edge list (tuple of (u,v))
-    edges_can = tuple(sorted((best_perm[u], best_perm[v]) for (u, v) in E))
-    return best_key, edges_can
 
-# ---------- Build & cache all isomorphism-class representatives for a given N ----------
-
-@lru_cache(maxsize=None)
-def _representatives_for_N(N):
+def _canonical_code(rows: List[int]) -> int:
     """
-    Return a tuple of canonical edge-sets (each a tuple of (u,v), 0-based with sink at N-1),
-    one per isomorphism class of one-sink DAGs on N vertices.
-    This cache is built once per N; subsequent calls are O(1).
+    Compute an isomorphism-invariant canonical code of the DAG:
+      1) WL refine to get stable color classes.
+      2) Fix the sink (N-1) last (unique end vertex).
+      3) Enumerate permutations **within** each WL color class, keeping classes
+         in the canonical order, and pick the lexicographically smallest
+         row-major adjacency bitstring (N*N bits).
+    The resulting integer is a canonical form; equal iff graphs are isomorphic.
     """
-    if N <= 1:
-        raise ValueError("N must be > 1")
+    N = len(rows)
+    # WL refinement (classes in canonical order)
+    _, groups = _wl_partition(rows)
 
-    reps = []
-    seen_keys = set()
-    for edges in _enumerate_forward_dags(N):
-        if not _is_one_sink_dag(N, edges):
-            continue
-        key, edges_can = _canonical_form_with_sink_last(N, edges)
-        if key not in seen_keys:
-            seen_keys.add(key)
-            reps.append(edges_can)
+    # Remove the sink from its WL class and place it at the very end.
+    sink = N - 1
+    groups_fixed: List[List[int]] = []
+    sink_class_idx = None
+    for gi, g in enumerate(groups):
+        if sink in g:
+            sink_class_idx = gi
+            members = [v for v in g if v != sink]
+            if members:
+                groups_fixed.append(members)
+        else:
+            groups_fixed.append(list(g))
+    if sink_class_idx is None:
+        raise RuntimeError("Sink not found in WL classes (should be impossible).")
 
-    # Optional: sort by (|E|, lex) to get a stable order (not required for uniform sampling)
-    reps.sort(key=lambda es: (len(es), es))
-    return tuple(reps)
+    # Build adjacency matrix for fast lookup (row-major)
+    A = [[0] * N for _ in range(N)]
+    for i in range(N):
+        x = rows[i]
+        while x:
+            lsb = x & -x
+            j = (lsb.bit_length() - 1)
+            A[i][j] = 1
+            x ^= lsb
 
-# ---------- Public sampler ----------
+    best_code: int | None = None
 
-def sample_one_sink_dag_class(N, seed=None):
+    # Cartesian product of all permutations **inside** each class
+    group_perms: List[List[Tuple[int, ...]]] = [list(permutations(g)) for g in groups_fixed]
+    for choice in product(*group_perms):
+        order = [v for block in choice for v in block]
+        order.append(sink)  # sink fixed last
+
+        # Row-major N x N bitstring (diagonal is always 0 for DAGs)
+        code = 0
+        for ii in range(N):
+            oi = order[ii]
+            row = A[oi]
+            for jj in range(N):
+                oj = order[jj]
+                code = (code << 1) | row[oj]
+
+        if best_code is None or code < best_code:
+            best_code = code
+
+    assert best_code is not None
+    return best_code
+
+
+@dataclass
+class DAGIsomorphismSampler:
     """
-    Uniformly sample from *isomorphism classes* of DAGs on N>1 vertices
-    that have exactly one sink (global sink) and where every other vertex
-    has a directed path to the sink. Sources may be any subset of {1..N-1}.
+    Uniform sampler over isomorphism classes of DAGs on N > 1 vertices
+    with exactly one end vertex (unique sink) and the property that every
+    non-sink vertex has a directed path to the sink.
+    The set of possible start vertices (sources) is unrestricted—i.e., any
+    non-empty subset of the N-1 non-sink vertices can occur as sources.
 
-    Output format:
-        A dict mapping node IDs 1..N to a sorted list of immediate successors.
-        For example: {1: [2,5], 2: [5], 3: [5], 4: [5], 5: []}
+    Construction:
+      - Enumerates all DAGs in a fixed topological labeling (edges only i->j for i<j),
+        enforcing non-empty out-neighborhood for each i < N-1. This ensures:
+          * the last vertex is a sink,
+          * every vertex has an outward path to the sink (by induction).
+      - Computes a canonical form per graph using WL refinement + permutations
+        inside WL color classes (sink fixed last).
+      - Deduplicates by canonical code to obtain one representative per
+        isomorphism class.
+      - Sampling uniformly from that representative list yields uniform sampling
+        over isomorphism classes.
 
-    Uniformity guarantee:
-        We build one canonical representative per isomorphism class and then
-        choose uniformly among these representatives. Thus the distribution is
-        uniform over classes (not over labeled graphs), which is exactly the
-        requirement here.
+    Complexity notes:
+      - Enumeration count is ∏_{i=1}^{N-1} (2^i - 1) = (2^1 - 1)(2^2 - 1)...(2^{N-1} - 1),
+        which grows fast but is small for N ≤ 6–7.
+      - Canonicalization cost is typically modest because WL strongly refines
+        classes; remaining symmetries are handled by block-internal permutations.
 
-    Randomness:
-        Pass `seed` to make the draw reproducible for testing; otherwise uses
-        the global RNG.
-
-    Complexity:
-        • First call for a given N: exponential preprocessing to enumerate
-          and canonicalize all classes (feasible for small N, e.g., N≤6).
-        • Subsequent calls: O(N+E) time and memory (pick a representative and
-          materialize its adjacency).
-
-    Known alternatives:
-        • Burnside/Polya “orbit samplers” (a.k.a. Burnside process) can produce
-          uniform unlabeled samples without enumerating all classes, but they
-          require the ability to sample uniformly from Fix(π) for π∈S_N, which
-          is nontrivial for DAGs with structural constraints. This simple method
-          is the most maintainable exact approach for small N.
+    Example sanity check:
+      - For N = 5 this discovers exactly 164 isomorphism classes (as noted).
     """
-    reps = _representatives_for_N(N)
-    if not reps:
-        raise RuntimeError("No representatives found; check implementation.")
-    rng = random.Random(seed) if seed is not None else random
-    edges = rng.choice(reps)  # edges are 0-based with sink at N-1 (canonical labeling)
+    N: int
+    seed: int | None = None
 
-    # Build 1-based adjacency dict
-    adj = {i+1: [] for i in range(N)}
-    for u, v in edges:
-        adj[u+1].append(v+1)
-    for i in range(1, N+1):
-        adj[i].sort()
-    return adj
+    def __post_init__(self) -> None:
+        if self.N <= 1:
+            raise ValueError("N must be > 1.")
+        self._rng = random.Random(self.seed)
+        # Build the set of isomorphism classes and store one labeled representative per class.
+        self._reps: List[List[int]] = []
+        seen: Dict[int, List[int]] = {}
+
+        for rows in _enumerate_forward_dags(self.N):
+            code = _canonical_code(rows)
+            if code not in seen:
+                seen[code] = rows
+                self._reps.append(rows)
+
+        # Optional: shuffle representatives so that repeated runs with the same seed
+        # don't always visit classes in the same internal order (sampling is uniform anyway).
+        self._rng.shuffle(self._reps)
+
+    @property
+    def num_isomorphism_classes(self) -> int:
+        """Number of unlabeled isomorphism classes discovered for this N."""
+        return len(self._reps)
+
+    def _rows_to_output(self, rows: List[int]) -> List[Tuple[int, List[int]]]:
+        """
+        Convert bitmask rows to the requested output format:
+          A list of (node_id, [sorted successor ids]) in topological order.
+        """
+        N = len(rows)
+        out: List[Tuple[int, List[int]]] = []
+        for i in range(N):
+            succs: List[int] = []
+            x = rows[i]
+            while x:
+                lsb = x & -x
+                j = (lsb.bit_length() - 1)
+                succs.append(j)
+                x ^= lsb
+            succs.sort()
+            out.append((i, succs))
+        return out
+
+    def sample_one(self) -> List[Tuple[int, List[int]]]:
+        """Sample one DAG uniformly from the isomorphism classes and return it in the requested format."""
+        rows = self._rng.choice(self._reps)
+        return self._rows_to_output(rows)
+
+    def __iter__(self) -> Iterator[List[Tuple[int, List[int]]]]:
+        """
+        Infinite iterator: each iteration yields a DAG (in the requested format)
+        sampled uniformly from the isomorphism classes.
+        """
+        while True:
+            yield self.sample_one()
 
 
-def sample_prompt(N, seed=None):
-    """Sample a one-sink DAG and describe how to chain the problems."""
-    adj = sample_one_sink_dag_class(N, seed=seed)
 
-    indegree = {node: 0 for node in adj}
-    for targets in adj.values():
-        for node in targets:
-            indegree[node] += 1
-
-    zero_heap = [node for node, deg in indegree.items() if deg == 0]
-    heapq.heapify(zero_heap)
-    topo_order = []
-    while zero_heap:
-        node = heapq.heappop(zero_heap)
-        topo_order.append(node)
-        for succ in adj[node]:
-            indegree[succ] -= 1
-            if indegree[succ] == 0:
-                heapq.heappush(zero_heap, succ)
-
-    if len(topo_order) != len(adj):
-        raise ValueError("Sampled graph is not acyclic; expected a DAG.")
-
+def build_prompt(adj:List[Tuple[int, List[int]]])-> str:
     def _format_targets(target_nodes):
-        problems = [f"Problem {n}" for n in target_nodes]
+        problems = [f"Problem {n+1}" for n in target_nodes]
         if not problems:
             return ""
         if len(problems) == 1:
@@ -216,27 +296,31 @@ def sample_prompt(N, seed=None):
         return f"{', '.join(problems[:-1])} as well as {problems[-1]}"
 
     lines = []
-    for node in topo_order:
-        targets = adj[node]
+    for node, targets in adj:
         if targets:
             targets_text = _format_targets(targets)
             lines.append(
-                f"- Output of Problem {node} should become input for {targets_text}."
+                f"- Output of Problem {node+1} should become input for {targets_text}."
             )
         else:
             lines.append(
                 "- Output of Problem {} should become the final output of the "
                 "combined problem and this output value should remain exactly same "
-                "as it is in original Problem {}.".format(node, node)
+                "as it is in original Problem {}.".format(node+1, node+1)
             )
 
     return "\n".join(lines)
 
-
 if __name__ == "__main__":
-    g = sample_one_sink_dag_class(5)
-    print(g)
+    # Example: N=5 (there are 164 isomorphism classes with the given constraints)
+    sampler = DAGIsomorphismSampler(N=4, seed=123)
 
-    g1 = sample_one_sink_dag_class(5, seed=12345)
-    g2 = sample_one_sink_dag_class(5, seed=12345)
-    assert g1 == g2
+    print(f"N=4 -> #classes discovered: {sampler.num_isomorphism_classes} (expected 164)")
+
+    it = iter(sampler)
+    for k in range(10):
+        dag = next(it)
+        print(f"\nSample {k+1}:")
+        print(dag)
+        print(build_prompt(dag))
+        print("-" * 40)
