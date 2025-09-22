@@ -179,3 +179,13 @@ def sample_one_sink_dag_class(N, seed=None):
     for i in range(1, N+1):
         adj[i].sort()
     return adj
+
+
+if __name__ == "__main__":
+    g = sample_one_sink_dag_class(5)
+    print(g)
+
+    g1 = sample_one_sink_dag_class(5, seed=12345)
+    g2 = sample_one_sink_dag_class(5, seed=12345)
+    assert g1 == g2
+
