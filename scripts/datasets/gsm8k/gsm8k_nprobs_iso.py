@@ -729,7 +729,7 @@ class Paths:
 
 
 def make_paths(root: Path, combo_size: int, split: str) -> Paths:
-    base = root / f"gsm8k_{combo_size}probs"
+    base = root / f"gsm8k_{combo_size}probs_iso"
     in_dataset = base / "in_dataset"
     working_dir = base / "working_dir"
     out_dataset = base / "out_dataset"
