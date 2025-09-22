@@ -1,3 +1,4 @@
+import heapq
 import random
 from functools import lru_cache
 from itertools import permutations
@@ -181,6 +182,57 @@ def sample_one_sink_dag_class(N, seed=None):
     return adj
 
 
+def sample_prompt(N, seed=None):
+    """Sample a one-sink DAG and describe how to chain the problems."""
+    adj = sample_one_sink_dag_class(N, seed=seed)
+
+    indegree = {node: 0 for node in adj}
+    for targets in adj.values():
+        for node in targets:
+            indegree[node] += 1
+
+    zero_heap = [node for node, deg in indegree.items() if deg == 0]
+    heapq.heapify(zero_heap)
+    topo_order = []
+    while zero_heap:
+        node = heapq.heappop(zero_heap)
+        topo_order.append(node)
+        for succ in adj[node]:
+            indegree[succ] -= 1
+            if indegree[succ] == 0:
+                heapq.heappush(zero_heap, succ)
+
+    if len(topo_order) != len(adj):
+        raise ValueError("Sampled graph is not acyclic; expected a DAG.")
+
+    def _format_targets(target_nodes):
+        problems = [f"Problem {n}" for n in target_nodes]
+        if not problems:
+            return ""
+        if len(problems) == 1:
+            return problems[0]
+        if len(problems) == 2:
+            return f"{problems[0]} as well as {problems[1]}"
+        return f"{', '.join(problems[:-1])} as well as {problems[-1]}"
+
+    lines = []
+    for node in topo_order:
+        targets = adj[node]
+        if targets:
+            targets_text = _format_targets(targets)
+            lines.append(
+                f"- Output of Problem {node} should become input for {targets_text}."
+            )
+        else:
+            lines.append(
+                "- Output of Problem {} should become the final output of the "
+                "combined problem and this output value should remain exactly same "
+                "as it is in original Problem {}.".format(node, node)
+            )
+
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
     g = sample_one_sink_dag_class(5)
     print(g)
@@ -188,4 +240,3 @@ if __name__ == "__main__":
     g1 = sample_one_sink_dag_class(5, seed=12345)
     g2 = sample_one_sink_dag_class(5, seed=12345)
     assert g1 == g2
-
