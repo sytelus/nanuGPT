@@ -217,6 +217,8 @@ class AttemptResult:
     combined_problem: Optional[str] = None
     combine_error: Optional[str] = None
     combine_completion_tokens: int = 0
+    graph_instructions: Optional[str] = None
+    dag_adjacency: Optional[List[Dict[str, Any]]] = None
 
     # Solve phase
     solver_output: Optional[str] = None
@@ -875,6 +877,17 @@ def build_combine_prompt(problem_texts: List[str], graph_instructions: str) -> s
     )
 
 
+def dag_to_meta_records(dag: List[Tuple[int, List[int]]]) -> List[Dict[str, Any]]:
+    """Convert sampler output (0-based, topo order) into a JSON-friendly structure."""
+    records: List[Dict[str, Any]] = []
+    for node, targets in dag:
+        records.append({
+            "problem": node + 1,
+            "targets": [t + 1 for t in targets],
+        })
+    return records
+
+
 def do_attempt(
     client: AOAIClient,
     combo: Tuple[int, ...],
@@ -1027,6 +1040,10 @@ def writer_success(paths: Paths, res: AttemptResult, lock: threading.Lock) -> No
         "second_solve_attempt": res.second_solve_attempt,
         "solver_outputs": res.solver_outputs,
     }
+    if res.graph_instructions is not None:
+        meta_row["graph_instructions"] = res.graph_instructions
+    if res.dag_adjacency is not None:
+        meta_row["dag_adjacency"] = res.dag_adjacency
     with lock:
         append_jsonl(paths.success_jsonl, out_row)
         append_jsonl(paths.success_meta, meta_row)
@@ -1233,6 +1250,9 @@ def worker_loop(
             res.expected_answer_raw = combo_problems[-1].expected_final_raw
             res.expected_answer_fraction = combo_problems[-1].expected_final_fraction
             res.elapsed_s = time.time() - attempt_started
+
+        res.graph_instructions = graph_instructions
+        res.dag_adjacency = dag_to_meta_records(dag)
 
         if res.elapsed_s == 0:
             res.elapsed_s = time.time() - attempt_started
