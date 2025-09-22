@@ -284,7 +284,7 @@ class DAGIsomorphismSampler:
 
 
 
-def build_prompt(adj:List[Tuple[int, List[int]]])-> str:
+def build_graph_instructions(adj:List[Tuple[int, List[int]]])-> str:
     def _format_targets(target_nodes):
         problems = [f"Problem {n+1}" for n in target_nodes]
         if not problems:
@@ -322,5 +322,5 @@ if __name__ == "__main__":
         dag = next(it)
         print(f"\nSample {k+1}:")
         print(dag)
-        print(build_prompt(dag))
+        print(build_graph_instructions(dag))
         print("-" * 40)
