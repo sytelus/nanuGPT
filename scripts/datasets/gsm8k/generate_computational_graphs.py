@@ -2,25 +2,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-GSM8K → Computational Graphs (DAG) via Azure OpenAI (GPT-5)
-==========================================================
+Generate computational graphs (DAGs) for math word-problem datasets using Azure OpenAI.
+=====================================================================================
 
-What this script does
----------------------
-1) Downloads the GSM8K dataset from Hugging Face ("main" config; train & test splits).
-2) For each problem, asks a GPT-5 model (via Azure OpenAI) to emit a *computational graph*
-   as JSON using a constrained function-call ("tools") schema.
-3) Validates:
-   - JSON and schema shape
-   - node/edge consistency
-   - DAG acyclicity
-4) Evaluates the graph to compute the final numeric output (when possible), compares it to
-   the gold answer, and computes graph statistics (num nodes/edges, height, max width, ops).
-5) Writes results to a restartable cache (JSONL) and, at the end (or on demand), emits a
-   Hugging Face Arrow dataset on disk with the original columns + graph + metadata.
+Purpose
+-------
+Builds computational graphs for supported datasets (currently GSM8K and AIME 2024) by
+prompting a GPT-5-style model through Azure OpenAI's tools interface. The implementation
+centralises prompt text, schema validation, retry logic, and caching so future datasets
+only require a declarative profile rather than script duplication.
 
-Key features for robustness
----------------------------
+High-level workflow
+-------------------
+1. Resolve dataset profile (Hugging Face path, problem/answer columns, prompt tone,
+   output directory naming, and expected columns).
+2. Download the dataset locally (or reuse cached JSON rows) and iterate each problem.
+3. Ask the model to emit a computational graph via function-calling; validate structure,
+   apply repair attempts when needed, and evaluate the graph numerically.
+4. Persist per-record caches for resumability and, on demand or at completion, materialise
+   a JSONL file with the original columns plus graph metadata.
+
+Key robustness features
+-----------------------
 - Exponential backoff + jitter for transient API failures (rate limiting, timeouts).
 - Content-repair loop if the model returns invalid JSON/graph (up to N attempts).
 - Parallelism (async) with a bounded concurrency semaphore.
@@ -35,7 +38,6 @@ pip install -U:
   orjson>=3.10.0
   tenacity>=8.5.0
   rich>=13.7.0
-  pyarrow>=16.0.0
 
 Environment / Config
 --------------------
@@ -47,23 +49,17 @@ You must provide Azure OpenAI details either via environment variables or comman
 
 Example
 -------
-python gsm8k_graphs_pipeline.py \
-  --outdir ./out/gsm8k_graphs \
-  --dataset gsm8k --config main \
-  --splits train test \
-  --max-workers 8 \
-  --dry-run 50
+python generate_computational_graphs.py --dataset gsm8k   --out_dir ./out/gsm8k_graphs --dry-run 20
+python generate_computational_graphs.py --dataset aime24 --out_dir ./out/aime24_graphs
 
-At the end, you can build the Arrow dataset:
-python gsm8k_graphs_pipeline.py --outdir ./out/gsm8k_graphs --build-arrow
-
-Notes
------
-- This script targets Azure OpenAI Chat Completions API with "tools" (function calling).
-- If your Azure deployment or API version differs, set them via flags or environment.
-- The validator/evaluator supports typical middle-school math ops; unknown ops won't crash
-  validation but will likely prevent evaluation; the script records those gracefully.
-
+Notes for maintainers
+---------------------
+- To add a new dataset, append a profile to ``DATASET_REGISTRY`` below. Profiles are
+  declarative and describe column aliases, prompt flavour, and default output naming.
+- The script emits JSONL instead of Arrow. Consumers should expect ``out_final/graphs.jsonl``
+  alongside rich per-record caches under ``working_dir/cache``.
+- Validation and evaluation code is dataset-agnostic; dataset-specific behaviour should be
+  captured in the profile or, in rare cases, through optional hooks.
 """
 
 from __future__ import annotations
@@ -72,13 +68,11 @@ import argparse
 import asyncio
 import dataclasses
 import datetime as dt
-import functools
 import itertools
 import math
 import os
 import random
 import re
-import shutil
 import sys
 import time
 from collections import Counter, defaultdict
@@ -98,16 +92,65 @@ from rich.text import Text
 from rich.logging import RichHandler
 import logging
 
-# Hugging Face datasets / Arrow
-from datasets import load_dataset, load_dataset_builder, Dataset, DatasetDict
-import pyarrow as pa
-import pyarrow.dataset as pads
+# Hugging Face datasets
+from datasets import load_dataset, load_dataset_builder
 from nanugpt import utils
 
 
 # -----------------------------
 # Configuration
 # -----------------------------
+
+
+@dataclasses.dataclass(frozen=True)
+class DatasetProfile:
+    """Declarative description of a dataset supported by the generator."""
+
+    key: str
+    hf_dataset: str
+    hf_config: str
+    question_field: str
+    answer_field: str
+    expected_columns: Tuple[str, ...]
+    prompt_descriptor: str
+    prompt_notes: Tuple[str, ...]
+    default_out_subdir: str
+    id_field: Optional[str] = "id"
+
+
+DATASET_REGISTRY: Dict[str, DatasetProfile] = {
+    "gsm8k": DatasetProfile(
+        key="gsm8k",
+        hf_dataset="gsm8k",
+        hf_config="main",
+        question_field="question",
+        answer_field="answer",
+        expected_columns=("question", "answer"),
+        prompt_descriptor="middle-school math word problems",
+        prompt_notes=(
+            "Assume short, concrete word problems answered with integers or simple fractions.",
+            "Favor explicit arithmetic steps mirroring middle-school pedagogy.",
+        ),
+        default_out_subdir="gsm8k_graphs",
+        id_field="id",
+    ),
+    "aime24": DatasetProfile(
+        key="aime24",
+        hf_dataset="HuggingFaceH4/aime_2024",
+        hf_config="default",
+        question_field="problem",
+        answer_field="answer",
+        expected_columns=("year", "number", "problem", "answer"),
+        prompt_descriptor="AIME-2024 competition mathematics problems",
+        prompt_notes=(
+            "Solutions may require multi-step reasoning; still emit elementary arithmetic nodes.",
+            "Preserve exact constants (e.g., radicals, fractions) as Const nodes when needed.",
+        ),
+        default_out_subdir="aime24_graphs",
+        id_field=None,
+    ),
+}
+
 
 @dataclasses.dataclass
 class Config:
@@ -118,12 +161,21 @@ class Config:
     api_version: str = os.environ.get("OPENAI_API_VERSION", "2024-06-01")
 
     # Run controls
-    # Final output directory. If not provided, we derive it at runtime as:
-    #   os.environ.get('OUT_DIR', '~/out_dir') + '/gsm8k_graphs'
+    # Final output directory. If not provided, we derive it as:
+    #   os.environ.get('OUT_DIR', '~/out_dir') + f'/{profile.default_out_subdir}'
     out_dir: Optional[str] = None
-    dataset_name: str = "gsm8k"
-    dataset_config: str = "main"
+    dataset_key: str = "gsm8k"
+    dataset_name: Optional[str] = None
+    dataset_config: Optional[str] = None
     splits: Optional[Tuple[str, ...]] = None  # if None, auto-detect all dataset splits
+    question_field: Optional[str] = None
+    answer_field: Optional[str] = None
+    expected_columns: Tuple[str, ...] = dataclasses.field(default_factory=tuple)
+    prompt_descriptor: Optional[str] = None
+    prompt_notes: Tuple[str, ...] = dataclasses.field(default_factory=tuple)
+    default_out_subdir: Optional[str] = None
+    id_field: Optional[str] = None
+    profile: Optional[DatasetProfile] = None
     max_workers: int = 8
     request_timeout_s: Optional[int] = None
     network_max_retries: int = 8
@@ -135,8 +187,8 @@ class Config:
     temperature: Optional[float] = None
     seed: Optional[int] = 7
 
-    # Build Arrow dataset from cached jsonl even without calling the API
-    build_arrow_only: bool = False
+    # Build JSONL dataset from cached results even without calling the API
+    build_jsonl_only: bool = False
 
 
 # -----------------------------
@@ -458,8 +510,8 @@ def tool_schema() -> List[Dict[str, Any]]:
     }]
 
 
-SYSTEM_PROMPT = """\
-You are a meticulous graph builder for middle-school math word problems.
+SYSTEM_PROMPT_TEMPLATE = """\
+You are a meticulous graph builder for {descriptor}.
 
 Task:
 Given a problem statement, produce a computational graph (a DAG) capturing the exact arithmetic.
@@ -478,17 +530,25 @@ Rules:
 - Ensure the graph is acyclic and each referenced input id exists.
 - Prefer composing multi-input Add/Mul instead of chaining two-step adds/mults when it’s clearer.
 - Set 'output' to the node representing the final numeric answer requested.
-
+{extra_guidance}
 Response format:
 Return ONLY via the function call 'emit_graph' with arguments matching the schema.
 If the problem is underspecified or non-numeric, still return a best-effort DAG capturing the numeric parts.
 """
 
 
-def user_prompt(question: str) -> List[Dict[str, Any]]:
+def build_system_prompt(descriptor: str, notes: Tuple[str, ...]) -> str:
+    extra_guidance = ""
+    if notes:
+        bullets = "\n".join(f"- {note}" for note in notes)
+        extra_guidance = f"\nDataset-specific considerations:\n{bullets}\n"
+    return SYSTEM_PROMPT_TEMPLATE.format(descriptor=descriptor, extra_guidance=extra_guidance)
+
+
+def user_prompt(question: str, system_prompt: str) -> List[Dict[str, Any]]:
     """Build messages with the system content and the problem statement for the user role."""
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {
             "role": "user",
             "content": f"Problem:\n{question}\n\nReturn only the structured graph via the emit_graph function."
@@ -516,8 +576,8 @@ def json_dumps(obj: Any) -> str:
 
 def parse_gold_answer(ans: str) -> Optional[float]:
     """
-    GSM8K answers often end with '#### 42'. Extract the trailing number.
-    If not found, fallback to the last number in the string.
+    Extract a numeric answer from strings like "#### 42" (GSM8K/AIME style).
+    Falls back to the last number present when the canonical marker is absent.
     """
     if not ans:
         return None
@@ -912,6 +972,19 @@ class Runner:
         self.worker_slots: List[Optional[str]] = [None] * cfg.max_workers
         self.main_status_prefix = "Init"
 
+        if self.cfg.profile is None:
+            raise ValueError("Config.profile must be resolved before constructing Runner.")
+        self.profile = self.cfg.profile
+
+        self.question_field = self.cfg.question_field or self.profile.question_field
+        self.answer_field = self.cfg.answer_field or self.profile.answer_field
+        self.prompt_descriptor = self.cfg.prompt_descriptor or self.profile.prompt_descriptor
+        self.prompt_notes = self.cfg.prompt_notes or self.profile.prompt_notes
+        self.expected_columns = tuple(self.cfg.expected_columns)
+        self.id_field = self.cfg.id_field
+        self._columns_logged = False
+        self.system_prompt = build_system_prompt(self.prompt_descriptor, tuple(self.prompt_notes))
+
         if not self.cfg.splits:
             builder = load_dataset_builder(
                 self.cfg.dataset_name,
@@ -927,7 +1000,8 @@ class Runner:
         # cache dirs
         if not cfg.out_dir or not str(cfg.out_dir).strip():
             base_out = os.environ.get("OUT_DIR", os.path.expanduser("~/out_dir"))
-            final_out = os.path.join(base_out, "gsm8k_graphs")
+            subdir = self.cfg.default_out_subdir or f"{self.cfg.dataset_key}_graphs"
+            final_out = os.path.join(base_out, subdir)
         else:
             # Respect explicit CLI value as the final directory
             final_out = cfg.out_dir
@@ -953,8 +1027,18 @@ class Runner:
             handlers=[RichHandler(console=self.console, rich_tracebacks=True),
                       logging.FileHandler(log_path, encoding="utf-8")]
         )
-        self.log = logging.getLogger("gsm8k-graphs")
-        self.log.info("Splits to process: %s", ", ".join(self.splits))
+        logger_name = f"{self.cfg.dataset_key}-graphs"
+        self.log = logging.getLogger(logger_name)
+        self.log.info(
+            "Dataset: %s | config: %s | splits: %s",
+            self.cfg.dataset_name,
+            self.cfg.dataset_config,
+            ", ".join(self.splits),
+        )
+        if self.expected_columns:
+            self.log.info("Expected columns: %s", ", ".join(self.expected_columns))
+        else:
+            self.log.info("Expected columns not specified; will log actual columns once loaded.")
 
         # Silence noisy network libraries while the dashboard handles live updates.
         for noisy in ("httpx", "openai", "openai._client", "openai._http"):
@@ -1094,6 +1178,7 @@ class Runner:
             try:
                 cached = self._read_dataset_split(path)
                 if cached:
+                    self._log_columns_once(cached)
                     return cached
                 self.log.warning("Dataset cache for split %s is empty; re-downloading.", split)
             except ValueError as exc:
@@ -1102,8 +1187,20 @@ class Runner:
         self.log.info("Downloading dataset split %s and caching to in_dataset.", split)
         ds = load_dataset(self.cfg.dataset_name, self.cfg.dataset_config, split=split)
         rows = [dict(row) for row in ds]
+        self._log_columns_once(rows)
         self._write_dataset_split(split, rows)
         return rows
+
+    def _log_columns_once(self, rows: List[Dict[str, Any]]) -> None:
+        if self._columns_logged or not rows:
+            return
+        self._columns_logged = True
+        sample = rows[0]
+        actual = sorted(sample.keys())
+        self.log.info("Columns detected: %s", ", ".join(actual))
+        missing = sorted(set(self.expected_columns) - set(actual))
+        if missing:
+            self.log.warning("Missing expected column(s): %s", ", ".join(missing))
 
     def _split_dir(self, split: str) -> str:
         d = os.path.join(self.cache_dir, split)
@@ -1226,7 +1323,7 @@ class Runner:
         worker_slot: Optional[int] = None,
     ) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any], List[str], int]:
         """Attempt initial build; if invalid, send one or two repair attempts with validator feedback."""
-        messages = user_prompt(question)
+        messages = user_prompt(question, self.system_prompt)
         errors_all: List[str] = []
         attempts = 0
         last_graph_payload: Optional[Dict[str, Any]] = None
@@ -1270,7 +1367,7 @@ class Runner:
             if last_graph_payload is not None:
                 repair_prompt += "\n\nPrevious graph attempt:\n" + json_dumps(last_graph_payload)
             repair_messages = [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": repair_prompt},
             ]
             if rid:
@@ -1303,35 +1400,77 @@ class Runner:
         return None, raw_resp if 'raw_resp' in locals() else {}, errors_all, attempts
 
     # ---------- per-record processing ----------
-    async def process_one(self, split: str, rid: str, question: str, answer: str, worker_slot: int) -> Dict[str, Any]:
+    async def process_one(self, split: str, rid: str, idx: int, row: Dict[str, Any], worker_slot: int) -> Dict[str, Any]:
+        row_id: Optional[Any] = None
+        if self.id_field and row.get(self.id_field) not in (None, ""):
+            row_id = row.get(self.id_field)
+        elif row.get("id") not in (None, ""):
+            row_id = row.get("id")
+        else:
+            row_id = rid
+
+        question_raw = row.get(self.question_field)
+        if question_raw is None:
+            raise ValueError(f"Row {rid} missing question field '{self.question_field}'.")
+        answer_raw = row.get(self.answer_field)
+        if answer_raw is None:
+            raise ValueError(f"Row {rid} missing answer field '{self.answer_field}'.")
+
+        question_text = question_raw if isinstance(question_raw, str) else str(question_raw)
+        answer_text = answer_raw if isinstance(answer_raw, str) else str(answer_raw)
+
+        record: Dict[str, Any] = dict(row)
+        record["id"] = row_id
+        record["question"] = question_text
+        record["answer"] = answer_text
+        record["split"] = split
+        record.setdefault(self.question_field, question_raw)
+        record.setdefault(self.answer_field, answer_raw)
+
+        meta = {
+            "dataset_key": self.cfg.dataset_key,
+            "question_field": self.question_field,
+            "answer_field": self.answer_field,
+            "prompt_descriptor": self.prompt_descriptor,
+            "profile_id_field": self.id_field,
+            "row_index": idx,
+            "cache_rid": rid,
+        }
+        if self.prompt_notes:
+            meta["prompt_notes"] = list(self.prompt_notes)
+        record["_meta"] = meta
+
         try:
             await self.dashboard.update_worker(worker_slot, status="Start", problem=rid)
             await self._print_worker(rid, "Starting problem")
-            graph, raw, errors, attempts = await self.build_or_repair_graph(question, rid=rid, worker_slot=worker_slot)
+            graph, raw, errors, attempts = await self.build_or_repair_graph(question_text, rid=rid, worker_slot=worker_slot)
         except TransientNetworkError as ne:
             self.net_fail += 1
             self.done += 1
             await self._report_progress()
             await self.dashboard.update_worker(worker_slot, status="NetErr", failures_delta=1)
             await self._print_worker(rid, f"NetworkError: {ne}", style="red")
-            return {
-                "id": rid,
-                "split": split,
-                "question": question,
-                "answer": answer,
+            failure_record = dict(record)
+            failure_record.update({
                 "error": f"NetworkError: {ne}",
                 "attempts": 0,
-                "ts": dt.datetime.utcnow().isoformat()
-            }
+                "ts": dt.datetime.utcnow().isoformat(),
+                "graph": None,
+                "graph_valid": False,
+                "validation_errors": [f"NetworkError: {ne}"],
+                "raw_response": None,
+                "eval_ok": False,
+                "eval_value": None,
+                "eval_error": f"NetworkError: {ne}",
+                "gold_value": parse_gold_answer(answer_text),
+                "answer_match": False,
+            })
+            return failure_record
 
-        record: Dict[str, Any] = {
-            "id": rid,
-            "split": split,
-            "question": question,
-            "answer": answer,
+        record.update({
             "ts": dt.datetime.utcnow().isoformat(),
             "attempts": attempts,
-        }
+        })
 
         if graph is None:
             self.content_fail += 1
@@ -1371,7 +1510,7 @@ class Runner:
             except Exception as e:
                 eval_ok, value, eval_err = False, None, str(e)
 
-        gold = parse_gold_answer(answer)
+        gold = parse_gold_answer(answer_text)
         match = (eval_ok and gold is not None and value is not None and abs(value - gold) < 1e-6)
 
         record.update({
@@ -1457,7 +1596,7 @@ class Runner:
                 await self.dashboard.update_worker(slot, status="Ready", problem=rid)
                 await self._print_worker(rid, "Acquired worker slot", style="blue")
                 try:
-                    rec = await self.process_one(split, rid, row["question"], row["answer"], worker_slot=slot)
+                    rec = await self.process_one(split, rid, idx, row, worker_slot=slot)
                     self.save_record(split, rid, rec)
                 except Exception as exc:
                     self.log.exception("Unhandled exception during processing | split=%s | rid=%s", split, rid)
@@ -1486,72 +1625,45 @@ class Runner:
         self.main_status_prefix = f"{split} done"
         await self._refresh_main_row(status=f"{split} done")
 
-    # ---------- Arrow dataset build ----------
-    def build_arrow(self) -> None:
-        """Read cached JSONs and build a HF Dataset saved to disk."""
-        self.console.rule("[bold]Building Arrow dataset from cache")
+    # ---------- JSONL dataset build ----------
+    def build_jsonl(self) -> None:
+        """Aggregate cached JSON records into a single JSONL artifact."""
+        self.console.rule("[bold]Building JSONL dataset from cache")
 
-        # Load original splits to align (for reproducibility)
-        result_rows = []
+        records: List[Dict[str, Any]] = []
         for split in self.splits:
             split_dir = self._split_dir(split)
             files = [os.path.join(split_dir, fn) for fn in os.listdir(split_dir) if fn.endswith(".json")]
-            for p in sorted(files):
-                with open(p, "rb") as f:
-                    rec = orjson.loads(f.read())
-                # Normalize for HF datasets (ensure pure Python types)
-                out = {
-                    "id": rec.get("id"),
-                    "split": rec.get("split"),
-                    "question": rec.get("question"),
-                    "answer": rec.get("answer"),
-                    "graph_json": json_dumps(rec.get("graph")) if rec.get("graph") is not None else None,
-                    "graph_valid": bool(rec.get("graph_valid")),
-                    "validation_errors": rec.get("validation_errors") or [],
-                    "eval_ok": bool(rec.get("eval_ok")),
-                    "eval_value": float(rec["eval_value"]) if rec.get("eval_value") is not None else None,
-                    "gold_value": float(rec["gold_value"]) if rec.get("gold_value") is not None else None,
-                    "answer_match": bool(rec.get("answer_match")),
-                    "ops": (rec.get("stats") or {}).get("ops") or [],
-                    "num_nodes": (rec.get("stats") or {}).get("num_nodes"),
-                    "num_edges": (rec.get("stats") or {}).get("num_edges"),
-                    "max_width": (rec.get("stats") or {}).get("max_width"),
-                    "height": (rec.get("stats") or {}).get("height"),
-                    "levels": [f"{k}:{v}" for k, v in ((rec.get('stats') or {}).get('levels') or {}).items()],
-                    "attempts": int(rec.get("attempts") or 0),
-                    "ts": rec.get("ts"),
-                    "raw_response_json": json_dumps(rec.get("raw_response")) if rec.get("raw_response") else None,
-                }
-                result_rows.append(out)
+            for path in sorted(files):
+                with open(path, "rb") as fh:
+                    rec = orjson.loads(fh.read())
+                records.append(rec)
 
-        if not result_rows:
-            self.console.print("[yellow]No cached records found. Nothing to build.[/yellow]")
+        if not records:
+            self.console.print("[yellow]No cached records found. Nothing to materialise.[/yellow]")
             return
 
-        ds = Dataset.from_list(result_rows)
-        save_path = os.path.join(self.out_final_dir, "arrow_dataset")
-        tmp_save_path = save_path + ".tmp"
-        if os.path.exists(tmp_save_path):
-            if os.path.isdir(tmp_save_path):
-                shutil.rmtree(tmp_save_path)
-            else:
-                os.remove(tmp_save_path)
-        ds.save_to_disk(tmp_save_path)
-        if os.path.exists(save_path):
-            if os.path.isdir(save_path):
-                shutil.rmtree(save_path)
-            else:
-                os.remove(save_path)
-        shutil.move(tmp_save_path, save_path)
-        self.console.print(f"[green]Saved Arrow dataset to: {save_path}[/green]")
+        jsonl_path = os.path.join(self.out_final_dir, "graphs.jsonl")
+        tmp_path = jsonl_path + ".tmp"
+        os.makedirs(self.out_final_dir, exist_ok=True)
+        with open(tmp_path, "wb") as fh:
+            for rec in records:
+                fh.write(orjson.dumps(rec))
+                fh.write(b"\n")
+        os.replace(tmp_path, jsonl_path)
+        self.console.print(f"[green]Saved JSONL dataset to: {jsonl_path}[/green]")
 
-        # Also write a summary table
-        ops_flat = list(itertools.chain.from_iterable(r["ops"] for r in result_rows))
+        ops_iter = (
+            (rec.get("stats") or {}).get("ops") or []
+            for rec in records
+            if isinstance(rec, dict)
+        )
+        ops_flat = list(itertools.chain.from_iterable(ops_iter))
         ops_counts = Counter(ops_flat)
-        total_graphs = len(result_rows)
-        valid_graphs = sum(1 for r in result_rows if r["graph_valid"])
-        eval_ok = sum(1 for r in result_rows if r["eval_ok"])
-        match = sum(1 for r in result_rows if r["answer_match"])
+        total_graphs = len(records)
+        valid_graphs = sum(1 for r in records if r.get("graph_valid"))
+        eval_ok = sum(1 for r in records if r.get("eval_ok"))
+        match = sum(1 for r in records if r.get("answer_match"))
 
         tbl = Table(title="Summary")
         tbl.add_column("Metric")
@@ -1568,8 +1680,8 @@ class Runner:
         # Surface output location immediately so long runs show where results land.
         self.console.print(f"[bold green]Outputs will be written to:[/bold green] {self.out_dir}")
 
-        if self.cfg.build_arrow_only:
-            self.build_arrow()
+        if self.cfg.build_jsonl_only:
+            self.build_jsonl()
             # Print final output directory for user clarity
             self._print_dir_summary()
             return
@@ -1589,13 +1701,13 @@ class Runner:
             except Exception as exc:
                 await self.dashboard.set_message(f"Fatal error: {exc}", style="red")
                 raise
-            await self.dashboard.set_message("Splits complete. Building Arrow dataset...", style="cyan")
-            self.main_status_prefix = "Arrow"
-            await self._refresh_main_row(status="Arrow")
+            await self.dashboard.set_message("Splits complete. Building JSONL dataset...", style="cyan")
+            self.main_status_prefix = "JSONL"
+            await self._refresh_main_row(status="JSONL")
         self.dashboard.bind_live(None)
 
-        # Build Arrow dataset at the end as a convenience
-        self.build_arrow()
+        # Build JSONL dataset at the end as a convenience
+        self.build_jsonl()
         # Print final output directory for user clarity
         self._print_dir_summary()
 
@@ -1605,43 +1717,173 @@ class Runner:
 # -----------------------------
 
 def parse_args(argv: Optional[List[str]] = None) -> Config:
-    p = argparse.ArgumentParser(description="GSM8K → computational graphs via Azure OpenAI (GPT-5).")
-    # Standardize to --out_dir; keep --outdir as a backward-compatible alias
-    p.add_argument("--out_dir", "--outdir", dest="out_dir", type=str, default=None,
-                   help="Output directory (cache + logs + arrow). If not set, uses $OUT_DIR or ~/out_dir, with subdir 'gsm8k_graphs'.")
-    p.add_argument("--dataset", type=str, default=None, help="Hugging Face dataset name (default: gsm8k).")
-    p.add_argument("--config", type=str, default=None, help="Dataset config (default: main).")
-    p.add_argument("--splits", type=str, nargs="+", default=None,
-                   help="Splits to process. If omitted, all dataset splits are used.")
-    p.add_argument("--max-workers", type=int, default=None, help="Max concurrent API calls.")
-    p.add_argument("--timeout", type=int, default=None, help="Per-request timeout (seconds).")
-    p.add_argument("--net-retries", type=int, default=None, help="Max network retries.")
-    p.add_argument("--content-attempts", type=int, default=None, help="Max content repair attempts per record.")
-    p.add_argument("--dry-run", type=int, default=None, help="If set, only process this many examples per split.")
-    p.add_argument("--max-problems", type=int, default=None,
-                   help="If set >=0, stop after processing this many problems across all splits.")
-    p.add_argument("--temperature", type=float, default=None, help="Sampling temperature.")
-    p.add_argument("--seed", type=int, default=None, help="Deterministic seed for the model (if supported).")
+    parser = argparse.ArgumentParser(
+        description="Generate computational graphs for math word-problem datasets via Azure OpenAI."
+    )
 
-    # Azure
-    p.add_argument("--azure-endpoint", type=str, default=None, help="Azure OpenAI endpoint URL.")
-    p.add_argument("--api-key", type=str, default=None, help="Azure OpenAI API key.")
-    p.add_argument("--api-version", type=str, default=None, help="Azure OpenAI API version (e.g., 2024-06-01).")
-    p.add_argument("--deployment", type=str, default=None, help="Azure deployment name for your chat model.")
+    # Dataset selection / overrides
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="gsm8k",
+        help=(
+            "Dataset profile to run. Built-ins: "
+            + ", ".join(sorted(DATASET_REGISTRY.keys()))
+            + ". Provide overrides (e.g. --hf-dataset) to experiment with new datasets."
+        ),
+    )
+    parser.add_argument("--hf-dataset", type=str, default=None, help="Override Hugging Face dataset identifier.")
+    parser.add_argument("--hf-config", type=str, default=None, help="Override dataset config name.")
+    parser.add_argument("--question-field", type=str, default=None, help="Column containing the problem statement.")
+    parser.add_argument("--answer-field", type=str, default=None, help="Column containing the reference answer.")
+    parser.add_argument("--id-field", type=str, default=None, help="Column to treat as a unique problem identifier.")
+    parser.add_argument(
+        "--expected-columns",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Columns expected for the dataset (logged for visibility).",
+    )
+    parser.add_argument(
+        "--prompt-descriptor",
+        type=str,
+        default=None,
+        help="Short phrase describing the dataset for the system prompt (e.g. 'middle-school math problems').",
+    )
+    parser.add_argument(
+        "--prompt-note",
+        action="append",
+        default=None,
+        help="Extra bullet instruction appended to the system prompt. Repeat the flag to add multiple notes.",
+    )
+    parser.add_argument(
+        "--out-subdir",
+        type=str,
+        default=None,
+        help="Default output subdirectory when --out_dir is omitted.",
+    )
 
-    # Build Arrow only
-    p.add_argument("--build-arrow", action="store_true", help="Only build Arrow dataset from cache; skip API calls.")
+    # Standard controls
+    parser.add_argument(
+        "--out_dir",
+        "--outdir",
+        dest="out_dir",
+        type=str,
+        default=None,
+        help="Root output directory (cache + logs + out_final). If omitted, derives from $OUT_DIR or ~/out_dir.",
+    )
+    parser.add_argument(
+        "--splits",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Dataset splits to process. When absent, all available splits are used.",
+    )
+    parser.add_argument("--max-workers", type=int, default=None, help="Maximum concurrent API calls.")
+    parser.add_argument("--timeout", type=int, default=None, help="Per-request timeout (seconds).")
+    parser.add_argument("--net-retries", type=int, default=None, help="Maximum network retries per request.")
+    parser.add_argument(
+        "--content-attempts",
+        type=int,
+        default=None,
+        help="Maximum model repair attempts per record when the graph is invalid.",
+    )
+    parser.add_argument("--dry-run", type=int, default=None, help="If set, only process this many examples per split.")
+    parser.add_argument(
+        "--max-problems",
+        type=int,
+        default=None,
+        help="Global budget across splits. When set >=0, stop after processing this many problems.",
+    )
+    parser.add_argument("--temperature", type=float, default=None, help="Sampling temperature passed to the model.")
+    parser.add_argument("--seed", type=int, default=None, help="Deterministic seed for the model (if supported).")
 
-    args = p.parse_args(argv)
+    # Azure connectivity overrides
+    parser.add_argument("--azure-endpoint", type=str, default=None, help="Azure OpenAI endpoint URL.")
+    parser.add_argument("--api-key", type=str, default=None, help="Azure OpenAI API key.")
+    parser.add_argument("--api-version", type=str, default=None, help="Azure OpenAI API version (e.g. 2024-06-01).")
+    parser.add_argument("--deployment", type=str, default=None, help="Azure deployment name for the chat model.")
+
+    # Output-only mode
+    parser.add_argument(
+        "--build-jsonl",
+        action="store_true",
+        help="Only build the final JSONL dataset from cache; skip API calls.",
+    )
+    parser.add_argument(
+        "--build-arrow",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )  # legacy alias for compatibility
+
+    args = parser.parse_args(argv)
     cfg = Config()
 
-    # Override from CLI
-    if args.out_dir: cfg.out_dir = args.out_dir
-    if args.dataset: cfg.dataset_name = args.dataset
-    if args.config: cfg.dataset_config = args.config
-    if args.splits: cfg.splits = tuple(args.splits)
-    if args.max_workers is not None: cfg.max_workers = args.max_workers
-    if args.timeout is not None: cfg.request_timeout_s = args.timeout
+    cfg.dataset_key = args.dataset or cfg.dataset_key
+
+    if cfg.dataset_key in DATASET_REGISTRY:
+        profile = DATASET_REGISTRY[cfg.dataset_key]
+    else:
+        if not args.hf_dataset:
+            parser.error(
+                f"Unknown dataset profile '{cfg.dataset_key}'. Provide --hf-dataset and related overrides to proceed."
+            )
+        profile = DatasetProfile(
+            key=cfg.dataset_key,
+            hf_dataset=args.hf_dataset,
+            hf_config=args.hf_config or "default",
+            question_field=args.question_field or "question",
+            answer_field=args.answer_field or "answer",
+            expected_columns=tuple(args.expected_columns or ()),
+            prompt_descriptor=args.prompt_descriptor or f"{cfg.dataset_key} math problems",
+            prompt_notes=tuple(args.prompt_note or ()),
+            default_out_subdir=args.out_subdir or f"{cfg.dataset_key}_graphs",
+            id_field=args.id_field,
+        )
+
+    overrides: Dict[str, Any] = {}
+    if args.hf_dataset:
+        overrides["hf_dataset"] = args.hf_dataset
+    if args.hf_config:
+        overrides["hf_config"] = args.hf_config
+    if args.question_field:
+        overrides["question_field"] = args.question_field
+    if args.answer_field:
+        overrides["answer_field"] = args.answer_field
+    if args.expected_columns is not None:
+        overrides["expected_columns"] = tuple(args.expected_columns)
+    if args.prompt_descriptor:
+        overrides["prompt_descriptor"] = args.prompt_descriptor
+    if args.prompt_note is not None:
+        overrides["prompt_notes"] = profile.prompt_notes + tuple(args.prompt_note)
+    if args.out_subdir:
+        overrides["default_out_subdir"] = args.out_subdir
+    if args.id_field is not None:
+        overrides["id_field"] = args.id_field
+
+    if overrides:
+        profile = dataclasses.replace(profile, **overrides)
+
+    cfg.profile = profile
+    cfg.dataset_name = profile.hf_dataset
+    cfg.dataset_config = profile.hf_config
+    cfg.question_field = profile.question_field
+    cfg.answer_field = profile.answer_field
+    cfg.expected_columns = profile.expected_columns
+    cfg.prompt_descriptor = profile.prompt_descriptor
+    cfg.prompt_notes = profile.prompt_notes
+    cfg.default_out_subdir = profile.default_out_subdir
+    cfg.id_field = profile.id_field
+
+    # Standard overrides from CLI
+    if args.out_dir:
+        cfg.out_dir = args.out_dir
+    if args.splits:
+        cfg.splits = tuple(args.splits)
+    if args.max_workers is not None:
+        cfg.max_workers = args.max_workers
+    if args.timeout is not None:
+        cfg.request_timeout_s = args.timeout
     if args.net_retries is not None: cfg.network_max_retries = args.net_retries
     if args.content_attempts is not None: cfg.content_max_attempts = args.content_attempts
     if args.dry_run is not None: cfg.dry_run = args.dry_run
@@ -1654,7 +1896,8 @@ def parse_args(argv: Optional[List[str]] = None) -> Config:
     if args.api_version: cfg.api_version = args.api_version
     if args.deployment: cfg.deployment = args.deployment
 
-    if args.build_arrow: cfg.build_arrow_only = True
+    if args.build_jsonl or args.build_arrow:
+        cfg.build_jsonl_only = True
 
     return cfg
 

@@ -3,8 +3,7 @@
 
 Purpose
 -------
-Transform the cached Arrow dataset produced by graph generation scripts (e.g.,
-``gsm8k_graphs.py`` or ``aime24_graphs.py``) into a curated markdown report
+Transform the cached JSONL dataset produced by the unified graph generation script (``generate_computational_graphs.py``) into a curated markdown report
 that highlights structural properties of the generated computational graphs.
 The intent is to provide a quick, repeatable overview of run quality and
 interesting edge cases without re-reading raw JSON caches.
@@ -17,7 +16,7 @@ graph-generation scripts: an explicit ``--out_dir`` overrides environment
 ``~/out_dir/<run-subdir>`` with ``run-subdir`` defaulting to
 ``gsm8k_graphs``. If ``--out_dir`` points to the parent directory (e.g.,
 ``~/out_dir``), the script also checks ``<out_dir>/<run-subdir>``. It expects
-the Arrow dataset directory at ``<resolved>/out_final/arrow_dataset``.
+the JSONL dataset at ``<resolved>/out_final/graphs.jsonl``.
 
 Outputs
 -------
@@ -31,7 +30,7 @@ Artifacts are written to ``<out_dir>/<report-subdir>`` (default ``report``):
 
 Workflow Summary
 ----------------
-1. Load the Arrow dataset into memory as plain dictionaries.
+1. Load the JSONL dataset into memory as plain dictionaries.
 2. Enrich records with derived metrics (e.g., nodes+edges, width/height ratio,
    fan-in statistics, unique op count) and aggregate global operator usage.
 3. Compute descriptive statistics and save distribution histograms.
@@ -55,7 +54,7 @@ Extensibility Notes
 * The plotting utilities centralise styling so future tweaks (e.g., seaborn)
   only require changes in one place.
 * This script deliberately avoids relying on private structures from the
-  generator scripts; it only consumes data persisted in the Arrow dataset.
+  generator scripts; it only consumes data persisted in the JSONL dataset.
 * Lightweight console logging is handled via the ``log`` helper; replace with a
   richer logger if structured output is required.
 """
@@ -85,7 +84,7 @@ try:
     from datasets import load_from_disk
 except Exception as exc:  # pragma: no cover - guarded import
     raise SystemExit(
-        "datasets (🤗) library is required to read the Arrow dataset."
+        "orjson (or the standard json module) is required to read the JSONL export."
     ) from exc
 
 
@@ -121,9 +120,9 @@ def resolve_output_dir(cli_out_dir: Optional[str], run_subdir: str) -> Tuple[str
     normalized = normalize_run_subdir(run_subdir)
     if cli_out_dir and str(cli_out_dir).strip():
         explicit = os.path.abspath(str(cli_out_dir).strip())
-        explicit_marker = os.path.join(explicit, "out_final", "arrow_dataset")
+        explicit_marker = os.path.join(explicit, "out_final", "graphs.jsonl")
         nested = os.path.join(explicit, normalized)
-        nested_marker = os.path.join(nested, "out_final", "arrow_dataset")
+        nested_marker = os.path.join(nested, "out_final", "graphs.jsonl")
 
         if os.path.exists(explicit_marker):
             resolved = explicit
@@ -148,19 +147,42 @@ def log(message: str) -> None:
     print(f"[gsm8k_analysis] {message}")
 
 
-def load_arrow_dataset(out_dir: str, run_label: str):
-    arrow_path = os.path.join(out_dir, "out_final", "arrow_dataset")
-    if not os.path.exists(arrow_path):
-        hint = "Run the corresponding graph generation script first."
-        if run_label:
-            hint = (
-                "Run the graph generation script that produces the "
-                f"'{run_label}' outputs first."
-            )
-        raise FileNotFoundError(
-            f"Arrow dataset not found at {arrow_path}. {hint}"
+def load_graph_records(out_dir: str, run_label: str) -> Tuple[List[Dict[str, Any]], str]:
+    jsonl_path = os.path.join(out_dir, "out_final", "graphs.jsonl")
+    arrow_dir = os.path.join(out_dir, "out_final", "arrow_dataset")
+
+    if os.path.exists(jsonl_path):
+        records: List[Dict[str, Any]] = []
+        with open(jsonl_path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"Failed to parse JSONL line: {exc}") from exc
+        return records, jsonl_path
+
+    if os.path.exists(arrow_dir):
+        try:
+            from datasets import load_from_disk
+        except Exception as exc:  # pragma: no cover - optional dependency path
+            raise SystemExit(
+                "datasets (🤗) library is required to read legacy Arrow exports."
+            ) from exc
+        dataset = load_from_disk(arrow_dir)
+        return [dict(row) for row in dataset], arrow_dir
+
+    hint = "Run the graph generation script first."
+    if run_label:
+        hint = (
+            "Run the graph generation script that produces the "
+            f"'{run_label}' outputs first."
         )
-    return load_from_disk(arrow_path), arrow_path
+    raise FileNotFoundError(
+        f"No dataset export found at {jsonl_path} or {arrow_dir}. {hint}"
+    )
 
 
 def safe_float_list(values: Iterable[Any]) -> List[float]:
@@ -475,7 +497,7 @@ def summarise_boolean(values: Iterable[bool]) -> Tuple[int, int, float]:
 
 def render_markdown(
     report_path: str,
-    arrow_path: str,
+    dataset_path: str,
     run_label: str,
     total_records: int,
     summary_lines: List[str],
@@ -487,7 +509,7 @@ def render_markdown(
     lines.append("")
     if run_label:
         lines.append(f"*Run subdirectory*: `{run_label}`")
-    lines.append(f"*Dataset source*: `{arrow_path}`")
+    lines.append(f"*Dataset source*: `{dataset_path}`")
     lines.append(f"*Total problems analysed*: **{total_records}**")
     lines.append("")
 
@@ -599,9 +621,61 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     log(f"Active run subdirectory: {run_subdir}")
     log(f"Report directory: {report_dir}")
 
-    dataset, arrow_path = load_arrow_dataset(out_dir, run_subdir)
-    log(f"Loading Arrow dataset from {arrow_path} ...")
-    records: List[Dict[str, Any]] = [dict(row) for row in dataset]
+    raw_records, dataset_path = load_graph_records(out_dir, run_subdir)
+    log(f"Loading dataset from {dataset_path} ...")
+    records: List[Dict[str, Any]] = [dict(row) for row in raw_records]
+
+    for rec in records:
+        stats = rec.get("stats")
+        if isinstance(stats, dict):
+            if stats.get("num_nodes") is not None:
+                rec["num_nodes"] = stats.get("num_nodes")
+            else:
+                rec.setdefault("num_nodes", None)
+            if stats.get("num_edges") is not None:
+                rec["num_edges"] = stats.get("num_edges")
+            else:
+                rec.setdefault("num_edges", None)
+            if stats.get("max_width") is not None:
+                rec["max_width"] = stats.get("max_width")
+            else:
+                rec.setdefault("max_width", None)
+            if stats.get("height") is not None:
+                rec["height"] = stats.get("height")
+            else:
+                rec.setdefault("height", None)
+            if stats.get("ops"):
+                rec["ops"] = stats.get("ops")
+            else:
+                rec.setdefault("ops", rec.get("ops") or [])
+
+            levels = stats.get("levels")
+            if isinstance(levels, dict):
+                try:
+                    rec["levels"] = [
+                        f"{k}:{levels[k]}" for k in sorted(levels, key=lambda v: int(v))
+                    ]
+                except Exception:
+                    rec["levels"] = [f"{k}:{v}" for k, v in levels.items()]
+            elif isinstance(levels, list):
+                rec["levels"] = levels
+            else:
+                rec.setdefault("levels", rec.get("levels") or [])
+        else:
+            rec.setdefault("num_nodes", rec.get("num_nodes"))
+            rec.setdefault("num_edges", rec.get("num_edges"))
+            rec.setdefault("max_width", rec.get("max_width"))
+            rec.setdefault("height", rec.get("height"))
+            rec.setdefault("ops", rec.get("ops") or [])
+            rec.setdefault("levels", rec.get("levels") or [])
+
+        if "graph" in rec and rec["graph"] is not None:
+            try:
+                rec["graph_json"] = json.dumps(rec["graph"])
+            except Exception:
+                rec.setdefault("graph_json", None)
+        else:
+            rec.setdefault("graph_json", None)
     log(f"Loaded {len(records)} records. Deriving per-graph metrics...")
 
     # Global accumulators for cross-cutting analysis.
@@ -792,7 +866,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         f"- Valid graphs: **{valid_count}/{valid_total}** ({valid_rate*100:.1f}%)",
         f"- Successfully evaluated: **{eval_count}/{eval_total}** ({eval_rate*100:.1f}%)",
         f"- Gold answer matches: **{match_count}/{match_total}** ({match_rate*100:.1f}%)",
-        f"- Cached Arrow rows read: **{total_records}**",
+        f"- Cached records read: **{total_records}**",
     ]
 
     for qty in quantities:
@@ -990,7 +1064,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     log(f"Rendering markdown report to {report_path}")
     render_markdown(
         report_path=report_path,
-        arrow_path=arrow_path,
+        dataset_path=dataset_path,
         run_label=run_subdir,
         total_records=total_records,
         summary_lines=summary_lines,
