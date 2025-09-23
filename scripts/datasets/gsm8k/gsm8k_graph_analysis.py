@@ -149,40 +149,28 @@ def log(message: str) -> None:
 
 def load_graph_records(out_dir: str, run_label: str) -> Tuple[List[Dict[str, Any]], str]:
     jsonl_path = os.path.join(out_dir, "out_final", "graphs.jsonl")
-    arrow_dir = os.path.join(out_dir, "out_final", "arrow_dataset")
-
-    if os.path.exists(jsonl_path):
-        records: List[Dict[str, Any]] = []
-        with open(jsonl_path, "r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    records.append(json.loads(line))
-                except json.JSONDecodeError as exc:
-                    raise ValueError(f"Failed to parse JSONL line: {exc}") from exc
-        return records, jsonl_path
-
-    if os.path.exists(arrow_dir):
-        try:
-            from datasets import load_from_disk
-        except Exception as exc:  # pragma: no cover - optional dependency path
-            raise SystemExit(
-                "datasets (🤗) library is required to read legacy Arrow exports."
-            ) from exc
-        dataset = load_from_disk(arrow_dir)
-        return [dict(row) for row in dataset], arrow_dir
-
-    hint = "Run the graph generation script first."
-    if run_label:
-        hint = (
-            "Run the graph generation script that produces the "
-            f"'{run_label}' outputs first."
+    if not os.path.exists(jsonl_path):
+        hint = "Run the graph generation script first."
+        if run_label:
+            hint = (
+                "Run the graph generation script that produces the "
+                f"'{run_label}' outputs first."
+            )
+        raise FileNotFoundError(
+            f"JSONL dataset not found at {jsonl_path}. {hint}"
         )
-    raise FileNotFoundError(
-        f"No dataset export found at {jsonl_path} or {arrow_dir}. {hint}"
-    )
+
+    records: List[Dict[str, Any]] = []
+    with open(jsonl_path, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Failed to parse JSONL line: {exc}") from exc
+    return records, jsonl_path
 
 
 def safe_float_list(values: Iterable[Any]) -> List[float]:
