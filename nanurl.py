@@ -1,20 +1,33 @@
 # Code originally from https://github.com/aburkov/theLMbook/blob/main/GRPO.py
 
-import numpy as np
+import copy
 import random
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
+
+import numpy as np
 import torch
 import torch.nn.functional as F
-import copy
 
-from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    PreTrainedModel,
+    PreTrainedTokenizerBase,
+)
 
-def set_random_seed(seed: int = 42):
-    """
-    Set the random seed for reproducibility across Python, NumPy, and PyTorch.
+CompletionMessage = Dict[str, str]
+CompletionList = List[CompletionMessage]
+DatasetExample = Dict[str, str]
+BatchSample = Union[DatasetExample, Tuple[str, str]]
+RewardFn = Callable[[Sequence[str], Sequence[CompletionList], Sequence[Optional[str]]], Sequence[float]]
 
-    Parameters:
-        seed (int): The seed value to use.
+def set_random_seed(seed: int = 42) -> None:
+    """Set the random seed for Python, NumPy, and PyTorch.
+
+    Example:
+        >>> set_random_seed(123)
+        # Deterministic behaviour across random, numpy, and torch
     """
     # Set the seed for Python's built-in random module
     random.seed(seed)
@@ -45,10 +58,19 @@ Respond in the following format:
 </answer>
 """
 
-def prepare_dataset(split="train"):
-    """Load and prepare the GSM8K dataset for training with string prompts."""
+def prepare_dataset(split: str = "train") -> List[DatasetExample]:
+    """Load and format GSM8K so prompts are ready for chat-style policies.
+
+    Example:
+        >>> sample = prepare_dataset(split="test")[0]
+        >>> sample.keys()
+        dict_keys(['prompt', 'answer'])
+
+    The prompt field is a chat transcript encoded as a single string, because the
+    RL pipeline consumes plain strings rather than structured messages.
+    """
     data = load_dataset('openai/gsm8k', 'main')[split]
-    formatted_data = []
+    formatted_data: List[DatasetExample] = []
 
     for example in data:
         # Convert list of messages to a single string prompt.
@@ -64,18 +86,24 @@ def prepare_dataset(split="train"):
 
     return formatted_data
 
-def build_prompt(messages):
-    """
-    Build a single prompt string from a list of messages.
-    Each message is expected to be a dictionary with 'role' and 'content' keys.
-    This function concatenates all message contents, preserving the training format.
-    """
-    return "\n".join([msg["content"].strip() for msg in messages])
+def build_prompt(messages: Sequence[CompletionMessage]) -> str:
+    """Concatenate chat messages into a single newline-delimited prompt string.
 
-def extract_answer_from_model_output(text):
+    Example:
+        >>> build_prompt([
+        ...     {"role": "system", "content": "<answer>..."},
+        ...     {"role": "user", "content": "What is 1+1?"},
+        ... ])
+        '<answer>...\nWhat is 1+1?'
     """
-    Extracts the value from the last <answer> tag in the text.
-    Returns None if no valid answer is found.
+    return "\n".join(msg["content"].strip() for msg in messages)
+
+def extract_answer_from_model_output(text: str) -> Optional[str]:
+    """Return the payload of the last `<answer>` ... `</answer>` block.
+
+    Example:
+        >>> extract_answer_from_model_output('<answer>42</answer> extra')
+        '42'
     """
     # Split on <answer> and take everything after the last occurrence
     parts = text.split("<answer>")
@@ -91,31 +119,23 @@ def extract_answer_from_model_output(text):
     answer = last_part.split("</answer>")[0].strip()
     return None if answer == "..." else answer
 
-def extract_answer_from_dataset(text):
-    """
-    Extracts the answer from the dataset.
-    The dataset separates the answer using the '####' delimiter.
+def extract_answer_from_dataset(text: str) -> Optional[str]:
+    """Extract the numeric answer after the GSM8K `####` delimiter.
+
+    Example:
+        >>> extract_answer_from_dataset('solution steps #### 12')
+        '12'
     """
     if "####" not in text:
         return None
     return text.split("####")[1].strip()
 
-def _extract_last_number(text):
-    """
-    Extracts the last number from text if it's properly separated.
+def _extract_last_number(text: str) -> Optional[float]:
+    """Extract the trailing numeric token from ``text`` when present.
 
-    Args:
-        text (str): The text to extract a number from.
-
-    Returns:
-        float or None: The extracted number as a float, or None if no valid number is found.
-
-    Explanation:
-        1. First removes $ and % signs from the text.
-        2. Uses regex to find numbers that are:
-           - Preceded by space, equals sign, or start of string
-           - Followed by end of string or space
-        3. Returns the first matching number as a float, or None if no match is found.
+    Example:
+        >>> _extract_last_number('cost = 7.5 dollars')
+        7.5
     """
     import re
 
@@ -130,52 +150,33 @@ def _extract_last_number(text):
     return float(match.group(1)) if match else None
 
 
-def _extract_single_number(text):
-    """
-    Extracts a single number from text if exactly one exists.
+def _extract_single_number(text: str) -> Optional[float]:
+    """Return the numeric value if ``text`` contains exactly one number.
 
-    Args:
-        text (str): The text to extract a number from.
-
-    Returns:
-        float or None: The extracted number as a float if exactly one number exists,
-                      otherwise None.
-
-    Explanation:
-        1. Uses regex to find all numbers in the text.
-        2. Returns the first number as a float if exactly one number is found.
-        3. Returns None if zero or multiple numbers are found.
+    Example:
+        >>> _extract_single_number('answer: -3.2')
+        -3.2
     """
     import re
     numbers = re.findall(r'-?\d*\.?\d+', text)
     return float(numbers[0]) if len(numbers) == 1 else None
 
 
-def evaluate_model(model, tokenizer, eval_examples, device):
-    """
-    Evaluates the model on a set of examples and prints detailed results.
+def evaluate_model(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    eval_examples: Sequence[DatasetExample],
+    device: torch.device,
+) -> float:
+    """Run greedy generation on ``eval_examples`` and report accuracy.
 
-    Args:
-        model: The language model to evaluate.
-        tokenizer: The tokenizer for encoding inputs and decoding outputs.
-        eval_examples (list): List of evaluation examples, each containing "prompt" and "answer".
-        device: The device (CPU or GPU) to run evaluation on.
+    Example:
+        >>> accuracy = evaluate_model(model, tokenizer, eval_batch, device)
+        >>> print(f"Eval accuracy: {accuracy:.1f}%")
+        Eval accuracy: 53.3%
 
-    Returns:
-        float: The accuracy percentage (correct predictions / total examples * 100).
-
-    Explanation:
-        1. Sets the model to evaluation mode.
-        2. For each example in the evaluation set:
-           - Encodes the prompt and generates a response using the model.
-           - Extracts the predicted answer from the generated response.
-           - Compares the predicted answer with the expected answer using multiple methods:
-             a. Exact string matching
-             b. Single number extraction and comparison
-             c. Last number extraction and comparison
-           - Prints detailed information about each example.
-        3. Calculates and returns the overall accuracy.
-        4. Returns the model to training mode.
+    The function logs the full prompt and completion for manual inspection to
+    make debugging reward logic easier.
     """
     model.eval()
     correct = 0
@@ -251,7 +252,12 @@ def evaluate_model(model, tokenizer, eval_examples, device):
     model.train()
     return accuracy
 
-def correctness_reward(prompts, completions, answer, **kwargs):
+def correctness_reward(
+    prompts: Sequence[str],
+    completions: Sequence[CompletionList],
+    answer: Sequence[Optional[str]],
+    **kwargs: object,
+) -> List[float]:
     """
     Assigns a reward based on the correctness of the model's answer.
 
@@ -263,6 +269,14 @@ def correctness_reward(prompts, completions, answer, **kwargs):
 
     Returns:
         list[float]: Reward scores based on answer correctness.
+
+    Example:
+        >>> correctness_reward(
+        ...     prompts=["What is 1+1?"],
+        ...     completions=[[{"content": "<answer>2</answer>"}]],
+        ...     answer=["2"],
+        ... )
+        [2.0]
 
     Explanation:
         1. Extracts the text content from each completion.
@@ -291,12 +305,13 @@ def correctness_reward(prompts, completions, answer, **kwargs):
             else:
                 rewards.append(0.0)
 
-    # Log completion lengths
-    completion_lengths = [len(response.split()) for response in responses]
     return rewards
 
 
-def format_reward(completions, **kwargs):
+def format_reward(
+    completions: Sequence[CompletionList],
+    **kwargs: object,
+) -> List[float]:
     """
     Assigns a reward for adhering to the desired XML format.
 
@@ -306,6 +321,10 @@ def format_reward(completions, **kwargs):
 
     Returns:
         list[float]: Reward scores based on format compliance.
+
+    Example:
+        >>> format_reward([[{"content": "<reasoning>...</reasoning><answer>1</answer>"}]])
+        [0.8]
 
     Explanation:
         1. Extracts the text content from each completion.
@@ -333,7 +352,11 @@ def format_reward(completions, **kwargs):
     return rewards
 
 
-def combined_reward(prompts, completions, answer):
+def combined_reward(
+    prompts: Sequence[str],
+    completions: Sequence[CompletionList],
+    answer: Sequence[Optional[str]],
+) -> List[float]:
     """
     Combines correctness and format rewards to provide a comprehensive evaluation.
 
@@ -344,6 +367,14 @@ def combined_reward(prompts, completions, answer):
 
     Returns:
         list[float]: Combined rewards for each prompt-completion pair.
+
+    Example:
+        >>> combined_reward(
+        ...     prompts=["What is 2+2?"],
+        ...     completions=[[{"content": "<answer>4</answer>"}]],
+        ...     answer=["4"],
+        ... )
+        [2.8]
 
     Explanation:
         1. Calculates individual reward components:
@@ -366,7 +397,7 @@ def combined_reward(prompts, completions, answer):
 
     return combined_rewards
 
-def selective_log_softmax(logits, input_ids):
+def selective_log_softmax(logits: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
     """
     Compute the log probabilities for the tokens specified in input_ids using a selective log-softmax.
 
@@ -386,16 +417,21 @@ def selective_log_softmax(logits, input_ids):
         4. Finally, squeeze(-1) removes the extra dimension, returning a tensor with the same shape as input_ids.
     """
     # Convert raw logits into log probabilities along the vocabulary axis.
-    log_probs = F.log_softmax(logits, dim=-1)  # Shape: (batch_size, seq_len, vocab_size)
+    log_probs = F.log_softmax(logits, dim=-1)  # (batch, seq_len, vocab)
 
-    # Reshape input_ids from (batch_size, seq_len) to (batch_size, seq_len, 1) for gathering.
-    # Then, gather the log probability for each token in input_ids.
+    # Gather the log probability for each token id in the sequence.
+    # input_ids.unsqueeze(-1) -> (batch, seq_len, 1)
     selected_log_probs = log_probs.gather(dim=-1, index=input_ids.unsqueeze(-1))
 
-    # Remove the extra last dimension to get back to shape (batch_size, seq_len).
+    # Remove the trailing singleton dimension so the output matches input_ids.
     return selected_log_probs.squeeze(-1)
 
-def compute_log_probabilities(model, input_ids, attention_mask, logits_to_keep):
+def compute_log_probabilities(
+    model: PreTrainedModel,
+    input_ids: torch.Tensor,
+    attention_mask: torch.Tensor,
+    logits_to_keep: int,
+) -> torch.Tensor:
     """
     Compute per-token log probabilities for a subset of tokens (typically the completion tokens).
 
@@ -407,7 +443,7 @@ def compute_log_probabilities(model, input_ids, attention_mask, logits_to_keep):
         logits_to_keep (int): Number of tokens (from the completion part) for which we need log probabilities.
 
     Returns:
-        torch.Tensor: Log probabilities for the last `logits_to_keep` tokens of each sequence.
+        torch.Tensor: Log probabilities for the last `logits_to_keep` tokens of each sequence. Shape: (batch_size, logits_to_keep).
 
     Explanation:
         1. We call the model with logits_to_keep + 1 so that the model outputs one extra logit than needed.
@@ -437,7 +473,7 @@ def compute_log_probabilities(model, input_ids, attention_mask, logits_to_keep):
     # Compute and return the log probabilities for the selected tokens.
     return selective_log_softmax(logits, input_ids)
 
-def create_completion_mask(completion_ids, eos_token_id):
+def create_completion_mask(completion_ids: torch.Tensor, eos_token_id: int) -> torch.Tensor:
     """
     Create a binary mask for the generated completion tokens so that tokens after the first EOS are ignored.
 
@@ -476,7 +512,13 @@ def create_completion_mask(completion_ids, eos_token_id):
 
     return completion_mask
 
-def generate_completions(model, tokenizer, prompts, num_generations=4, max_completion_length=32):
+def generate_completions(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    prompts: Sequence[str],
+    num_generations: int = 4,
+    max_completion_length: int = 32,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Generate multiple completions for each prompt and create corresponding attention masks.
 
@@ -488,11 +530,16 @@ def generate_completions(model, tokenizer, prompts, num_generations=4, max_compl
         max_completion_length (int): Maximum number of new tokens to generate for the completion.
 
     Returns:
-        tuple: Contains the following tensors:
-            - prompt_ids: (batch_size * num_generations, prompt_seq_len)
-            - prompt_mask: (batch_size * num_generations, prompt_seq_len)
-            - completion_ids: (batch_size * num_generations, completion_seq_len)
-            - completion_mask: (batch_size * num_generations, completion_seq_len)
+        tuple: Contains the following tensors. Shapes assume ``B`` prompts and ``G`` generations:
+            - prompt_ids: (B * G, prompt_seq_len)
+            - prompt_mask: (B * G, prompt_seq_len)
+            - completion_ids: (B * G, completion_seq_len)
+            - completion_mask: (B * G, completion_seq_len)
+
+    Example:
+        >>> p_ids, p_mask, c_ids, c_mask = generate_completions(model, tokenizer, ["Q?"], 2, 5)
+        >>> p_ids.shape, c_ids.shape
+        (torch.Size([2, 3]), torch.Size([2, 5]))
 
     Explanation:
         1. The prompts are tokenized and padded (with padding added to the left).
@@ -533,7 +580,14 @@ def generate_completions(model, tokenizer, prompts, num_generations=4, max_compl
 
     return prompt_ids, prompt_mask, completion_ids, completion_mask
 
-def generate_rollout_data(model, ref_model, tokenizer, batch_samples, num_generations, max_completion_length):
+def generate_rollout_data(
+    model: PreTrainedModel,
+    ref_model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    batch_samples: Sequence[BatchSample],
+    num_generations: int,
+    max_completion_length: int,
+) -> Dict[str, object]:
     """
     Generate rollouts and compute static log probabilities for both the old policy (current model)
     and the reference model. Gradients are disabled so that these remain fixed.
@@ -548,6 +602,11 @@ def generate_rollout_data(model, ref_model, tokenizer, batch_samples, num_genera
 
     Returns:
         A dictionary with rollout data including both old and reference log probabilities.
+
+    Example:
+        >>> rollout = generate_rollout_data(model, model, tokenizer, samples, 2, 16)
+        >>> rollout["old_log_probs"].shape
+        torch.Size([len(samples) * 2, 16])
     """
     tokenizer.padding_side  = "left"
     device = next(model.parameters()).device
@@ -563,6 +622,7 @@ def generate_rollout_data(model, ref_model, tokenizer, batch_samples, num_genera
             model, tokenizer, prompts, num_generations, max_completion_length
         )
         input_ids = torch.cat([prompt_ids, completion_ids], dim=1)
+        # Shape: (batch_size * num_generations, prompt_seq_len + completion_seq_len)
         attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)
         logits_to_keep = completion_ids.size(1)
 
@@ -593,7 +653,7 @@ def generate_rollout_data(model, ref_model, tokenizer, batch_samples, num_genera
         "num_generations": num_generations
     }
 
-def compute_group_relative_advantages(rewards, num_generations):
+def compute_group_relative_advantages(rewards: torch.Tensor, num_generations: int) -> torch.Tensor:
     """
     Compute group-relative advantages for each prompt group.
 
@@ -602,7 +662,11 @@ def compute_group_relative_advantages(rewards, num_generations):
         num_generations (int): Number of completions generated per prompt.
 
     Returns:
-        torch.Tensor: Tensor of advantages computed relative to the group mean.
+        torch.Tensor: Tensor of advantages computed relative to the group mean. Shape: (batch_size * num_generations, 1).
+
+    Example:
+        >>> compute_group_relative_advantages(torch.ones(6), num_generations=3).shape
+        torch.Size([6, 1])
     """
     # Reshape rewards to group by prompt
     rewards_by_group = rewards.view(-1, num_generations)
@@ -621,8 +685,16 @@ def compute_group_relative_advantages(rewards, num_generations):
     return advantages.unsqueeze(1)  # Add dimension for token-wise operations
 
 
-def maximize_grpo_objective(model, ref_model, rollout_data, tokenizer, reward_function,
-                          optimizer, beta, epsilon):
+def maximize_grpo_objective(
+    model: PreTrainedModel,
+    ref_model: PreTrainedModel,
+    rollout_data: Dict[str, object],
+    tokenizer: PreTrainedTokenizerBase,
+    reward_function: RewardFn,
+    optimizer: torch.optim.Optimizer,
+    beta: float,
+    epsilon: float,
+) -> float:
     """
     Update the policy model by maximizing the GRPO objective.
 
@@ -638,6 +710,13 @@ def maximize_grpo_objective(model, ref_model, rollout_data, tokenizer, reward_fu
 
     Returns:
         float: The loss value.
+
+    Example:
+        >>> isinstance(
+        ...     maximize_grpo_objective(model, model, rollout, tokenizer, combined_reward, optimizer, 0.1, 0.2),
+        ...     float,
+        ... )
+        True
     """
     # Extract data from rollout
     input_ids = rollout_data["input_ids"]
@@ -649,9 +728,10 @@ def maximize_grpo_objective(model, ref_model, rollout_data, tokenizer, reward_fu
 
     # Compute current log probabilities
     current_log_probs = compute_log_probabilities(model, input_ids, attention_mask, logits_to_keep)
+    # Shape note: log probabilities are (batch_size * num_generations, completion_seq_len).
 
     # Compute policy ratio
-    ratio = torch.exp(current_log_probs - old_log_probs)
+    ratio = torch.exp(current_log_probs - old_log_probs)  # Same shape as current_log_probs.
 
     # Get rewards data
     formatted_completions = rollout_data["formatted_completions"]
@@ -693,10 +773,21 @@ def maximize_grpo_objective(model, ref_model, rollout_data, tokenizer, reward_fu
     return loss.item()
 
 
-def train_with_grpo(model, tokenizer, train_data, num_iterations=1,
-                           steps_per_iteration=500, batch_size=4, num_generations=4,
-                           max_completion_length=128, beta=0.1, learning_rate=5e-6,
-                           mu=3, epsilon=0.2, reward_function=combined_reward):
+def train_with_grpo(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    train_data: Sequence[DatasetExample],
+    num_iterations: int = 1,
+    steps_per_iteration: int = 500,
+    batch_size: int = 4,
+    num_generations: int = 4,
+    max_completion_length: int = 128,
+    beta: float = 0.1,
+    learning_rate: float = 5e-6,
+    mu: int = 3,
+    epsilon: float = 0.2,
+    reward_function: RewardFn = combined_reward,
+) -> PreTrainedModel:
     """
     Iterative Group Relative Policy Optimization algorithm.
 
@@ -717,6 +808,11 @@ def train_with_grpo(model, tokenizer, train_data, num_iterations=1,
 
     Returns:
         The fine-tuned policy model.
+
+    Example:
+        >>> tuned = train_with_grpo(model, tokenizer, train_data, steps_per_iteration=1, num_generations=2)
+        >>> tuned is model
+        True
     """
     # Initialize policy model
     policy_model = model
@@ -765,8 +861,14 @@ def train_with_grpo(model, tokenizer, train_data, num_iterations=1,
 
     return policy_model
 
-def optimize_model_memory(model):
-    """Apply memory optimizations like proper gradient checkpointing setup"""
+def optimize_model_memory(model: PreTrainedModel) -> PreTrainedModel:
+    """Enable gradient checkpointing and disable KV caching to save memory.
+
+    Example:
+        >>> optimized = optimize_model_memory(model)
+        >>> optimized.config.use_cache
+        False
+    """
     # Ensure model is in training mode
     model.train()
 
