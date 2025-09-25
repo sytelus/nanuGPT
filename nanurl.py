@@ -777,16 +777,16 @@ def train_with_grpo(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizerBase,
     train_data: Sequence[DatasetExample],
-    num_iterations: int = 1,
-    steps_per_iteration: int = 500,
-    batch_size: int = 4,
-    num_generations: int = 4,
-    max_completion_length: int = 128,
-    beta: float = 0.1,
-    learning_rate: float = 5e-6,
-    mu: int = 3,
-    epsilon: float = 0.2,
-    reward_function: RewardFn = combined_reward,
+    num_iterations: int,
+    steps_per_iteration: int,
+    batch_size: int,
+    num_generations: int,
+    max_completion_length: int,
+    beta: float,
+    learning_rate: float,
+    mu: int,
+    epsilon: float,
+    reward_function: RewardFn,
 ) -> PreTrainedModel:
     """
     Iterative Group Relative Policy Optimization algorithm.
@@ -808,14 +808,9 @@ def train_with_grpo(
 
     Returns:
         The fine-tuned policy model.
-
-    Example:
-        >>> tuned = train_with_grpo(model, tokenizer, train_data, steps_per_iteration=1, num_generations=2)
-        >>> tuned is model
-        True
     """
-    # Initialize policy model
     policy_model = model
+    # extract device from model
     device = next(policy_model.parameters()).device
 
     # Outer loop for iterations with reward model updates
@@ -829,7 +824,6 @@ def train_with_grpo(
             param.requires_grad = False
         reference_model = reference_model.to(device)
 
-        # Initialize optimizer
         optimizer = torch.optim.Adam(policy_model.parameters(), lr=learning_rate)
         policy_model.train()
 
@@ -861,20 +855,11 @@ def train_with_grpo(
 
     return policy_model
 
-def optimize_model_memory(model: PreTrainedModel) -> PreTrainedModel:
-    """Enable gradient checkpointing and disable KV caching to save memory.
-
-    Example:
-        >>> optimized = optimize_model_memory(model)
-        >>> optimized.config.use_cache
-        False
-    """
-    # Ensure model is in training mode
+def enable_grads(model: PreTrainedModel) -> PreTrainedModel:
     model.train()
 
     # Disable caching for gradient checkpointing
     model.config.use_cache = False
-
     # Enable gradient checkpointing
     model.gradient_checkpointing_enable()
 
@@ -889,80 +874,46 @@ def optimize_model_memory(model: PreTrainedModel) -> PreTrainedModel:
     return model
 
 def main():
-    """
-    Main function to run the complete training and evaluation pipeline.
-
-    The process consists of:
-      1. Loading the pre-trained model and tokenizer.
-      2. Evaluating the initial model performance (before any finetuning).
-      3. Performing reinforcement learning (GRPO) finetuning.
-      4. Evaluating the final model after GRPO finetuning.
-      5. Saving the finetuned model and tokenizer.
-
-    Note: Functions such as prepare_dataset, evaluate_model, and reward_function
-          are assumed to be defined elsewhere.
-    """
-    # Determine the device (GPU if available, otherwise CPU) from the model's parameters.
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # Define the model name and output directory.
-    model_name = "Qwen/Qwen2.5-0.5B-Instruct" # The 0.5B model is not smart enough
-                                              # to generate the <reasoning> and <answer> tags
-                                              # so several iterations of SFT to teach it these tags
-                                              # are recommended before RL
+    # 0.5B model is not smart to generate the <reasoning> and <answer> tags
+    # so several iterations of SFT to teach it these tags are recommended before RL
+    model_name = "Qwen/Qwen2.5-0.5B-Instruct"
     output_dir = "math_solver_model"
 
-    # Load the pre-trained causal language model.
-    # - torch_dtype specifies the precision (bfloat16 for efficiency on supported hardware).
-    # - attn_implementation selects an optimized attention mechanism.
-    # - device_map="auto" automatically distributes the model across available devices.
     print("Downloading model...")
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        torch_dtype=torch.bfloat16,
+        torch_dtype=torch.bfloat16, # use bf16 for performance
         #attn_implementation="flash_attention_2",
-        device_map=None
+        device_map=None # TODO: move directly to GPU
     )
     print("Downloaded model")
-    # Move the model to the determined device.
-    model = model.to(device)
 
-    # Load the tokenizer corresponding to the model.
+    model = model.to(device)
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
-    # Set the pad token to be the same as the end-of-sequence token.
+    # fix tokenizer padding token
     tokenizer.pad_token = tokenizer.eos_token
-    # Update the model configuration with the correct token IDs.
     model.config.pad_token_id = tokenizer.eos_token_id
     model.config.eos_token_id = tokenizer.eos_token_id
 
-    # -------------------------------
-    # Step 0: INITIAL EVALUATION
-    # -------------------------------
-    # Load the complete training dataset using a helper function (assumed defined elsewhere).
+    # create a list of all dataset examples as prompts that will be given to models and answers we expect
+    # [{'prompt': 'Respond in the following format:\n\n<reasoning>\n...\n</reasoning>\n<answer>\n...\n</answer>\nNatalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May?', 'answer': '72'},...]
     all_data = prepare_dataset("train")
-    # Randomize the order of examples.
     random.shuffle(all_data)
-    # Use a small subset (e.g., 30 examples) for evaluation.
+    # reserve some examples for test set
     num_eval_examples = 1
+    train_data = all_data[num_eval_examples:]
     eval_data = all_data[:num_eval_examples]
 
-    # Evaluate the initial performance of the model before any finetuning.
     print("\nInitial model evaluation before GRPO:")
     pre_grpo_accuracy = evaluate_model(model, tokenizer, eval_data, device)
     print(f"Pre-GRPO Accuracy: {pre_grpo_accuracy:.2f}%")
 
-    model = optimize_model_memory(model)
+    model = enable_grads(model)
 
-    # -------------------------------
-    # Step 1: RL FINETUNING (GRPO)
-    # -------------------------------
     print("\nStarting RL finetuning using GRPO...")
-
-    # Use the remaining examples (beyond the evaluation subset) for RL finetuning.
-    train_data = all_data[num_eval_examples:]
-
-    # Define RL training configuration.
     training_config = {
         'num_iterations' : 1,
         'steps_per_iteration': 500,                    # Total number of RL training steps.
@@ -975,6 +926,7 @@ def main():
         'epsilon': 0.1,
         'reward_function': combined_reward
     }
+
     # Fine-tune the model using GRPO RL training.
     model = train_with_grpo(
         model=model,
@@ -983,9 +935,7 @@ def main():
         **training_config
     )
 
-    # -------------------------------
     # Step 2: FINAL EVALUATION & SAVING
-    # -------------------------------
     print("\nFinal model evaluation after GRPO RL finetuning:")
     # Evaluate the final model performance using the evaluation dataset.
     post_grpo_accuracy = evaluate_model(model, tokenizer, eval_data, device)
