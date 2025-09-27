@@ -167,6 +167,17 @@ def create_wandb_logger(project_name, run_name,
     wandb_host = os.environ.get('WANDB_HOST', None)
     wandb.login(host=wandb_host) # use API key from WANDB_API_KEY env variable
 
+    # make the otherwise bare "init" log line from wandb more descriptive
+    wandb_logger = py_logging.getLogger("wandb")
+
+    def _annotate(record, project=project_name, run=run_name):
+        if record.getMessage() == "init":
+            record.msg = f"wandb.init(project={project!r}, name={run!r})"
+            record.args = ()
+        return True
+
+    wandb_logger.addFilter(_annotate)
+
     run = wandb.init(project=project_name, name=run_name,
                      save_code=True, notes=description)
     for metric in metrics:
