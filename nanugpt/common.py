@@ -12,7 +12,7 @@ from nanugpt import utils
 from nanugpt import glogging as logging
 from nanugpt.tokenizers.tokenizer_base import TokenizerBase
 
-GetLossType:TypeAlias = Callable[[Union[torch.Tensor, Mapping], torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]
+GetLossType:TypeAlias = Callable[[Union[torch.Tensor, Mapping], torch.Tensor], Tuple[torch.Tensor, int]]
 
 def setup_device(config:Mapping, logger:logging.Logger)->Tuple[torch.device, AbstractContextManager, utils.TorchInfo]:
     seed = config['general']['seed']

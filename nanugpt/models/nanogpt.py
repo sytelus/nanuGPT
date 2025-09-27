@@ -7,7 +7,7 @@ https://github.com/openai/gpt-2/blob/master/src/model.py
 https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/modeling_gpt2.py
 """
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Callable
 
 import math
 import inspect
@@ -278,18 +278,18 @@ class GPT(nn.Module):
         x = self.transformer.ln_f(x) # [batch, seq_len, emb_dim]
 
         if not only_last:
-            logits = self.lm_head(x) # [batch, seq_len, vocab_size]
+            logits:torch.Tensor = self.lm_head(x) # [batch, seq_len, vocab_size]
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
              # note: using list [-1] to preserve the time dim
-            logits = self.lm_head(x[:, [-1], :]) # [batch, 1, vocab_size]
+            logits:torch.Tensor = self.lm_head(x[:, [-1], :]) # [batch, 1, vocab_size]
 
         loss:Optional[torch.Tensor] = None
         if labels is not None:
             assert self.get_loss is not None, "Loss function is not defined"
             loss, correct = self.get_loss(logits, labels)
             # keeping logits around may unnecessarily consume a lot of memory  (atleast 1GB for 124M params)
-            return logits if return_logits else None, loss, correct
+            return (logits, loss, correct) if return_logits else (None, loss, correct)
 
         return logits, None, None
 
