@@ -609,7 +609,6 @@ def generate_rollout_data(
         torch.Size([len(samples) * 2, 16])
     """
     tokenizer.padding_side  = "left"
-    device = next(model.parameters()).device
 
     # Extract prompts and answers.
     prompts = [sample["prompt"] if isinstance(sample, dict) else sample[0] for sample in batch_samples]
@@ -839,6 +838,7 @@ def train_with_grpo(
                     policy_model, reference_model, tokenizer,
                     batch_samples, num_generations, max_completion_length
                 )
+                # TODO: remove forward hoot from the reference model for grads
 
             # Multiple GRPO updates per batch of generations
             for grpo_iter in range(1, mu + 1):
