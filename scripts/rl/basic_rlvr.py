@@ -520,7 +520,7 @@ def generate_completions(
     max_completion_length: int = 32,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    Generate multiple completions for each prompt and create corresponding attention masks.
+    For given prompts, generate the specified number of completions for specified maximum length using the model.
 
     Args:
         model: The language model used for generation.
