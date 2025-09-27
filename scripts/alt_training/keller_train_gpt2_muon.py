@@ -559,7 +559,7 @@ if __name__ == "__main__":
         model.train()
         # forward pass
         with ctx:
-            _, loss = model(x, y, return_logits=False)
+            _, loss, _ = model(x, y, return_logits=False)
         # advance the dataset for the next batch
         x, y = train_loader.next_batch()
         # backward pass
