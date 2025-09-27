@@ -22,6 +22,11 @@ class ConstantWithCooldownScheduler(LRScheduler):
             assert cooldown_iters is None, "Only one of cooldown_iters or cooldown_frac should be specified"
             self.cooldown_iters = int(cooldown_frac * max_iters)
 
+        if self.cooldown_iters is not None:
+            assert self.max_iters is not None, "max_iters must be specified if cooldown_iters is specified"
+            assert self.cooldown_iters < self.max_iters, "cooldown_iters must be less than max_iters"
+            assert self.end_factor < 1.0, "end_factor must be less than 1.0 for cooldown to have an effect"
+
         super().__init__(optimizer, last_epoch)
 
     def get_lr(self):

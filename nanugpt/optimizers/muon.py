@@ -18,7 +18,7 @@ def get_optim(model,
               muon_momentum_warmup=300,  # number of muon steps to warmup momentum from min to max
               expect_embeddings: bool = True,
               expect_layers: bool = True,
-              **kwargs
+              **kwargs # TODO: remove this and see if _inherit works in yaml
               ):
 
     # If wrapped with DistributedDataParallel, unwrap one level to the underlying module

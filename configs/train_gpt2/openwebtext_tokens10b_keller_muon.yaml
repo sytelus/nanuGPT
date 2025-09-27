@@ -43,10 +43,11 @@ scheduler:
   module: 'nanugpt.schedulers.constant.get_scheduler'
   #_inherit: false
   module_kwargs:
-    warmup_iters: 256
+    warmup_iters: 0 # although Keller has warmup arg, it doesn't get used
     cooldown_frac: 0.4  # CAUSION: many old runs uses constant 2048 incorrectly
     _inherit: false
     max_iters: '_copy: /training/max_steps'
+    end_factor: 1.0E-6 # without this end_factor defaults to 1 and cooldown doesn't happen
 
 eval:
   # we use karpathy's eval config for comparable numbers
