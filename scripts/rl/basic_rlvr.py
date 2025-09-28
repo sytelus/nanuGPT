@@ -64,16 +64,7 @@ MODEL_MODE = "completion"  # "chat" or "completion"
 
 SYSTEM_PROMPT = """A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. The reasoning process and answer are enclosed within <reasoning> </reasoning> and <answer> </answer> tags, respectively, i.e., <reasoning> reasoning process here </reasoning> <answer> answer here </answer>.""" \
 if MODEL_MODE == "chat" else \
-"""
-Respond in the following format:
-
-<reasoning>
-...
-</reasoning>
-<answer>
-...
-</answer>
-"""
+"""First, think about the reasoning process in the mind and then provide the answer. The reasoning process and answer are enclosed within <reasoning> </reasoning> and <answer> </answer> tags, respectively, i.e., <reasoning> reasoning process here </reasoning> <answer> answer here </answer>."""
 
 def extract_answer_from_model_output(text: str) -> Optional[str]:
     # Split on <answer> and take everything after the last occurrence
