@@ -148,90 +148,96 @@ def evaluate_model(
     tokenizer: PreTrainedTokenizerBase,
     eval_examples: Sequence[DatasetExample],
     device: torch.device,
+    batch_size: int = 32,
 ) -> float:
-    """Run greedy generation on ``eval_examples`` and report accuracy.
+    """Run greedy generation on ``eval_examples`` and report accuracy."""
 
-    Example:
-        >>> accuracy = evaluate_model(model, tokenizer, eval_batch, device)
-        >>> print(f"Eval accuracy: {accuracy:.1f}%")
-        Eval accuracy: 53.3%
+    if batch_size <= 0:
+        raise ValueError("batch_size must be a positive integer")
 
-    The function logs the full prompt and completion for manual inspection to
-    make debugging reward logic easier.
-    """
+    pad_token_id = tokenizer.pad_token_id
+    eos_token_id = tokenizer.eos_token_id
+    if pad_token_id is None or eos_token_id is None:
+        raise ValueError("Tokenizer must define both pad_token_id and eos_token_id for evaluation")
+
+    was_training = model.training
     model.eval()
     correct = 0
     total = len(eval_examples)
-    print("\n" + "="*50)
-    print("EVALUATION ON", total, "EXAMPLES")
-    print("="*50)
 
-    for example in eval_examples:
-        # Build the full prompt using the same method as training.
-        full_prompt = example["prompt"]
-        expected = example["answer"]
+    print("Evaluating model on ", total, "examples...")
 
-        # Tokenize the full prompt and generate a response from the model.
-        inputs = tokenizer.encode(full_prompt, return_tensors="pt").to(device)
-        with torch.no_grad():
-            outputs = model.generate(
-                inputs,
-                max_new_tokens=512,
-                temperature=0.7,
-                num_return_sequences=1,
-                pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=tokenizer.eos_token_id,
-                forced_eos_token_id=tokenizer.eos_token_id,
-                early_stopping=False
-            ) # type: ignore
-        response = tokenizer.decode(outputs[0], skip_special_tokens=True)
 
-        # Extract the predicted answer from the model output.
-        try:
-            predicted = extract_answer_from_model_output(response)
+    try:
+        for start in range(0, total, batch_size):
+            batch_examples = eval_examples[start:start + batch_size]
+            prompts = [example["prompt"] for example in batch_examples]
+            expected_answers = [example.get("answer") for example in batch_examples]
 
-            # Check correctness in multiple ways
-            if predicted == expected:  # First try exact match
-                is_correct = True
-            else:
-                # Try single number
-                pred_num = _extract_single_number(str(predicted))
-                exp_num = _extract_single_number(str(expected))
-                if pred_num is not None and exp_num is not None and pred_num == exp_num:
-                    is_correct = True
-                else:
-                    # Try last number match
-                    pred_num = _extract_last_number(str(predicted))
-                    exp_num = _extract_last_number(str(expected))
-                    is_correct = (pred_num is not None and exp_num is not None and
-                                pred_num == exp_num)
+            inputs = tokenizer(
+                prompts,
+                return_tensors="pt",
+                padding=True,
+                truncation=False,
+            )
 
-            if is_correct:
-                correct += 1
+            input_ids = inputs["input_ids"].to(device)
+            attention_mask = inputs["attention_mask"].to(device)
 
-            # # Print details of the evaluation.
-            # print("\nPrompt:")
-            # print(full_prompt)
-            # print("\nExpected Answer:")
-            # print(expected)
-            # print("\nExtracted Answer:")
-            # print(predicted)
-            # print("\nFull Generated Response:")
-            # print(response)
-            # print("\nCorrect:", "✓" if is_correct else "✗")
-            # print("-"*50)
+            with torch.no_grad():
+                generated = model.generate(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    max_new_tokens=512,
+                    temperature=0.7,
+                    num_return_sequences=1,
+                    pad_token_id=pad_token_id,
+                    eos_token_id=eos_token_id,
+                    forced_eos_token_id=eos_token_id,
+                    early_stopping=False,
+                ) # type: ignore
 
-        except Exception as e:
-            print("\nFailed to parse model output for prompt:")
-            print(full_prompt)
-            print("Error:", e)
-            print("-"*50)
+            responses = tokenizer.batch_decode(generated, skip_special_tokens=True)
 
-    accuracy = (correct / total) * 100
+            for example, expected, response in zip(batch_examples, expected_answers, responses):
+                full_prompt = example["prompt"]
+
+                try:
+                    predicted = extract_answer_from_model_output(response)
+
+                    is_correct = False
+                    if predicted == expected:
+                        is_correct = True
+                    else:
+                        pred_num = _extract_single_number(str(predicted))
+                        exp_num = _extract_single_number(str(expected))
+                        if pred_num is not None and exp_num is not None and pred_num == exp_num:
+                            is_correct = True
+                        else:
+                            pred_num = _extract_last_number(str(predicted))
+                            exp_num = _extract_last_number(str(expected))
+                            is_correct = (
+                                pred_num is not None and
+                                exp_num is not None and
+                                pred_num == exp_num
+                            )
+
+                    if is_correct:
+                        correct += 1
+
+                except Exception as e:
+                    print("\nFailed to parse model output for prompt:")
+                    print(full_prompt)
+                    print("Error:", e)
+                    print("-"*50)
+    finally:
+        if was_training:
+            model.train()
+
+    accuracy = (correct / total) * 100 if total > 0 else 0.0
     print(f"\nAccuracy: {accuracy:.2f}% ({correct}/{total})")
     print("="*50)
 
-    model.train()
     return accuracy
 
 def correctness_reward(
@@ -862,11 +868,10 @@ def main():
     all_data = prepare_dataset("train")
     random.shuffle(all_data)
     # reserve some examples for test set
-    num_eval_examples = 30
+    num_eval_examples = 32
     train_data = all_data[num_eval_examples:]
     eval_data = all_data[:num_eval_examples]
 
-    print("\nInitial model evaluation before GRPO:")
     pre_grpo_accuracy = evaluate_model(model, tokenizer, eval_data, device)
     print(f"Pre-GRPO Accuracy: {pre_grpo_accuracy:.2f}%")
 
