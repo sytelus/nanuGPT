@@ -796,7 +796,7 @@ def train_with_grpo(
         for param in reference_model.parameters():
             param.requires_grad = False
 
-        optimizer = torch.optim.Adam(policy_model.parameters(), lr=learning_rate)
+        optimizer = torch.optim.AdamW(policy_model.parameters(), lr=learning_rate)
         policy_model.train()
 
         # Inner loop for policy updates
