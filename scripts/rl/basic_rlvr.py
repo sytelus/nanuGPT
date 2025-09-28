@@ -565,6 +565,8 @@ def generate_completions(
         early_stopping=False
     ) # type: ignore
 
+    print(f"Output batch size: {outputs.size(0)}, Device after model: {outputs.device}")
+
     # Remove the prompt portion from the generated output to isolate the completion tokens.
     completion_ids = outputs[:, prompt_length:]  # Shape: (batch_size*num_generations, completion_seq_len)
 
@@ -645,20 +647,6 @@ def generate_rollout_data(
         num_generations=num_generations
     )
 
-
-def compute_group_relative_advantages(
-    rewards: torch.Tensor,
-    num_generations: int,
-) -> torch.Tensor:
-    """Normalize rewards within each prompt group to compute advantages."""
-
-    rewards_matrix = rewards.view(-1, num_generations)
-    group_means = rewards_matrix.mean(dim=1, keepdim=True)
-    group_stds = rewards_matrix.std(dim=1, keepdim=True, unbiased=True).clamp_min(1e-4)
-    normalized = (rewards_matrix - group_means) / group_stds
-    return normalized.reshape(-1, 1)
-
-
 def grpo_loss(
     model: PolicyModel,
     rollout_data: RolloutData,
@@ -725,7 +713,10 @@ def grpo_loss(
     avg_reward = rewards_matrix.mean().item()
     print(f"Average Reward: {avg_reward:.4f}")
 
-    advantages = compute_group_relative_advantages(rewards_matrix, num_generations)
+    mean_rewards = rewards_matrix.mean(dim=1).repeat_interleave(num_generations)
+    std_rewards = rewards_matrix.std(dim=1).repeat_interleave(num_generations)
+    advantages = ((rewards_matrix.view(-1) - mean_rewards) / (std_rewards + 1e-4)).unsqueeze(1)
+
     surr1 = ratio * advantages
     surr2 = torch.clamp(ratio, 1 - epsilon, 1 + epsilon) * advantages
     surrogate_loss = torch.min(surr1, surr2)
@@ -780,6 +771,9 @@ def train_with_grpo(
     model = model.to(primary_device)
 
     policy_model: PolicyModel
+    # Use DataParallel only when >1 GPU is present. This keeps single-GPU runs simple
+    # while letting the heavy GRPO forward/backward passes fan out across multiple
+    # devices automatically (matching the original notebook’s behaviour).
     if len(device_ids) > 1:
         policy_model = nn.DataParallel(model, device_ids=device_ids)
     else:
@@ -795,6 +789,8 @@ def train_with_grpo(
         print(f"\nStarting iteration {iteration}/{num_iterations}")
 
         # Create reference model for KL constraint
+        # Clone the (possibly DataParallel-wrapped) policy onto the primary device so
+        # KL comparisons always run locally and avoid redundant multi-GPU copies.
         reference_model = copy.deepcopy(unwrap(policy_model)).to(primary_device)
         reference_model.eval()
         for param in reference_model.parameters():
@@ -895,7 +891,7 @@ def main():
     all_data = prepare_dataset("train")
     random.shuffle(all_data)
     # reserve some examples for test set
-    num_eval_examples = 32
+    num_eval_examples = 30
     train_data = all_data[num_eval_examples:]
     eval_data = all_data[:num_eval_examples]
 
