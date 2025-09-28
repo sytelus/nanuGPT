@@ -15,7 +15,7 @@ import numpy as np
 import torch
 from torch import nn
 import torch.nn.functional as F
-import torch._inductor.config as config
+import torch._dynamo as dynamo  # used to keep problematic ops out of torch.compile graphs
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
 
@@ -55,6 +55,13 @@ def apply_rotary_emb(x, cos, sin):
     y1 = x1 * cos + x2 * sin
     y2 = x1 * (-sin) + x2 * cos
     return torch.cat([y1, y2], 3)
+
+
+# torch.compile was triggering Triton autotune crashes on the fused CE kernel; run it eager.
+@dynamo.disable
+def cross_entropy_loss(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    return F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+
 
 def rmsnorm(x0, eps=1e-6):
     x = x0.float()
@@ -158,7 +165,7 @@ class GPT(nn.Module):
         if targets is not None:
             # if we are given some desired targets also calculate the loss
             logits = self.lm_head(x)
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+            loss = cross_entropy_loss(logits, targets)  # keeps giant CE matmul out of compiled graph
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
             logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
@@ -471,8 +478,6 @@ if __name__ == "__main__":
     }[args.model]
     model = GPT(model_config)
     model = model.train().cuda()
-    # if hasattr(config, "coordinate_descent_tuning"):
-    #     config.coordinate_descent_tuning = True # suggested by @Chillee
     print0("compiling the model...")
     model = torch.compile(model)
     print0("compiling done.")

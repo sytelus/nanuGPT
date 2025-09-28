@@ -25,6 +25,7 @@ CompletionList = List[CompletionMessage]
 DatasetExample = Dict[str, str]
 BatchSample = Union[DatasetExample, Tuple[str, str]]
 RewardFn = Callable[[Sequence[str], Sequence[CompletionList], Sequence[Optional[str]]], Sequence[float]]
+PolicyModel = Union[PreTrainedModel, nn.DataParallel]
 
 
 class RolloutData(TypedDict):
@@ -415,7 +416,7 @@ def selective_log_softmax(logits: torch.Tensor, input_ids: torch.Tensor) -> torc
     return selected_log_probs.squeeze(-1)
 
 def compute_log_probs(
-    model: PreTrainedModel,
+    model: PolicyModel,
     input_ids: torch.Tensor,
     attention_mask: torch.Tensor,
     logits_to_keep: int,
@@ -645,8 +646,21 @@ def generate_rollout_data(
     )
 
 
+def compute_group_relative_advantages(
+    rewards: torch.Tensor,
+    num_generations: int,
+) -> torch.Tensor:
+    """Normalize rewards within each prompt group to compute advantages."""
+
+    rewards_matrix = rewards.view(-1, num_generations)
+    group_means = rewards_matrix.mean(dim=1, keepdim=True)
+    group_stds = rewards_matrix.std(dim=1, keepdim=True, unbiased=True).clamp_min(1e-4)
+    normalized = (rewards_matrix - group_means) / group_stds
+    return normalized.reshape(-1, 1)
+
+
 def grpo_loss(
-    model: PreTrainedModel,
+    model: PolicyModel,
     rollout_data: RolloutData,
     reward_function: RewardFn,
     beta: float,
@@ -707,14 +721,11 @@ def grpo_loss(
         dtype=torch.float32,
         device=current_log_probs.device,
     )
-    rewards = rewards.view(batch_size, num_generations)
-    avg_reward = rewards.mean().item()
+    rewards_matrix = rewards.view(batch_size, num_generations)
+    avg_reward = rewards_matrix.mean().item()
     print(f"Average Reward: {avg_reward:.4f}")
 
-    mean_rewards = rewards.mean(dim=1, keepdim=True)
-    std_rewards = rewards.std(dim=1, keepdim=True, unbiased=False)
-    normalized_advantages = (rewards - mean_rewards) / (std_rewards + 1e-4)
-    advantages = normalized_advantages.view(-1, 1)
+    advantages = compute_group_relative_advantages(rewards_matrix, num_generations)
     surr1 = ratio * advantages
     surr2 = torch.clamp(ratio, 1 - epsilon, 1 + epsilon) * advantages
     surrogate_loss = torch.min(surr1, surr2)
@@ -765,14 +776,26 @@ def train_with_grpo(
     if not device_ids:
         raise ValueError("GRPO training requires at least one CUDA device.")
 
-    policy_model = nn.DataParallel(model, device_ids=device_ids)
+    primary_device = torch.device(f"cuda:{device_ids[0]}")
+    model = model.to(primary_device)
+
+    policy_model: PolicyModel
+    if len(device_ids) > 1:
+        policy_model = nn.DataParallel(model, device_ids=device_ids)
+    else:
+        policy_model = model
+
+    def unwrap(module_like: PolicyModel) -> PreTrainedModel:
+        if isinstance(module_like, nn.DataParallel):
+            return cast(PreTrainedModel, module_like.module)
+        return cast(PreTrainedModel, module_like)
 
     # Outer loop for iterations with reward model updates
     for iteration in range(1, num_iterations + 1):
         print(f"\nStarting iteration {iteration}/{num_iterations}")
 
         # Create reference model for KL constraint
-        reference_model = copy.deepcopy(cast(PreTrainedModel, policy_model.module))
+        reference_model = copy.deepcopy(unwrap(policy_model)).to(primary_device)
         reference_model.eval()
         for param in reference_model.parameters():
             param.requires_grad = False
@@ -787,7 +810,7 @@ def train_with_grpo(
 
             # Set old policy for this step
             with torch.no_grad():
-                policy_module = cast(PreTrainedModel, policy_model.module)
+                policy_module = unwrap(policy_model)
                 # Generate completions and compute log probs
                 rollout_data = generate_rollout_data(
                     policy_module, reference_model, tokenizer,
@@ -797,9 +820,8 @@ def train_with_grpo(
 
             # Multiple GRPO updates per batch of generations
             for grpo_iter in range(1, mu + 1):
-                policy_module = cast(PreTrainedModel, policy_model.module)
                 loss, avg_reward = grpo_loss(
-                    policy_module, rollout_data,
+                    policy_model, rollout_data,
                     reward_function, beta, epsilon
                 )
                 # Optimization step
@@ -814,7 +836,7 @@ def train_with_grpo(
         # This is not implemented in the original code but present in the pseudocode
         print(f"Completed iteration {iteration}. Reward model update would happen here.")
 
-    return cast(PreTrainedModel, policy_model.module)
+    return unwrap(policy_model)
 
 def enable_grads(model: PreTrainedModel) -> PreTrainedModel:
     model.train()
@@ -835,7 +857,12 @@ def enable_grads(model: PreTrainedModel) -> PreTrainedModel:
     return model
 
 def main():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    num_gpus = torch.cuda.device_count()
+    if num_gpus == 0:
+        raise RuntimeError("GRPO training requires at least one CUDA device.")
+
+    primary_device = torch.device("cuda:0")
+    device = primary_device
     print(f"Using device: {device}")
 
     # 0.5B model is not smart to generate the <reasoning> and <answer> tags
@@ -848,9 +875,10 @@ def main():
         model_name,
         torch_dtype=torch.bfloat16, # use bf16 for performance
         #attn_implementation="flash_attention_2",
-        device_map="auto",
+        device_map=None,
         trust_remote_code=True,
     )
+    model = model.to(primary_device)
     print("Downloaded model")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
@@ -859,7 +887,6 @@ def main():
     model.config.pad_token_id = tokenizer.eos_token_id
     model.config.eos_token_id = tokenizer.eos_token_id
 
-    num_gpus = torch.cuda.device_count()
     print(f"Detected {num_gpus} GPUs")
     device_ids = list(range(num_gpus))
 
