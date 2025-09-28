@@ -2,11 +2,16 @@
 
 import copy
 import random
+import re
+import os
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
+import typing
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.utils.rnn import pad_sequence
 
 from datasets import load_dataset
 from transformers import (
@@ -23,12 +28,6 @@ BatchSample = Union[DatasetExample, Tuple[str, str]]
 RewardFn = Callable[[Sequence[str], Sequence[CompletionList], Sequence[Optional[str]]], Sequence[float]]
 
 def set_random_seed(seed: int = 42) -> None:
-    """Set the random seed for Python, NumPy, and PyTorch.
-
-    Example:
-        >>> set_random_seed(123)
-        # Deterministic behaviour across random, numpy, and torch
-    """
     # Set the seed for Python's built-in random module
     random.seed(seed)
 
@@ -58,53 +57,7 @@ Respond in the following format:
 </answer>
 """
 
-def prepare_dataset(split: str = "train") -> List[DatasetExample]:
-    """Load and format GSM8K so prompts are ready for chat-style policies.
-
-    Example:
-        >>> sample = prepare_dataset(split="test")[0]
-        >>> sample.keys()
-        dict_keys(['prompt', 'answer'])
-
-    The prompt field is a chat transcript encoded as a single string, because the
-    RL pipeline consumes plain strings rather than structured messages.
-    """
-    data = load_dataset('openai/gsm8k', 'main')[split]
-    formatted_data: List[DatasetExample] = []
-
-    for example in data:
-        # Convert list of messages to a single string prompt.
-        prompt_str = build_prompt([
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": example["question"]}
-        ])
-        formatted_example = {
-            "prompt": prompt_str,  # Now a string rather than a list.
-            "answer": extract_answer_from_dataset(example["answer"])
-        }
-        formatted_data.append(formatted_example)
-
-    return formatted_data
-
-def build_prompt(messages: Sequence[CompletionMessage]) -> str:
-    """Concatenate chat messages into a single newline-delimited prompt string.
-
-    Example:
-        >>> build_prompt([
-        ...     {"role": "system", "content": "<answer>..."},
-        ...     {"role": "user", "content": "What is 1+1?"},
-        ... ])
-        '<answer>...\nWhat is 1+1?'
-    """
-    return "\n".join(msg["content"].strip() for msg in messages)
-
 def extract_answer_from_model_output(text: str) -> Optional[str]:
-    """Return the payload of the last `<answer>` ... `</answer>` block.
-
-    Example:
-        >>> extract_answer_from_model_output('<answer>42</answer> extra')
-        '42'
-    """
     # Split on <answer> and take everything after the last occurrence
     parts = text.split("<answer>")
     if len(parts) < 2:  # No <answer> tag found
@@ -120,15 +73,31 @@ def extract_answer_from_model_output(text: str) -> Optional[str]:
     return None if answer == "..." else answer
 
 def extract_answer_from_dataset(text: str) -> Optional[str]:
-    """Extract the numeric answer after the GSM8K `####` delimiter.
-
-    Example:
-        >>> extract_answer_from_dataset('solution steps #### 12')
-        '12'
-    """
     if "####" not in text:
         return None
     return text.split("####")[1].strip()
+
+def prepare_dataset(split: str = "train") -> List[DatasetExample]:
+    data = load_dataset('openai/gsm8k', 'main')[split]
+    formatted_data: List[DatasetExample] = []
+
+    for raw in data:
+        example: DatasetExample = typing.cast(DatasetExample, raw)
+        # Convert list of messages to a single string prompt.
+        prompt_str = build_prompt([
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": example["question"]}
+        ])
+        formatted_example = {
+            "prompt": prompt_str,  # Now a string rather than a list.
+            "answer": extract_answer_from_dataset(example["answer"])
+        }
+        formatted_data.append(formatted_example)
+
+    return formatted_data
+
+def build_prompt(messages: Sequence[CompletionMessage]) -> str:
+    return "\n".join(msg["content"].strip() for msg in messages)
 
 def _extract_last_number(text: str) -> Optional[float]:
     """Extract the trailing numeric token from ``text`` when present.
@@ -137,7 +106,6 @@ def _extract_last_number(text: str) -> Optional[float]:
         >>> _extract_last_number('cost = 7.5 dollars')
         7.5
     """
-    import re
 
     # Remove $ and % signs
     text = text.replace('$', '').replace('%', '')
@@ -157,7 +125,7 @@ def _extract_single_number(text: str) -> Optional[float]:
         >>> _extract_single_number('answer: -3.2')
         -3.2
     """
-    import re
+
     numbers = re.findall(r'-?\d*\.?\d+', text)
     return float(numbers[0]) if len(numbers) == 1 else None
 
@@ -192,16 +160,17 @@ def evaluate_model(
 
         # Tokenize the full prompt and generate a response from the model.
         inputs = tokenizer.encode(full_prompt, return_tensors="pt").to(device)
-        outputs = model.generate(
-            inputs,
-            max_new_tokens=512,
-            temperature=0.7,
-            num_return_sequences=1,
-            pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id,
-            forced_eos_token_id=tokenizer.eos_token_id,
-            early_stopping=True
-        )
+        with torch.no_grad():
+            outputs = model.generate(
+                inputs,
+                max_new_tokens=512,
+                temperature=0.7,
+                num_return_sequences=1,
+                pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+                forced_eos_token_id=tokenizer.eos_token_id,
+                early_stopping=False
+            ) # type: ignore
         response = tokenizer.decode(outputs[0], skip_special_tokens=True)
 
         # Extract the predicted answer from the model output.
@@ -218,7 +187,7 @@ def evaluate_model(
                 if pred_num is not None and exp_num is not None and pred_num == exp_num:
                     is_correct = True
                 else:
-                    # Try last number
+                    # Try last number match
                     pred_num = _extract_last_number(str(predicted))
                     exp_num = _extract_last_number(str(expected))
                     is_correct = (pred_num is not None and exp_num is not None and
@@ -286,13 +255,11 @@ def correctness_reward(
            - Numeric equivalence check (1.5 points)
         4. Returns a list of reward scores.
     """
-    # Extract the content from each completion's first element
+
     responses = [completion[0]['content'] for completion in completions]
-
-    # Extract answers from model outputs
     extracted = [extract_answer_from_model_output(r) for r in responses]
-
     rewards = []
+
     for r, a in zip(extracted, answer):
         if r == a:  # Exact match case
             rewards.append(2.0)
@@ -305,6 +272,8 @@ def correctness_reward(
             else:
                 rewards.append(0.0)
 
+    # TODO: log completion lengths
+    completion_lengths = [len(response.split()) for response in responses]
     return rewards
 
 
@@ -426,7 +395,7 @@ def selective_log_softmax(logits: torch.Tensor, input_ids: torch.Tensor) -> torc
     # Remove the trailing singleton dimension so the output matches input_ids.
     return selected_log_probs.squeeze(-1)
 
-def compute_log_probabilities(
+def compute_log_probs(
     model: PreTrainedModel,
     input_ids: torch.Tensor,
     attention_mask: torch.Tensor,
@@ -569,8 +538,9 @@ def generate_completions(
         do_sample=True,
         temperature=1.0,
         pad_token_id=tokenizer.pad_token_id,
-        eos_token_id=tokenizer.eos_token_id
-    )
+        eos_token_id=tokenizer.eos_token_id,
+        early_stopping=False
+    ) # type: ignore
 
     # Remove the prompt portion from the generated output to isolate the completion tokens.
     completion_ids = outputs[:, prompt_length:]  # Shape: (batch_size*num_generations, completion_seq_len)
@@ -626,10 +596,10 @@ def generate_rollout_data(
         logits_to_keep = completion_ids.size(1)
 
         # Compute old_log_probs from the current model, with gradients disabled.
-        old_log_probs = compute_log_probabilities(model, input_ids, attention_mask, logits_to_keep)
+        old_log_probs = compute_log_probs(model, input_ids, attention_mask, logits_to_keep)
 
         # Compute ref_log_probs from the reference model, which remains static.
-        ref_log_probs = compute_log_probabilities(ref_model, input_ids, attention_mask, logits_to_keep)
+        ref_log_probs = compute_log_probs(ref_model, input_ids, attention_mask, logits_to_keep)
 
     formatted_completions = [
         [{'content': tokenizer.decode(ids, skip_special_tokens=True)}]
@@ -652,48 +622,14 @@ def generate_rollout_data(
         "num_generations": num_generations
     }
 
-def compute_group_relative_advantages(rewards: torch.Tensor, num_generations: int) -> torch.Tensor:
-    """
-    Compute group-relative advantages for each prompt group.
 
-    Args:
-        rewards (torch.Tensor): Tensor of shape (batch_size * num_generations) containing rewards.
-        num_generations (int): Number of completions generated per prompt.
-
-    Returns:
-        torch.Tensor: Tensor of advantages computed relative to the group mean. Shape: (batch_size * num_generations, 1).
-
-    Example:
-        >>> compute_group_relative_advantages(torch.ones(6), num_generations=3).shape
-        torch.Size([6, 1])
-    """
-    # Reshape rewards to group by prompt
-    rewards_by_group = rewards.view(-1, num_generations)
-
-    # Compute mean and standard deviation for each prompt group
-    group_means = rewards_by_group.mean(dim=1)
-    group_stds = rewards_by_group.std(dim=1)
-
-    # Expand the means and stds to match the original flat rewards tensor shape
-    expanded_means = group_means.repeat_interleave(num_generations)
-    expanded_stds = group_stds.repeat_interleave(num_generations)
-
-    # Normalize rewards to get advantages
-    advantages = (rewards - expanded_means) / (expanded_stds + 1e-4)
-
-    return advantages.unsqueeze(1)  # Add dimension for token-wise operations
-
-
-def maximize_grpo_objective(
+def grpo_loss(
     model: PreTrainedModel,
-    ref_model: PreTrainedModel,
     rollout_data: Dict[str, object],
-    tokenizer: PreTrainedTokenizerBase,
     reward_function: RewardFn,
-    optimizer: torch.optim.Optimizer,
     beta: float,
     epsilon: float,
-) -> float:
+) -> Tuple[torch.Tensor, float]:
     """
     Update the policy model by maximizing the GRPO objective.
 
@@ -712,11 +648,13 @@ def maximize_grpo_objective(
 
     Example:
         >>> isinstance(
-        ...     maximize_grpo_objective(model, model, rollout, tokenizer, combined_reward, optimizer, 0.1, 0.2),
+        ...     grpo_loss(model, model, rollout, tokenizer, combined_reward, optimizer, 0.1, 0.2),
         ...     float,
         ... )
         True
     """
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
     # Extract data from rollout
     input_ids = rollout_data["input_ids"]
     attention_mask = rollout_data["attention_mask"]
@@ -726,7 +664,7 @@ def maximize_grpo_objective(
     logits_to_keep = rollout_data["logits_to_keep"]
 
     # Compute current log probabilities
-    current_log_probs = compute_log_probabilities(model, input_ids, attention_mask, logits_to_keep)
+    current_log_probs = compute_log_probs(model, input_ids, attention_mask, logits_to_keep)
     # Shape note: log probabilities are (batch_size * num_generations, completion_seq_len).
 
     # Compute policy ratio
@@ -746,30 +684,17 @@ def maximize_grpo_objective(
     avg_reward = rewards.mean().item()
     print(f"Average Reward: {avg_reward:.4f}")
 
-    # Compute advantages using group-relative normalization
-    batch_size = rollout_data["batch_size"]
-    num_generations = rollout_data["num_generations"]
-    advantages = compute_group_relative_advantages(rewards, num_generations)
-
-    # Compute surrogate loss with clipping
-    surrogate1 = ratio * advantages
-    surrogate2 = torch.clamp(ratio, 1 - epsilon, 1 + epsilon) * advantages
-    surrogate_loss = torch.min(surrogate1, surrogate2)
-
-    # Compute KL divergence penalty
-    kl_div = torch.exp(ref_log_probs - current_log_probs) - (ref_log_probs - current_log_probs) - 1
-
-    # Combine losses
-    per_token_loss = surrogate_loss - beta * kl_div
+    mean_rewards = rewards.mean(dim=1).repeat_interleave(num_generations)
+    std_rewards = rewards.std(dim=1).repeat_interleave(num_generations)
+    advantages = ((rewards.view(-1) - mean_rewards) / (std_rewards + 1e-4)).unsqueeze(1)
+    surr1 = ratio * advantages
+    surr2 = torch.clamp(ratio, 1 - epsilon, 1 + epsilon) * advantages
+    surrogate_loss = torch.min(surr1, surr2)
+    kl = torch.exp(ref_log_probs - current_log_probs) - (ref_log_probs - current_log_probs) - 1
+    per_token_loss = surrogate_loss - beta * kl
     loss = -((per_token_loss * completion_mask).sum(dim=1) / completion_mask.sum(dim=1)).mean()
 
-    # Optimization step
-    optimizer.zero_grad()
-    loss.backward()
-    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.1)
-    optimizer.step()
-
-    return loss.item()
+    return loss, avg_reward
 
 
 def train_with_grpo(
@@ -786,6 +711,7 @@ def train_with_grpo(
     mu: int,
     epsilon: float,
     reward_function: RewardFn,
+    device_ids: List[int],
 ) -> PreTrainedModel:
     """
     Iterative Group Relative Policy Optimization algorithm.
@@ -808,20 +734,20 @@ def train_with_grpo(
     Returns:
         The fine-tuned policy model.
     """
-    policy_model = model
-    # extract device from model
-    device = next(policy_model.parameters()).device
+    assert device_ids is not None and len(device_ids) > 1, "This code needs at least 2 GPU cores to run!"
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    policy_model =nn.DataParallel(model, device_ids=device_ids)
 
     # Outer loop for iterations with reward model updates
     for iteration in range(1, num_iterations + 1):
         print(f"\nStarting iteration {iteration}/{num_iterations}")
 
         # Create reference model for KL constraint
-        reference_model = copy.deepcopy(policy_model)
+        reference_model = copy.deepcopy(policy_model.module)
         reference_model.eval()
         for param in reference_model.parameters():
             param.requires_grad = False
-        reference_model = reference_model.to(device)
 
         optimizer = torch.optim.Adam(policy_model.parameters(), lr=learning_rate)
         policy_model.train()
@@ -835,25 +761,30 @@ def train_with_grpo(
             with torch.no_grad():
                 # Generate completions and compute log probs
                 rollout_data = generate_rollout_data(
-                    policy_model, reference_model, tokenizer,
+                    policy_model.module, reference_model, tokenizer,
                     batch_samples, num_generations, max_completion_length
                 )
                 # TODO: remove forward hoot from the reference model for grads
 
             # Multiple GRPO updates per batch of generations
             for grpo_iter in range(1, mu + 1):
-                loss_value = maximize_grpo_objective(
-                    policy_model, reference_model, rollout_data, tokenizer,
-                    reward_function, optimizer, beta, epsilon
+                loss, avg_reward = grpo_loss(
+                    policy_model.module, rollout_data,
+                    reward_function, beta, epsilon
                 )
+                # Optimization step
+                optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.1)
+                optimizer.step()
                 print(f"Iteration {iteration}/{num_iterations}, Step {step}/{steps_per_iteration}, "
-                      f"GRPO update {grpo_iter}/{mu}, Loss: {loss_value:.4f}")
+                      f"GRPO update {grpo_iter}/{mu}, Loss: {loss.item():.4f}, Avg Reward: {avg_reward:.4f}")
 
         # Optional: Update reward model here if using reward model training
         # This is not implemented in the original code but present in the pseudocode
         print(f"Completed iteration {iteration}. Reward model update would happen here.")
 
-    return policy_model
+    return policy_model.module
 
 def enable_grads(model: PreTrainedModel) -> PreTrainedModel:
     model.train()
@@ -879,7 +810,7 @@ def main():
 
     # 0.5B model is not smart to generate the <reasoning> and <answer> tags
     # so several iterations of SFT to teach it these tags are recommended before RL
-    model_name = "Qwen/Qwen2.5-0.5B-Instruct"
+    model_name = "Qwen/Qwen2.5-1.5B-Instruct"
     output_dir = "math_solver_model"
 
     print("Downloading model...")
@@ -887,23 +818,27 @@ def main():
         model_name,
         torch_dtype=torch.bfloat16, # use bf16 for performance
         #attn_implementation="flash_attention_2",
-        device_map=None # TODO: move directly to GPU
+        device_map="auto",
+        trust_remote_code=True,
     )
     print("Downloaded model")
 
-    model = model.to(device)
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
     # fix tokenizer padding token
     tokenizer.pad_token = tokenizer.eos_token
     model.config.pad_token_id = tokenizer.eos_token_id
     model.config.eos_token_id = tokenizer.eos_token_id
 
+    num_gpus = torch.cuda.device_count()
+    print(f"Detected {num_gpus} GPUs")
+    device_ids = list(range(num_gpus))
+
     # create a list of all dataset examples as prompts that will be given to models and answers we expect
     # [{'prompt': 'Respond in the following format:\n\n<reasoning>\n...\n</reasoning>\n<answer>\n...\n</answer>\nNatalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May?', 'answer': '72'},...]
     all_data = prepare_dataset("train")
     random.shuffle(all_data)
     # reserve some examples for test set
-    num_eval_examples = 1
+    num_eval_examples = 30
     train_data = all_data[num_eval_examples:]
     eval_data = all_data[:num_eval_examples]
 
@@ -917,9 +852,9 @@ def main():
     training_config = {
         'num_iterations' : 1,
         'steps_per_iteration': 500,                    # Total number of RL training steps.
-        'batch_size': 4,                     # Number of samples per training step.
-        'num_generations': 16,                # Number of completions generated per prompt.
-        'max_completion_length': 500,        # Maximum token length for each generated completion.
+        'batch_size': 7,                     # Number of samples per training step.
+        'num_generations': 12,                # Number of completions generated per prompt.
+        'max_completion_length': 400,        # Maximum token length for each generated completion.
         'beta': 0.04,                         # KL divergence penalty coefficient.
         'learning_rate': 5e-6,                # Learning rate for RL fine-tuning.
         'mu': 1,
@@ -932,6 +867,7 @@ def main():
         model=model,
         tokenizer=tokenizer,
         train_data=train_data,
+        device_ids=device_ids,
         **training_config
     )
 

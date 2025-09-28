@@ -7,7 +7,7 @@ where = ["."]
 
 [project]
 name = "nanugpt"
-version = "0.4.1"
+version = "0.4.2"
 requires-python = ">=3.8" # importlib.metadata requires python >=3.8
 authors = [
     { name = "Shital Shah", email = "sytelus@gmail.com" }
@@ -37,10 +37,18 @@ dependencies = [
     "tqdm",
     "matplotlib",
     "rich",
+
+    # below if for gsm8k generations
     "pyarrow",
     "orjson",
     "tenacity",
-    "openai"
+    "openai",
+
+    # for RLVR
+    "accelerate",
+    "flash-attn",
+    "tf-keras", # for some reason, Hugging Face cannot work without it
+    "trl",
 ]
 
 [project.urls]
