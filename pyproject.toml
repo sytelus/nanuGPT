@@ -49,6 +49,9 @@ dependencies = [
     "flash-attn",
     "tf-keras", # for some reason, Hugging Face cannot work without it
     "trl",
+
+    # Muon experiments
+    "muon-optimizer @ git+https://github.com/KellerJordan/Muon",
 ]
 
 [project.urls]
