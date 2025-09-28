@@ -1,5 +1,5 @@
 # from https://raw.githubusercontent.com/KellerJordan/modded-nanogpt/09a49d4af4804af92d14216b43136f5510a8fba8/train_gpt2.py
-# altered to use OpenWebText
+# altered to use OpenWebText and Muon - but not verified as working!! In fact it is not working yet :(.
 # Test commandline:
 # torchrun --nproc_per_node=1 --standalone keller_train_gpt2_adamw.py --batch_size 4 --num_iterations 6 --val_loss_every 2 --total_batch_size 4096 --enable_wandb 0
 # python keller_train_gpt2_muon.py --batch_size 4 --num_iterations 6 --val_loss_every 2 --total_batch_size 4096 --enable_wandb 0
