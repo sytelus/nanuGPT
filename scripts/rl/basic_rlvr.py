@@ -209,17 +209,17 @@ def evaluate_model(
             if is_correct:
                 correct += 1
 
-            # Print details of the evaluation.
-            print("\nPrompt:")
-            print(full_prompt)
-            print("\nExpected Answer:")
-            print(expected)
-            print("\nExtracted Answer:")
-            print(predicted)
-            print("\nFull Generated Response:")
-            print(response)
-            print("\nCorrect:", "✓" if is_correct else "✗")
-            print("-"*50)
+            # # Print details of the evaluation.
+            # print("\nPrompt:")
+            # print(full_prompt)
+            # print("\nExpected Answer:")
+            # print(expected)
+            # print("\nExtracted Answer:")
+            # print(predicted)
+            # print("\nFull Generated Response:")
+            # print(response)
+            # print("\nCorrect:", "✓" if is_correct else "✗")
+            # print("-"*50)
 
         except Exception as e:
             print("\nFailed to parse model output for prompt:")
