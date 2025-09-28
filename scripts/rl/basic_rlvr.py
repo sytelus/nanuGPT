@@ -168,10 +168,15 @@ def evaluate_model(
 
     print("Evaluating model on ", total, "examples...")
 
+    if total == 0:
+        print("No evaluation examples provided; skipping evaluation.")
+        return 0.0
+
+    effective_batch_size = min(batch_size, total)
 
     try:
-        for start in range(0, total, batch_size):
-            batch_examples = eval_examples[start:start + batch_size]
+        for start in range(0, total, effective_batch_size):
+            batch_examples = eval_examples[start:start + effective_batch_size]
             prompts = [example["prompt"] for example in batch_examples]
             expected_answers = [example.get("answer") for example in batch_examples]
 
