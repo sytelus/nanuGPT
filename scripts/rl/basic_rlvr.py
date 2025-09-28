@@ -756,7 +756,9 @@ def train_with_grpo(
     Returns:
         The fine-tuned policy model.
     """
-    assert device_ids is not None and len(device_ids) > 1, "This code needs at least 2 GPU cores to run!"
+    if not device_ids:
+        raise ValueError("GRPO training requires at least one CUDA device.")
+
     policy_model = nn.DataParallel(model, device_ids=device_ids)
 
     # Outer loop for iterations with reward model updates
@@ -764,7 +766,7 @@ def train_with_grpo(
         print(f"\nStarting iteration {iteration}/{num_iterations}")
 
         # Create reference model for KL constraint
-        reference_model = cast(PreTrainedModel, copy.deepcopy(policy_model.module))
+        reference_model = copy.deepcopy(cast(PreTrainedModel, policy_model.module))
         reference_model.eval()
         for param in reference_model.parameters():
             param.requires_grad = False
