@@ -55,7 +55,7 @@ if [ "$#" -eq 0 ]; then
   # avoid OOM errors by allowing segments to expand
   export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
   # turn on heavy optimizations in torchinductor
-  export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=${TORCHINDUCTOR_COORDINATE_DESCENT_TUNING:-1}
+  # export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=${TORCHINDUCTOR_COORDINATE_DESCENT_TUNING:-1}
 
   export TOLERENCE_YAML='tolerations:
             - key: "nvidia.com/gpu"

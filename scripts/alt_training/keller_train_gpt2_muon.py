@@ -166,7 +166,7 @@ class GPT(nn.Module):
 
         # there are performance reasons why not returning logits is prudent, if not needed
         if not return_logits:
-            logits = None
+            return None, loss
 
         return logits, loss
 
@@ -471,8 +471,8 @@ if __name__ == "__main__":
     }[args.model]
     model = GPT(model_config)
     model = model.train().cuda()
-    if hasattr(config, "coordinate_descent_tuning"):
-        config.coordinate_descent_tuning = True # suggested by @Chillee
+    # if hasattr(config, "coordinate_descent_tuning"):
+    #     config.coordinate_descent_tuning = True # suggested by @Chillee
     print0("compiling the model...")
     model = torch.compile(model)
     print0("compiling done.")

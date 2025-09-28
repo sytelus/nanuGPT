@@ -89,8 +89,8 @@ export RDMA_REQUESTS=${RDMA_REQUESTS:-1}
 # good defaults for Pytorch
 # avoid OOM errors by allowing segments to expand
 export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
-# turn on heavy optimizations in torchinductor
-export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=${TORCHINDUCTOR_COORDINATE_DESCENT_TUNING:-1}
+# Don't turn on heavy optimizations in torchinductor, this causes compile error for some models
+# export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=${TORCHINDUCTOR_COORDINATE_DESCENT_TUNING:-1}
 
 # validate START_COMMAND is not empty
 if [ -z "${START_COMMAND}" ]; then
