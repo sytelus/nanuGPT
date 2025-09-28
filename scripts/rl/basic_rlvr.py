@@ -110,7 +110,9 @@ def prepare_dataset(
             prompt_str = build_prompt([
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": example["question"]},
-                {"role":"assistant", "content": "<reasoning>\n"}
+                # priming model to responde within tags
+                # this seems to be necessory for Qwen 2.5 1.5B
+                {"role":"assistant", "content": "<reasoning>\n"},
             ], tokenizer)
         else:
             prompt_str = build_prompt([
