@@ -1,8 +1,13 @@
 # from https://raw.githubusercontent.com/KellerJordan/modded-nanogpt/09a49d4af4804af92d14216b43136f5510a8fba8/train_gpt2.py
-# altered to use OpenWebText and Muon - but not verified as working!! In fact it is not working yet :(.
+# altered to use OpenWebText
 # Test commandline:
 # torchrun --nproc_per_node=1 --standalone keller_train_gpt2_adamw.py --batch_size 4 --num_iterations 6 --val_loss_every 2 --total_batch_size 4096 --enable_wandb 0
 # python keller_train_gpt2_muon.py --batch_size 4 --num_iterations 6 --val_loss_every 2 --total_batch_size 4096 --enable_wandb 0
+#
+# NOTE: This version has been minimally modified to use MuonWithAuxAdam instead of AdamW.
+# - Parameter grouping mirrors the working Muon example: hidden matrix weights -> Muon; others -> Adam.
+# - Momentum warmup for Muon is applied over the first ~300 steps.
+# - Per-param gradient unit-norming was removed (it conflicts with Muon’s update geometry).
 
 import os
 import sys
@@ -15,9 +20,12 @@ import numpy as np
 import torch
 from torch import nn
 import torch.nn.functional as F
-import torch._dynamo as dynamo  # used to keep problematic ops out of torch.compile graphs
+import torch._inductor.config as config
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
+
+# [MUON] import the Muon optimizer
+from muon import MuonWithAuxAdam  # pip install muon-optimizer (package name may be 'muon')
 
 from nanugpt.common import setup_logger
 
@@ -45,23 +53,16 @@ class Rotary(torch.nn.Module):
             freqs = torch.outer(t, self.inv_freq).to(x.device)
             self.cos_cached = freqs.cos()
             self.sin_cached = freqs.sin()
-        return self.cos_cached[None, :, None, :], self.sin_cached[None, :, None, :] # type: ignore
+        return self.cos_cached[None, :, None, :], self.sin_cached[None, :, None, :]  # type: ignore
 
 def apply_rotary_emb(x, cos, sin):
-    assert x.ndim == 4 # multihead attention
+    assert x.ndim == 4  # multihead attention
     d = x.shape[3]//2
     x1 = x[..., :d]
     x2 = x[..., d:]
     y1 = x1 * cos + x2 * sin
     y2 = x1 * (-sin) + x2 * cos
     return torch.cat([y1, y2], 3)
-
-
-# torch.compile was triggering Triton autotune crashes on the fused CE kernel; run it eager.
-@dynamo.disable
-def cross_entropy_loss(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-    return F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
-
 
 def rmsnorm(x0, eps=1e-6):
     x = x0.float()
@@ -83,7 +84,7 @@ class CausalSelfAttention(nn.Module):
         self.rotary = Rotary(self.head_dim)
 
     def forward(self, x):
-        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+        B, T, C = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         qkv = self.c_attn(x)
         q, k, v = qkv.split(self.n_embd, dim=2)
@@ -94,7 +95,7 @@ class CausalSelfAttention(nn.Module):
         q = apply_rotary_emb(q, cos, sin)
         k = apply_rotary_emb(k, cos, sin)
         y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=True)
-        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
+        y = y.transpose(1, 2).contiguous().view(B, T, C)  # re-assemble all head outputs side by side
         # output projection
         y = self.c_proj(y)
         return y
@@ -147,36 +148,73 @@ class GPT(nn.Module):
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        # weight tying removed so they can be optimized at different rates
-        #self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
+        self.transformer.wte.weight = self.lm_head.weight  # weight tying
 
     def forward(self, idx, targets=None, return_logits=True):
         b, t = idx.size()
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
-        pos = torch.arange(0, t, dtype=torch.long, device=idx.device) # shape (t)
+        pos = torch.arange(0, t, dtype=torch.long, device=idx.device)  # shape (t)
 
         # forward the GPT model itself
-        x = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
+        x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
 
         for block in self.transformer.h:
             x = block(x)
         x = rmsnorm(x)
 
         if targets is not None:
-            # if we are given some desired targets also calculate the loss
             logits = self.lm_head(x)
-            loss = cross_entropy_loss(logits, targets)  # keeps giant CE matmul out of compiled graph
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
         else:
-            # inference-time mini-optimization: only forward the lm_head on the very last position
-            logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
+            logits = self.lm_head(x[:, [[-1]], :].squeeze(1))  # keep time dim in a simple way
             loss = None
 
-        # there are performance reasons why not returning logits is prudent, if not needed
         if not return_logits:
-            return None, loss
-
+            logits = None
         return logits, loss
 
+    # [MUON] Replace AdamW with MuonWithAuxAdam + param grouping.
+    def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
+        """
+        Returns a MuonWithAuxAdam optimizer with:
+          - Hidden matrix weights -> Muon (lr=0.05, momentum warmup handled in the loop)
+          - Embedding/LM head (tied) -> Adam (lr=0.02, betas=(0.8, 0.95), eps=1e-10)
+          - Scalar params (if any) -> Adam (lr=0.004, betas=(0.8, 0.95), eps=1e-10)
+        LRs are later scaled by the existing scheduler via a per-group 'initial_lr'.
+        """
+        # identify parameter groups
+        # embedding/head are weight-tied; keep in a single group
+        embed_head_param = self.transformer.wte.weight
+
+        # hidden matrix params: all 2D weights inside transformer.h (attention/MLP)
+        hidden_matrix_params = []
+        for name, p in self.transformer.h.named_parameters():
+            if p.ndim >= 2 and (p is not embed_head_param):
+                hidden_matrix_params.append(p)
+
+        # scalar params: biases or norm-gains if present (none in this config, but keep general)
+        scalar_params = [p for n, p in self.named_parameters()
+                         if (p.ndim < 2) and (p is not embed_head_param)]
+
+        # Adam aux groups (betas/eps per working Muon recipe)
+        adam_groups = []
+        # embeddings + head (tied)
+        adam_groups.append(dict(params=[embed_head_param], lr=0.02, betas=(0.8, 0.95), eps=1e-10, use_muon=False))
+        # scalars (if any)
+        if len(scalar_params) > 0:
+            adam_groups.append(dict(params=scalar_params, lr=0.004, betas=(0.8, 0.95), eps=1e-10, use_muon=False))
+
+        # Muon group for hidden matrices
+        muon_group = dict(params=hidden_matrix_params, lr=0.05, momentum=0.95, use_muon=True)
+
+        param_groups = [*adam_groups, muon_group]
+        optimizer = MuonWithAuxAdam(param_groups)
+
+        # record per-group initial lr; training loop multiplies by scheduler scale
+        for g in optimizer.param_groups:
+            g["initial_lr"] = g["lr"]
+
+        return optimizer
 
 # -----------------------------------------------------------------------------
 # Our own simple Distributed Data Loader
@@ -206,7 +244,7 @@ class DistributedDataLoader:
         self.current_shard = 0
         self.current_position = self.process_rank * self.B * self.T
 
-    def advance(self): # advance to next data shard
+    def advance(self):  # advance to next data shard
         self.current_shard = 0
         self.current_position = self.process_rank * self.B * self.T
 
@@ -215,155 +253,13 @@ class DistributedDataLoader:
         T = self.T
         buf = self.tokens[self.current_position : self.current_position+B*T+1]
         buf = torch.tensor(buf.astype(np.int32), dtype=torch.long)
-        x = (buf[:-1]).view(B, T) # inputs
-        y = (buf[1:]).view(B, T) # targets
+        x = (buf[:-1]).view(B, T)  # inputs
+        y = (buf[1:]).view(B, T)   # targets
         # advance current position and load next shard if necessary
         self.current_position += B * T * self.num_processes
         if self.current_position + (B * T * self.num_processes + 1) > len(self.tokens):
             self.advance()
         return x.cuda(), y.cuda()
-
-
-# -----------------------------------------------------------------------------
-# Muon optimizer
-
-@torch.compile
-def zeropower_via_newtonschulz5(G: torch.Tensor, steps: int) -> torch.Tensor:
-    """
-    Newton-Schulz iteration to compute the zeroth power / orthogonalization of G. We opt to use a
-    quintic iteration whose coefficients are selected to maximize the slope at zero. For the purpose
-    of minimizing steps, it turns out to be empirically effective to keep increasing the slope at
-    zero even beyond the point where the iteration no longer converges all the way to one everywhere
-    on the interval. This iteration therefore does not produce UV^T but rather something like US'V^T
-    where S' is diagonal with S_{ii}' ~ Uniform(0.5, 1.5), which turns out not to hurt model
-    performance at all relative to UV^T, where USV^T = G is the SVD.
-    """
-    assert len(G.shape) == 2
-    a, b, c = (3.4445, -4.7750,  2.0315)
-    X = G.bfloat16()
-    if G.size(0) > G.size(1):
-        X = X.T
-
-    # Ensure spectral norm is at most 1
-    X = X / (X.norm() + 1e-7)
-    # Perform the NS iterations
-    for _ in range(steps):
-        A = X @ X.T
-        B = b * A + c * A @ A # adapted from suggestion by @jxbz, @leloykun, and @YouJiacheng
-        X = a * X + B @ X
-
-    if G.size(0) > G.size(1):
-        X = X.T
-    return X
-
-class Muon(torch.optim.Optimizer):
-    """
-    Muon - MomentUm Orthogonalized by Newton-schulz
-
-    Muon internally runs standard SGD-momentum, and then performs an orthogonalization post-
-    processing step, in which each 2D parameter's update is replaced with the nearest orthogonal
-    matrix. To efficiently orthogonalize each update, we use a Newton-Schulz iteration, which has
-    the advantage that it can be stably run in bfloat16 on the GPU.
-
-    Some warnings:
-    - This optimizer assumes that all parameters passed in are 2D.
-    - It should not be used for the embedding layer, the final fully connected layer, or any {0,1}-D
-    parameters; those should all be optimized by a standard method (e.g., AdamW).
-    - To use it with 4D convolutional filters, it works well to just flatten their last 3 dimensions.
-    - We believe it is unlikely to work well for training with small batch size.
-    - We believe it may not work well for finetuning pretrained models, but we haven"t tested this.
-    - We have not yet tried this optimizer for training scenarios larger than NanoGPT (124M).
-
-    Arguments:
-        lr: The learning rate used by the internal SGD.
-        momentum: The momentum used by the internal SGD.
-        nesterov: Whether to use Nesterov-style momentum in the internal SGD. (recommended)
-        ns_steps: The number of Newton-Schulz iteration steps to use.
-    """
-    def __init__(self, params, lr=0.02, momentum=0.95, nesterov=True, ns_steps=5, rank=0, world_size=1): # type: ignore
-        self.rank = rank
-        self.world_size = world_size
-        defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov, ns_steps=ns_steps)
-        params: list[torch.Tensor] = [*params]
-        assert all(isinstance(p, torch.Tensor) for p in params)
-        sizes = {p.numel() for p in params}
-        def create_update_buffer(size: int):
-            # allocate a buffer with world_size rows for the distributed all_gather
-            b = torch.empty(self.world_size, size, dtype=torch.bfloat16, device="cuda")
-            return dict(update_buffer=b, update_buffer_views=[b[i] for i in range(self.world_size)])
-        param_groups = [
-            dict(params=[p for p in params if p.numel() == size], **create_update_buffer(size)) for size in sizes]
-        super().__init__(param_groups, defaults)
-
-    @torch.no_grad()
-    def step(self):
-        for group in self.param_groups:
-            lr = group["lr"]
-            momentum = group["momentum"]
-            nesterov = group["nesterov"]
-            ns_steps = group["ns_steps"]
-            update_buffer = group["update_buffer"]
-            update_buffer_views: list[torch.Tensor] = group["update_buffer_views"]
-            # list of parameters to update
-            params: list[torch.Tensor] = group["params"]
-            handle = None  # will be used for async op if distributed is enabled
-            params_world = None
-
-            # Define update_prev: in distributed mode we need to wait for the async op.
-            def update_prev():
-                # If there is nothing to update, return early.
-                if params_world is None:
-                    return
-                # Only wait for the async op if we are in distributed mode.
-                if torch.distributed.is_initialized():
-                    assert handle is not None
-                    handle.wait()
-                # Apply the update from each gathered tensor
-                for p_world, g_world in zip(params_world, update_buffer_views):
-                    # The update uses a scaling factor based on parameter shape.
-                    p_world.add_(
-                        g_world.view_as(p_world),
-                        alpha=-lr * max(1, p_world.size(0) / p_world.size(1)) ** 0.5,
-                    )
-
-            # Loop over parameters in groups of size self.world_size.
-            for base_i in range(len(params))[::self.world_size]:
-                if base_i + self.rank < len(params):
-                    p = params[base_i + self.rank]
-                    g = p.grad
-                    assert g is not None, "Gradient not set for parameter!"
-                    state = self.state[p]
-                    if "momentum_buffer" not in state:
-                        state["momentum_buffer"] = torch.zeros_like(g)
-                    buf: torch.Tensor = state["momentum_buffer"]
-                    buf.lerp_(g, 1 - momentum)
-                    # Use Nesterov momentum if enabled.
-                    g = g.lerp_(buf, momentum) if nesterov else buf
-                    # Apply the Newton-Schulz orthogonalization (assume zeropower_via_newtonschulz5 is defined)
-                    g = zeropower_via_newtonschulz5(g, steps=ns_steps).flatten()
-                else:
-                    # For parameters that are not updated by this rank, use the buffer view.
-                    g = update_buffer_views[self.rank]
-
-                # Perform the previous updates before moving on.
-                update_prev()
-
-                # Only perform distributed all_gather if torch.distributed is initialized.
-                if torch.distributed.is_initialized():
-                    # This will asynchronously gather the tensor 'g' from all processes into update_buffer.
-                    handle = torch.distributed.all_gather_into_tensor(update_buffer, g, async_op=True)
-                else:
-                    # In a single-worker setting, there is no need to gather; copy g into all views.
-                    for view in update_buffer_views:
-                        view.copy_(g)
-                # Determine the group of parameters that correspond to the current block.
-                params_world = params[base_i : base_i + self.world_size]
-
-            # Perform a final update for the last block.
-            update_prev()
-
-# -----------------------------------------------------------------------------
-
 
 # -----------------------------------------------------------------------------
 # int main
@@ -378,7 +274,7 @@ if __name__ == "__main__":
     import time
     import argparse
 
-    print0(f"Running pytorch {torch.version.__version__}") # type: ignore
+    print0(f"Running pytorch {torch.version.__version__}")
 
     parser = argparse.ArgumentParser()
     # file system input / output
@@ -411,6 +307,7 @@ if __name__ == "__main__":
     args.input_bin = os.path.expandvars(args.input_bin)
     args.input_val_bin = os.path.expandvars(args.input_val_bin)
     args.output_dir = os.path.join(os.path.expandvars(args.output_dir), run_id)
+    warmdown_iters = int(args.num_iterations * args.cooldown_frac)
 
     logger = setup_logger(config={
             "logging":{
@@ -455,8 +352,8 @@ if __name__ == "__main__":
     else:
         raise ValueError('No GPU found. Set device_type=cpu.')
 
-    master_process = ddp_rank == 0 # this process will do logging, checkpointing etc.
-    seed_offset = 0 # each process gets the exact same seed
+    master_process = ddp_rank == 0  # this process will do logging, checkpointing etc.
+    seed_offset = 0  # each process gets the exact same seed
     print(f"device_name: {device_name}, ddp_rank: {ddp_rank}, ddp_local_rank: {ddp_local_rank}, ddp_world_size: {ddp_world_size}")
 
     use_ddp = ddp_world_size > 1
@@ -467,7 +364,7 @@ if __name__ == "__main__":
     assert args.total_batch_size == tokens_per_fwdbwd
 
     # set up a context manager following the desired dtype and device
-    ctx = torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16) # type: ignore
+    ctx = torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16)  # type: ignore
 
     # init the model from scratch
     model_config = {
@@ -478,6 +375,8 @@ if __name__ == "__main__":
     }[args.model]
     model = GPT(model_config)
     model = model.train().cuda()
+    if hasattr(config, "coordinate_descent_tuning"):
+        config.coordinate_descent_tuning = True  # suggested by @Chillee
     print0("compiling the model...")
     model = torch.compile(model)
     print0("compiling done.")
@@ -492,29 +391,28 @@ if __name__ == "__main__":
     # here we wrap model into DDP container
     if use_ddp:
         model = DDP(model, device_ids=[device_id])
-        raw_model:GPT = model.module # always contains the "raw" unwrapped model
+        raw_model = model.module  # always contains the "raw" unwrapped model
     else:
-        raw_model:GPT = model # type: ignore
+        raw_model = model
 
-    # collect the parameters to optimize
-    hidden_matrix_params = [p for p in raw_model.transformer.h.parameters() if p.ndim == 2]
-    embed_params = [raw_model.transformer.wte.weight]
-    scalar_params = [p for p in raw_model.parameters() if p.ndim < 2]
-    head_params = [raw_model.lm_head.weight]
+    # [MUON] init the optimizer via the model helper (returns MuonWithAuxAdam)
+    optimizer = raw_model.configure_optimizers(weight_decay=args.weight_decay,
+                                               learning_rate=args.learning_rate, betas=(0.9, 0.95),
+                                               device_type=device_name)
 
-    # init the optimizer(s)
-    adam_params = [dict(params=head_params, lr=0.008), dict(params=embed_params, lr=0.6), dict(params=scalar_params, lr=0.04)]
-    optimizer1 = torch.optim.Adam(adam_params, betas=(0.8, 0.95), fused=True)
-    optimizer2 = Muon(hidden_matrix_params, lr=0.05, momentum=0.95, rank=ddp_rank, world_size=ddp_world_size)
-    optimizers = [optimizer1, optimizer2]
-
-    # learning rate schedule: stable then decay
-    def get_lr(it: int):
-        t = 1 - it / args.num_iterations # time remaining in training
-        assert 1 >= t >= 0
-        w = min(t / args.cooldown_frac, 1.0) # 1 -> 0
-        return w * 1.0 + (1 - w) * 0.1
-    schedulers = [torch.optim.lr_scheduler.LambdaLR(opt, get_lr) for opt in optimizers]
+    # learning rate decay scheduler (linear warmup and warmdown)
+    def get_lr(it):
+        assert it <= args.num_iterations
+        # 1) linear warmup for warmup_iters steps
+        if it < args.warmup_iters:
+            return args.learning_rate * (it+1) / args.warmup_iters
+        # 2) constant lr for a while
+        elif it < args.num_iterations - warmdown_iters:
+            return args.learning_rate
+        # 3) linear warmdown
+        else:
+            decay_ratio = (args.num_iterations - it) / warmdown_iters
+            return args.learning_rate * decay_ratio
 
     timings = []
     train_tokens = 0
@@ -552,10 +450,6 @@ if __name__ == "__main__":
             })
             torch.cuda.synchronize()
 
-        # bit confusing: we want to make sure to eval on 0th iteration
-        # but also after the very last iteration. so we loop for step <= num_iterations
-        # instead of just < num_iterations (one extra due to <=), only to do
-        # the validation/sampling one last time, and then we break right here as we're done.
         if last_step:
             logger.info(metrics)
             break
@@ -569,31 +463,35 @@ if __name__ == "__main__":
         x, y = train_loader.next_batch()
         # backward pass
         loss.backward()
-        for p in model.parameters():
-            p.grad = p.grad / (p.grad.norm() + 1e-6) # type: ignore
+
+        # [MUON] REMOVE per-parameter unit-norm grad normalization.
+        # This was present in the AdamW version but is not used with Muon.
 
         # determine and set the learning rate for this iteration
-        # momentum warmup for Muon
-        frac = min(step / 300, 1)
-        for group in optimizer2.param_groups:
-            group["momentum"] = (1 - frac) * 0.85 + frac * 0.95
-        # step the optimizers and schedulers
-        for opt, sched in zip(optimizers, schedulers):
-            opt.step()
-            sched.step()
+        lr_abs = get_lr(step)
+        # translate absolute LR into a scale for per-group 'initial_lr'
+        lr_scale = lr_abs / max(args.learning_rate, 1e-12)
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = param_group.get('initial_lr', param_group['lr']) * lr_scale
 
-        model.zero_grad(set_to_none=True)
+        # [MUON] momentum warmup for Muon group(s)
+        frac = min(step / 300.0, 1.0)
+        for g in optimizer.param_groups:
+            if g.get("use_muon", False):
+                g["momentum"] = (1 - frac) * 0.85 + frac * 0.95
 
+        # step the optimizer
+        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
         # --------------- TRAINING SECTION END -------------------
         # everything that follows now is just diagnostics, prints, logging, etc.
 
         torch.cuda.synchronize()
         # time and print
         t1 = time.time()
-        # the 0th iteration is often an outlier (much slower) => skip logging it
         train_tokens += ddp_world_size * B * T
         tokens_per_second = ddp_world_size * B * T / (t1-t0)
-        lossf = loss.item() # keep track of the mean loss
+        lossf = loss.item()  # keep track of the mean loss
 
         train_time_hr += (t1-t0-val_time) / 3600.0
         metrics.update({
@@ -603,7 +501,7 @@ if __name__ == "__main__":
             "train/elapsed_hr": (t1-train_start_time) / 3600.0,
             "train/train_time_hr": train_time_hr,
             "train/tokens": train_tokens,
-            "train/lr": get_lr(step),
+            "train/lr": lr_abs,
         })
 
         logger.info(metrics)
