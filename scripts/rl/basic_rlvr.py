@@ -60,7 +60,11 @@ def set_random_seed(seed: int = 42) -> None:
 
 set_random_seed(42)
 
-SYSTEM_PROMPT = """
+MODEL_MODE = "completion"  # "chat" or "completion"
+
+SYSTEM_PROMPT = """A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. The reasoning process and answer are enclosed within <reasoning> </reasoning> and <answer> </answer> tags, respectively, i.e., <reasoning> reasoning process here </reasoning> <answer> answer here </answer>.""" \
+if MODEL_MODE == "chat" else \
+"""
 Respond in the following format:
 
 <reasoning>
@@ -91,17 +95,29 @@ def extract_answer_from_dataset(text: str) -> Optional[str]:
         return None
     return text.split("####")[1].strip()
 
-def prepare_dataset(split: str = "train") -> List[DatasetExample]:
+def prepare_dataset(
+    tokenizer: PreTrainedTokenizerBase,
+    split: str = "train",
+) -> List[DatasetExample]:
     data = load_dataset('openai/gsm8k', 'main')[split]
     formatted_data: List[DatasetExample] = []
 
     for raw in data:
         example: DatasetExample = cast(DatasetExample, raw)
         # Convert list of messages to a single string prompt.
-        prompt_str = build_prompt([
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": example["question"]}
-        ])
+
+        if MODEL_MODE == "chat":
+            prompt_str = build_prompt([
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": example["question"]},
+                {"role":"assistant", "content": "<reasoning>\n"}
+            ], tokenizer)
+        else:
+            prompt_str = build_prompt([
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": example["question"]}
+            ], tokenizer)
+
         formatted_example = {
             "prompt": prompt_str,  # Now a string rather than a list.
             "answer": extract_answer_from_dataset(example["answer"])
@@ -110,8 +126,21 @@ def prepare_dataset(split: str = "train") -> List[DatasetExample]:
 
     return formatted_data
 
-def build_prompt(messages: Sequence[CompletionMessage]) -> str:
-    return "\n".join(msg["content"].strip() for msg in messages)
+def build_prompt(
+    messages: Sequence[CompletionMessage],
+    tokenizer: PreTrainedTokenizerBase,
+) -> str:
+    if MODEL_MODE == "chat":
+        # messages = [{"role":"system","content":...}, {"role":"user","content":...}]
+        prompt = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=False
+        )
+    else:
+        return "\n".join(msg["content"].strip() for msg in messages)
+
+    return prompt
 
 def _extract_last_number(text: str) -> Optional[float]:
     """Extract the trailing numeric token from ``text`` when present.
@@ -565,9 +594,9 @@ def generate_completions(
         attention_mask=prompt_mask,
         max_new_tokens=max_completion_length,
         do_sample=True,
-        temperature=1.0,
-        #top_p=0.9,           # nucleus sampling for structure
-        #repetition_penalty=1.05,
+        temperature=0.7,
+        top_p=0.9,           # nucleus sampling for structure
+        repetition_penalty=1.05,
         pad_token_id=pad_token_id,
         eos_token_id=eos_token_id,
         early_stopping=False
@@ -912,7 +941,7 @@ def main():
 
     # create a list of all dataset examples as prompts that will be given to models and answers we expect
     # [{'prompt': 'Respond in the following format:\n\n<reasoning>\n...\n</reasoning>\n<answer>\n...\n</answer>\nNatalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May?', 'answer': '72'},...]
-    all_data = prepare_dataset("train")
+    all_data = prepare_dataset(tokenizer, "train")
     random.shuffle(all_data)
     # reserve some examples for test set
     num_eval_examples = 30

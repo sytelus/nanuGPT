@@ -66,7 +66,7 @@ export START_COMMAND # used later in the rendered YAML
 export NODES=${NODES:-1}
 export GPUS_PER_NODE=${GPUS_PER_NODE:-8}
 export NPROC_PER_NODE=${NPROC_PER_NODE:-${GPUS_PER_NODE}} # by default use all gpus on node
-export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"nvcr.io/nvidia/pytorch:25.08-py3"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
+export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"sytelus/gpu-devbox:2025.09.28"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
 export ENV_SETUP_SCRIPT=${ENV_SETUP_SCRIPT:-} # script to setup environment for specific cluster, this runs before any code
 export VOLCANO_NAMESPACE=${VOLCANO_NAMESPACE:-} # namespace in volcano cluster
 export VOLCANO_DATA_PVC_NAME=${VOLCANO_DATA_PVC_NAME:-} # data PVC claim in volcano cluster
