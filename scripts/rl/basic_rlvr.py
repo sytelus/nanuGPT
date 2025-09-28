@@ -565,9 +565,9 @@ def generate_completions(
         attention_mask=prompt_mask,
         max_new_tokens=max_completion_length,
         do_sample=True,
-        temperature=0.7,
-        top_p=0.9,           # nucleus sampling for structure
-        repetition_penalty=1.05,
+        temperature=1.0,
+        #top_p=0.9,           # nucleus sampling for structure
+        #repetition_penalty=1.05,
         pad_token_id=pad_token_id,
         eos_token_id=eos_token_id,
         early_stopping=False
@@ -578,7 +578,9 @@ def generate_completions(
     assert torch.equal(outputs[:, :prompt_seq_len].to(prompt_ids.device), prompt_ids)
 
     completion_ids = outputs[:, prompt_seq_len:]
-    print(tokenizer.decode(completion_ids[0], skip_special_tokens=True)[:200])
+
+    #print(tokenizer.decode(completion_ids[0], skip_special_tokens=True)[:200])
+
     # Create a binary mask that ignores tokens beyond the first EOS token.
     completion_mask = create_completion_mask(completion_ids, eos_token_id)
 
