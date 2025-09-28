@@ -179,6 +179,7 @@ def evaluate_model(
                 prompts,
                 return_tensors="pt",
                 padding=True,
+                padding_side="left",
                 truncation=False,
             )
 
@@ -539,7 +540,7 @@ def generate_completions(
 
     # Tokenize the list of prompts with padding. The padding_side="left" ensures alignment on the right.
     tokenizer.padding_side  = "left"
-    inputs = tokenizer(prompts, return_tensors="pt", padding=True)
+    inputs = tokenizer(prompts, return_tensors="pt", padding=True, padding_side="left")
     prompt_ids = inputs["input_ids"].to(device)      # Shape: (batch_size, prompt_seq_len)
     prompt_mask = inputs["attention_mask"].to(device)  # Shape: (batch_size, prompt_seq_len)
     prompt_length = prompt_ids.size(1)  # Save the prompt length to later separate prompt from completion.
@@ -568,7 +569,19 @@ def generate_completions(
     print(f"Output batch size: {outputs.size(0)}, Device after model: {outputs.device}")
 
     # Remove the prompt portion from the generated output to isolate the completion tokens.
-    completion_ids = outputs[:, prompt_length:]  # Shape: (batch_size*num_generations, completion_seq_len)
+    # 1) compute actual prompt lengths per row from the *pre-repeat* attention mask
+    #    (use the repeated mask you already have in scope)
+    prompt_lens = prompt_mask.sum(dim=1)                # (B*G,)
+    max_gen_len = outputs.size(1) - prompt_mask.size(1)
+
+    # 2) build a per-row mask that keeps only completion tokens
+    row_idx = torch.arange(outputs.size(1), device=outputs.device).unsqueeze(0)   # (1, S)
+    keep_mask = row_idx >= prompt_lens.unsqueeze(1)                                # (B*G, S)
+
+    # 3) gather variable-length tails and pad to the same length
+    #    (vectorized pad via boolean mask -> ragged -> pad_sequence)
+    ragged = [row[m].clone() for row, m in zip(outputs, keep_mask)]
+    completion_ids = pad_sequence(ragged, batch_first=True, padding_value=tokenizer.pad_token_id)
 
     # Create a binary mask that ignores tokens beyond the first EOS token.
     completion_mask = create_completion_mask(completion_ids, eos_token_id)
