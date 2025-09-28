@@ -4,8 +4,7 @@ import copy
 import random
 import re
 import os
-from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
-import typing
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, TypedDict, Union, cast
 
 import numpy as np
 import torch
@@ -26,6 +25,20 @@ CompletionList = List[CompletionMessage]
 DatasetExample = Dict[str, str]
 BatchSample = Union[DatasetExample, Tuple[str, str]]
 RewardFn = Callable[[Sequence[str], Sequence[CompletionList], Sequence[Optional[str]]], Sequence[float]]
+
+
+class RolloutData(TypedDict):
+    input_ids: torch.Tensor
+    attention_mask: torch.Tensor
+    completion_mask: torch.Tensor
+    old_log_probs: torch.Tensor
+    ref_log_probs: torch.Tensor
+    formatted_completions: List[CompletionList]
+    repeated_prompts: List[str]
+    repeated_answers: List[Optional[str]]
+    logits_to_keep: int
+    batch_size: int
+    num_generations: int
 
 def set_random_seed(seed: int = 42) -> None:
     # Set the seed for Python's built-in random module
@@ -82,7 +95,7 @@ def prepare_dataset(split: str = "train") -> List[DatasetExample]:
     formatted_data: List[DatasetExample] = []
 
     for raw in data:
-        example: DatasetExample = typing.cast(DatasetExample, raw)
+        example: DatasetExample = cast(DatasetExample, raw)
         # Convert list of messages to a single string prompt.
         prompt_str = build_prompt([
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -528,6 +541,11 @@ def generate_completions(
     prompt_ids = prompt_ids.repeat_interleave(num_generations, dim=0)   # New shape: (batch_size*num_generations, prompt_seq_len)
     prompt_mask = prompt_mask.repeat_interleave(num_generations, dim=0) # New shape: (batch_size*num_generations, prompt_seq_len)
 
+    pad_token_id = tokenizer.pad_token_id
+    eos_token_id = tokenizer.eos_token_id
+    if pad_token_id is None or eos_token_id is None:
+        raise ValueError("Tokenizer must define both pad_token_id and eos_token_id for generation")
+
     # Generate new tokens for each prompt. The output includes the original prompt and the generated tokens.
     outputs = model.generate(
         prompt_ids,
@@ -535,8 +553,8 @@ def generate_completions(
         max_new_tokens=max_completion_length,
         do_sample=True,
         temperature=1.0,
-        pad_token_id=tokenizer.pad_token_id,
-        eos_token_id=tokenizer.eos_token_id,
+        pad_token_id=pad_token_id,
+        eos_token_id=eos_token_id,
         early_stopping=False
     ) # type: ignore
 
@@ -544,7 +562,7 @@ def generate_completions(
     completion_ids = outputs[:, prompt_length:]  # Shape: (batch_size*num_generations, completion_seq_len)
 
     # Create a binary mask that ignores tokens beyond the first EOS token.
-    completion_mask = create_completion_mask(completion_ids, tokenizer.eos_token_id)
+    completion_mask = create_completion_mask(completion_ids, eos_token_id)
 
     return prompt_ids, prompt_mask, completion_ids, completion_mask
 
@@ -555,7 +573,7 @@ def generate_rollout_data(
     batch_samples: Sequence[BatchSample],
     num_generations: int,
     max_completion_length: int,
-) -> Dict[str, object]:
+) -> RolloutData:
     """
     Generate rollouts and compute static log probabilities for both the old policy (current model)
     and the reference model. Gradients are disabled so that these remain fixed.
@@ -599,31 +617,31 @@ def generate_rollout_data(
         # Compute ref_log_probs from the reference model, which remains static.
         ref_log_probs = compute_log_probs(ref_model, input_ids, attention_mask, logits_to_keep)
 
-    formatted_completions = [
+    formatted_completions: List[CompletionList] = [
         [{'content': tokenizer.decode(ids, skip_special_tokens=True)}]
         for ids in completion_ids
     ]
-    repeated_prompts = [p for p in prompts for _ in range(num_generations)]
-    repeated_answers = [a for a in answers for _ in range(num_generations)]
+    repeated_prompts: List[str] = [p for p in prompts for _ in range(num_generations)]
+    repeated_answers: List[Optional[str]] = [a for a in answers for _ in range(num_generations)]
 
-    return {
-        "input_ids": input_ids,
-        "attention_mask": attention_mask,
-        "completion_mask": completion_mask,
-        "old_log_probs": old_log_probs,   # Static log probs from the current model (old policy)
-        "ref_log_probs": ref_log_probs,     # Static log probs from the reference model
-        "formatted_completions": formatted_completions,
-        "repeated_prompts": repeated_prompts,
-        "repeated_answers": repeated_answers,
-        "logits_to_keep": logits_to_keep,
-        "batch_size": len(prompts),
-        "num_generations": num_generations
-    }
+    return RolloutData(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        completion_mask=completion_mask,
+        old_log_probs=old_log_probs,   # Static log probs from the current model (old policy)
+        ref_log_probs=ref_log_probs,     # Static log probs from the reference model
+        formatted_completions=formatted_completions,
+        repeated_prompts=repeated_prompts,
+        repeated_answers=repeated_answers,
+        logits_to_keep=logits_to_keep,
+        batch_size=len(prompts),
+        num_generations=num_generations
+    )
 
 
 def grpo_loss(
     model: PreTrainedModel,
-    rollout_data: Dict[str, object],
+    rollout_data: RolloutData,
     reward_function: RewardFn,
     beta: float,
     epsilon: float,
@@ -651,8 +669,6 @@ def grpo_loss(
         ... )
         True
     """
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
     # Extract data from rollout
     input_ids = rollout_data["input_ids"]
     attention_mask = rollout_data["attention_mask"]
@@ -741,16 +757,14 @@ def train_with_grpo(
         The fine-tuned policy model.
     """
     assert device_ids is not None and len(device_ids) > 1, "This code needs at least 2 GPU cores to run!"
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-    policy_model =nn.DataParallel(model, device_ids=device_ids)
+    policy_model = nn.DataParallel(model, device_ids=device_ids)
 
     # Outer loop for iterations with reward model updates
     for iteration in range(1, num_iterations + 1):
         print(f"\nStarting iteration {iteration}/{num_iterations}")
 
         # Create reference model for KL constraint
-        reference_model = copy.deepcopy(policy_model.module)
+        reference_model = cast(PreTrainedModel, copy.deepcopy(policy_model.module))
         reference_model.eval()
         for param in reference_model.parameters():
             param.requires_grad = False
@@ -765,17 +779,19 @@ def train_with_grpo(
 
             # Set old policy for this step
             with torch.no_grad():
+                policy_module = cast(PreTrainedModel, policy_model.module)
                 # Generate completions and compute log probs
                 rollout_data = generate_rollout_data(
-                    policy_model.module, reference_model, tokenizer,
+                    policy_module, reference_model, tokenizer,
                     batch_samples, num_generations, max_completion_length
                 )
                 # TODO: remove forward hoot from the reference model for grads
 
             # Multiple GRPO updates per batch of generations
             for grpo_iter in range(1, mu + 1):
+                policy_module = cast(PreTrainedModel, policy_model.module)
                 loss, avg_reward = grpo_loss(
-                    policy_model.module, rollout_data,
+                    policy_module, rollout_data,
                     reward_function, beta, epsilon
                 )
                 # Optimization step
@@ -790,7 +806,7 @@ def train_with_grpo(
         # This is not implemented in the original code but present in the pseudocode
         print(f"Completed iteration {iteration}. Reward model update would happen here.")
 
-    return policy_model.module
+    return cast(PreTrainedModel, policy_model.module)
 
 def enable_grads(model: PreTrainedModel) -> PreTrainedModel:
     model.train()
