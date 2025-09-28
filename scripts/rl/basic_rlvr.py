@@ -565,7 +565,9 @@ def generate_completions(
         attention_mask=prompt_mask,
         max_new_tokens=max_completion_length,
         do_sample=True,
-        temperature=1.0,
+        temperature=0.7,
+        top_p=0.9,           # nucleus sampling for structure
+        repetition_penalty=1.05,
         pad_token_id=pad_token_id,
         eos_token_id=eos_token_id,
         early_stopping=False
@@ -814,11 +816,24 @@ def train_with_grpo(
             # Set old policy for this step
             with torch.no_grad():
                 policy_module = unwrap(policy_model)
+
+                # Save and switch modes just for generation
+                was_training = policy_module.training
+                prev_cache   = getattr(policy_module.config, "use_cache", False)
+                policy_module.eval()
+                policy_module.config.use_cache = True
+
                 # Generate completions and compute log probs
                 rollout_data = generate_rollout_data(
                     policy_module, reference_model, tokenizer,
                     batch_samples, num_generations, max_completion_length
                 )
+
+                # Restore training state for the update step
+                policy_module.config.use_cache = prev_cache
+                if was_training:
+                    policy_module.train()
+
                 # TODO: remove forward hoot from the reference model for grads
 
             # Multiple GRPO updates per batch of generations
