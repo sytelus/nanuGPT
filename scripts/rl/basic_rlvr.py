@@ -415,8 +415,7 @@ def compute_log_probs(
         torch.Tensor: Log probabilities for the last `logits_to_keep` tokens of each sequence. Shape: (batch_size, logits_to_keep).
 
     Explanation:
-        1. We call the model with logits_to_keep + 1 so that the model outputs one extra logit than needed.
-           This is common in next-token prediction setups.
+        1. We obtain the full logits for the prompt+completion sequence from the model.
         2. We slice off the last logit along the sequence dimension because it does not correspond to any input token.
         3. We then restrict both the input_ids and logits to the last logits_to_keep tokens, which should
            correspond to the generated completion portion.
@@ -426,7 +425,6 @@ def compute_log_probs(
     logits = model(
         input_ids=input_ids,
         attention_mask=attention_mask,
-        logits_to_keep=logits_to_keep + 1  # Request one extra logit for proper alignment.
     ).logits  # Shape: (batch_size, total_seq_len, vocab_size)
 
     # Remove the last logit as it does not have a corresponding target token.
@@ -521,7 +519,7 @@ def generate_completions(
 
     # Tokenize the list of prompts with padding. The padding_side="left" ensures alignment on the right.
     tokenizer.padding_side  = "left"
-    inputs = tokenizer(prompts, return_tensors="pt", padding=True, padding_side="left")
+    inputs = tokenizer(prompts, return_tensors="pt", padding=True)
     prompt_ids = inputs["input_ids"].to(device)      # Shape: (batch_size, prompt_seq_len)
     prompt_mask = inputs["attention_mask"].to(device)  # Shape: (batch_size, prompt_seq_len)
     prompt_length = prompt_ids.size(1)  # Save the prompt length to later separate prompt from completion.
@@ -662,6 +660,8 @@ def grpo_loss(
     old_log_probs = rollout_data["old_log_probs"]
     ref_log_probs = rollout_data["ref_log_probs"]
     logits_to_keep = rollout_data["logits_to_keep"]
+    batch_size = int(rollout_data["batch_size"])
+    num_generations = int(rollout_data["num_generations"])
 
     # Compute current log probabilities
     current_log_probs = compute_log_probs(model, input_ids, attention_mask, logits_to_keep)
@@ -677,16 +677,22 @@ def grpo_loss(
 
     # Compute rewards
     rewards = torch.tensor(
-        reward_function(prompts=repeated_prompts, completions=formatted_completions, answer=repeated_answers),
+        reward_function(
+            prompts=repeated_prompts,
+            completions=formatted_completions,
+            answer=repeated_answers,
+        ),
         dtype=torch.float32,
-        device=next(model.parameters()).device
+        device=current_log_probs.device,
     )
+    rewards = rewards.view(batch_size, num_generations)
     avg_reward = rewards.mean().item()
     print(f"Average Reward: {avg_reward:.4f}")
 
-    mean_rewards = rewards.mean(dim=1).repeat_interleave(num_generations)
-    std_rewards = rewards.std(dim=1).repeat_interleave(num_generations)
-    advantages = ((rewards.view(-1) - mean_rewards) / (std_rewards + 1e-4)).unsqueeze(1)
+    mean_rewards = rewards.mean(dim=1, keepdim=True)
+    std_rewards = rewards.std(dim=1, keepdim=True, unbiased=False)
+    normalized_advantages = (rewards - mean_rewards) / (std_rewards + 1e-4)
+    advantages = normalized_advantages.view(-1, 1)
     surr1 = ratio * advantages
     surr2 = torch.clamp(ratio, 1 - epsilon, 1 + epsilon) * advantages
     surrogate_loss = torch.min(surr1, surr2)
@@ -775,7 +781,7 @@ def train_with_grpo(
                 # Optimization step
                 optimizer.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.1)
+                torch.nn.utils.clip_grad_norm_(policy_model.parameters(), max_norm=0.1)
                 optimizer.step()
                 print(f"Iteration {iteration}/{num_iterations}, Step {step}/{steps_per_iteration}, "
                       f"GRPO update {grpo_iter}/{mu}, Loss: {loss.item():.4f}, Avg Reward: {avg_reward:.4f}")
