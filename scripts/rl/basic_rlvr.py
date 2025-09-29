@@ -544,7 +544,8 @@ def train_with_grpo(
         logger.info("Starting iteration %d/%d", iteration, num_iterations)
 
         # Snapshot policy -> reference (no grads).
-        reference_model = copy.deepcopy(unwrap(policy_model)).to(torch.device(device_name))
+        device = torch.device(device_name)
+        reference_model = copy.deepcopy(unwrap(policy_model)).to(device)
         reference_model.eval()
         for p in reference_model.parameters():
             p.requires_grad = False
@@ -575,10 +576,11 @@ def train_with_grpo(
 
             for grpo_iter in range(1, mu + 1):  # number of GRPO updates per batch
                 loss, avg_reward = grpo_loss(policy_model, rollout_data, reward_function, beta, epsilon)
-                optimizer.zero_grad(set_to_none=True)  # TODO: check if this would work because gradient_as_bucket_view=True
+                optimizer.zero_grad()  # TODO: check if this would work because gradient_as_bucket_view=True
                 loss.backward()
                 total_norm = torch.nn.utils.clip_grad_norm_(policy_model.parameters(), max_norm=0.1)
                 optimizer.step()
+                optimizer.zero_grad(set_to_none=True)  # TODO: check if this would work because gradient_as_bucket_view=True
                 logger.info(
                     "Itr %d/%d, Step %d/%d, mu %d/%d, Loss: %.1g, reward: %.1g, norm: %.1g",
                     iteration, num_iterations, step, steps_per_iteration, grpo_iter, mu, loss.item(), avg_reward, total_norm.item()
@@ -620,11 +622,15 @@ def run_grpo_training(
 ) -> dict:
     """Run GRPO RL fine-tuning end-to-end."""
 
+    device = torch.device(device_name)
+    logger.info("Initial CUDA memory allocated: %.1g GB", torch.cuda.max_memory_allocated(device) / 1e9)
+
     logger.info("Downloading model %s...", model_name)
     model = AutoModelForCausalLM.from_pretrained(
-        model_name, dtype=torch.bfloat16, device_map={"": device_id} if torch.cuda.is_available() else None, trust_remote_code=True,
+        model_name, dtype="auto", device_map={"": device_id} if torch.cuda.is_available() else None, trust_remote_code=True,
     )
-    logger.info("Model download complete.")
+    logger.info("Model download complete. dtype is %s", str(next(model.parameters()).dtype))
+    logger.info("CUDA memory allocated after model download: %.1g GB", torch.cuda.max_memory_allocated(device) / 1e9)
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
