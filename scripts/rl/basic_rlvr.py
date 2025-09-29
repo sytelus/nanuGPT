@@ -60,6 +60,12 @@ class RolloutData(TypedDict):
 
 def init_torch(seed) -> Tuple[str, int]:
     device_name, device_id = 'cpu', -1
+
+    if not ("RANK" in os.environ and "WORLD_SIZE" in os.environ and "LOCAL_RANK" in os.environ):
+        logger.warning("Not all distributed environment variables detected; defaulting to single-process.")
+        os.environ.update(RANK="0", WORLD_SIZE="1", LOCAL_RANK="0", LOCAL_WORLD_SIZE="1", MASTER_ADDR="localhost", MASTER_PORT="12355")
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+
     if torch.cuda.is_available():
         gpu_count = torch.cuda.device_count()
         if gpu_count > 1:
@@ -78,10 +84,6 @@ def init_torch(seed) -> Tuple[str, int]:
         torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
         torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
         torch.set_float32_matmul_precision('high')
-
-    if not ("RANK" in os.environ and "WORLD_SIZE" in os.environ and "LOCAL_RANK" in os.environ):
-        logger.warning("Not all distributed environment variables detected; defaulting to single-process.")
-        os.environ.update(RANK="0", WORLD_SIZE="1", LOCAL_RANK="0", LOCAL_WORLD_SIZE="1", MASTER_ADDR="localhost", MASTER_PORT="12355")
 
     dist.init_process_group(backend="nccl" if torch.cuda.is_available() else "gloo", init_method="env://",
                             device_id=torch.device(device_name))  # type: ignore[arg-type]
