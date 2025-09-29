@@ -167,7 +167,7 @@ def prepare_dataset(
     tokenizer: PreTrainedTokenizerBase,
     model_mode: str,
     system_prompt: str,
-    split: str = "train",
+    split: str,
 ) -> List[DatasetExample]:
     data = load_dataset("openai/gsm8k", "main")[split]
     formatted_data: List[DatasetExample] = []
@@ -208,12 +208,21 @@ def evaluate_model(
     tokenizer: PreTrainedTokenizerBase,
     eval_examples: Sequence[DatasetExample],
     device: torch.device,
-    batch_size: int = 32,
-    greedy_eval: bool = False,
+    batch_size: int,
+    greedy_eval: bool,
+    max_new_tokens: int,
+    sampling_temperature: float,
+    num_return_sequences: int,
 ) -> float:
     """Greedy generation over `eval_examples`; returns accuracy percent."""
     if batch_size <= 0:
         raise ValueError("batch_size must be a positive integer")
+    if max_new_tokens <= 0:
+        raise ValueError("max_new_tokens must be positive")
+    if num_return_sequences <= 0:
+        raise ValueError("num_return_sequences must be positive")
+    if num_return_sequences != 1:
+        raise ValueError("Evaluation expects num_return_sequences=1 to align outputs with prompts")
     pad_token_id = tokenizer.pad_token_id
     eos_token_id = tokenizer.eos_token_id
     if pad_token_id is None or eos_token_id is None:
@@ -245,28 +254,31 @@ def evaluate_model(
             input_ids = inputs["input_ids"].to(device, non_blocking=True)
             attention_mask = inputs["attention_mask"].to(device, non_blocking=True)
 
-            generate_params = {
-                "input_ids": input_ids,
-                "attention_mask": attention_mask,
-                "max_new_tokens": 512,
-                "pad_token_id": pad_token_id,
-                "eos_token_id": eos_token_id,
-                "forced_eos_token_id": eos_token_id,
-                "early_stopping": False,
-            }
-            if greedy_eval:
-                generate_params["do_sample"] = False  # greedy decoding
-            else:
-                generate_params.update({
-                    "do_sample": True,
-                    "temperature": 0.7,
-                    "num_return_sequences": 1,
-                })
-
             with torch.no_grad():
-                # FIX: evaluation must be greedy; the old code used temperature=0.7
-                # which introduces randomness and noisy accuracy.
-                generated = model.generate(**generate_params)  # type: ignore
+                if greedy_eval:
+                    generated = model.generate(  # type: ignore
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        max_new_tokens=max_new_tokens,
+                        pad_token_id=pad_token_id,
+                        eos_token_id=eos_token_id,
+                        forced_eos_token_id=eos_token_id,
+                        early_stopping=False,
+                        do_sample=False,
+                    )
+                else:
+                    generated = model.generate(  # type: ignore
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        max_new_tokens=max_new_tokens,
+                        pad_token_id=pad_token_id,
+                        eos_token_id=eos_token_id,
+                        forced_eos_token_id=eos_token_id,
+                        early_stopping=False,
+                        do_sample=True,
+                        temperature=sampling_temperature,
+                        num_return_sequences=num_return_sequences,
+                    )
 
             # Decode only the *new* tokens (avoid the prompt leaking into parsing).
             new_tokens = generated[:, input_ids.size(1) :]
@@ -312,7 +324,6 @@ def correctness_reward(
     prompts: Sequence[str],
     completions: Sequence[CompletionList],
     answer: Sequence[Optional[str]],
-    **kwargs: object,
 ) -> List[float]:
     """2.0 for exact match; 1.5 for numeric-equivalent; else 0.0."""
     responses = [completion[0]["content"] for completion in completions]
@@ -336,7 +347,6 @@ def correctness_reward(
 
 def format_reward(
     completions: Sequence[CompletionList],
-    **kwargs: object,
 ) -> List[float]:
     """Up to 0.8 for using required XML tags."""
     responses = [completion[0]["content"] for completion in completions]
@@ -670,10 +680,28 @@ def enable_grads(model: PreTrainedModel) -> PreTrainedModel:
 
     return model
 
-def main():
-    seed = 42
-    model_mode = "completion"  # "chat" => use tokenizer chat template; "completion" => plain text prompt.
-    greedy_eval = False    # If False, eval uses temperature=0.7 sampling (noisy accuracy).
+def main(
+    seed: int = 42,
+    model_mode: str = "completion",  # "chat" => use tokenizer chat template; "completion" => plain text prompt.
+    greedy_eval: bool = False,        # If False, eval uses temperature=0.7 sampling (noisy accuracy).
+    model_name: str = "Qwen/Qwen2.5-1.5B-Instruct",
+    train_split: str = "train",
+    num_eval_examples: int = 30,
+    eval_batch_size: int = 32,
+    eval_max_new_tokens: int = 512,
+    eval_temperature: float = 0.7,
+    eval_num_return_sequences: int = 1,
+    num_iterations: int = 1,
+    steps_per_iteration: int = 500,
+    batch_size: int = 7,
+    num_generations: int = 12,
+    max_completion_length: int = 400,
+    beta: float = 0.04,
+    learning_rate: float = 5e-6,
+    mu: int = 1,
+    epsilon: float = 0.1,
+    reward_function: RewardFn = combined_reward,
+) -> None:
     system_prompt = build_system_prompt(model_mode)
 
     set_random_seed(seed)
@@ -684,8 +712,7 @@ def main():
     primary_device = torch.device("cuda:0")
     print(f"Using device: {primary_device} | #GPUs detected: {num_gpus}")
 
-    model_name = "Qwen/Qwen2.5-1.5B-Instruct"
-    print("Downloading model...")
+    print(f"Downloading model {model_name}...")
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16,
@@ -704,52 +731,59 @@ def main():
     device_ids = list(range(num_gpus))
 
     # Prepare data: a shuffled train split, with a small held-out eval slice.
-    all_data = prepare_dataset(tokenizer, model_mode, system_prompt, "train")
+    all_data = prepare_dataset(tokenizer, model_mode, system_prompt, train_split)
     random.shuffle(all_data)
-    num_eval_examples = 30
+    if num_eval_examples < 0 or num_eval_examples > len(all_data):
+        raise ValueError(
+            f"num_eval_examples must be between 0 and {len(all_data)}; received {num_eval_examples}"
+        )
     train_data = all_data[num_eval_examples:]
     eval_data = all_data[:num_eval_examples]
 
     pre_grpo_accuracy = evaluate_model(
-        model,
-        tokenizer,
-        eval_data,
-        primary_device,
+        model=model,
+        tokenizer=tokenizer,
+        eval_examples=eval_data,
+        device=primary_device,
+        batch_size=eval_batch_size,
         greedy_eval=greedy_eval,
+        max_new_tokens=eval_max_new_tokens,
+        sampling_temperature=eval_temperature,
+        num_return_sequences=eval_num_return_sequences,
     )
     print(f"Pre-GRPO Accuracy: {pre_grpo_accuracy:.2f}%")
 
     model = enable_grads(model)
 
     print("\nStarting RL finetuning using GRPO...")
-    training_config = {
-        "num_iterations": 1,
-        "steps_per_iteration": 500,
-        "batch_size": 7,
-        "num_generations": 12,
-        "max_completion_length": 400,
-        "beta": 0.04,
-        "learning_rate": 5e-6,
-        "mu": 1,
-        "epsilon": 0.1,
-        "reward_function": combined_reward,
-    }
-
     model = train_with_grpo(
         model=model,
         tokenizer=tokenizer,
         train_data=train_data,
+        num_iterations=num_iterations,
+        steps_per_iteration=steps_per_iteration,
+        batch_size=batch_size,
+        num_generations=num_generations,
+        max_completion_length=max_completion_length,
+        beta=beta,
+        learning_rate=learning_rate,
+        mu=mu,
+        epsilon=epsilon,
+        reward_function=reward_function,
         device_ids=device_ids,
-        **training_config,
     )
 
     print("\nFinal model evaluation after GRPO RL finetuning:")
     post_grpo_accuracy = evaluate_model(
-        model,
-        tokenizer,
-        eval_data,
-        primary_device,
+        model=model,
+        tokenizer=tokenizer,
+        eval_examples=eval_data,
+        device=primary_device,
+        batch_size=eval_batch_size,
         greedy_eval=greedy_eval,
+        max_new_tokens=eval_max_new_tokens,
+        sampling_temperature=eval_temperature,
+        num_return_sequences=eval_num_return_sequences,
     )
     print(f"Post-GRPO Accuracy: {post_grpo_accuracy:.2f}%")
     print(f"Total Improvement: {post_grpo_accuracy - pre_grpo_accuracy:.2f}%")
