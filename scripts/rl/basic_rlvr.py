@@ -103,22 +103,19 @@ def set_random_seed(seed: int = 42) -> None:
     torch.set_float32_matmul_precision("high")
 
 
-set_random_seed(42)
-
-MODEL_MODE = "completion"  # "chat" => use tokenizer chat template; "completion" => plain text prompt.
-GREEDY_EVAL = False    # If False, eval uses temperature=0.7 sampling (noisy accuracy).
-
-SYSTEM_PROMPT = (
-    """A conversation between User and Assistant. The user asks a question, and the Assistant solves it. """
-    """The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. """
-    """The reasoning process and answer are enclosed within <reasoning> </reasoning> and <answer> </answer> tags, """
-    """respectively, i.e., <reasoning> reasoning process here </reasoning> <answer> answer here </answer>."""
-    if MODEL_MODE == "chat"
-    else
-    """First, think about the reasoning process in the mind and then provide the answer. """
-    """The reasoning process and answer are enclosed within <reasoning> </reasoning> and <answer> </answer> tags, """
-    """respectively, i.e., <reasoning> reasoning process here </reasoning> <answer> answer here </answer>."""
-)
+def build_system_prompt(model_mode: str) -> str:
+    if model_mode == "chat":
+        return (
+            "A conversation between User and Assistant. The user asks a question, and the Assistant solves it. "
+            "The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. "
+            "The reasoning process and answer are enclosed within <reasoning> </reasoning> and <answer> </answer> tags, "
+            "respectively, i.e., <reasoning> reasoning process here </reasoning> <answer> answer here </answer>."
+        )
+    return (
+        "First, think about the reasoning process in the mind and then provide the answer. "
+        "The reasoning process and answer are enclosed within <reasoning> </reasoning> and <answer> </answer> tags, "
+        "respectively, i.e., <reasoning> reasoning process here </reasoning> <answer> answer here </answer>."
+    )
 
 
 def extract_answer_from_model_output(text: str) -> Optional[str]:
@@ -136,8 +133,12 @@ def extract_answer_from_dataset(text: str) -> Optional[str]:
         return None
     return text.split("####")[1].strip()
 
-def build_prompt(messages: Sequence[CompletionMessage], tokenizer: PreTrainedTokenizerBase) -> str:
-    if MODEL_MODE == "chat":
+def build_prompt(
+    messages: Sequence[CompletionMessage],
+    tokenizer: PreTrainedTokenizerBase,
+    model_mode: str,
+) -> str:
+    if model_mode == "chat":
         # Use the model's chat template to serialize the conversation.
         return tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=False
@@ -162,29 +163,36 @@ def _extract_single_number(text: str) -> Optional[float]:
     numbers = re.findall(r"-?\d*\.?\d+", text)
     return float(numbers[0]) if len(numbers) == 1 else None
 
-def prepare_dataset(tokenizer: PreTrainedTokenizerBase, split: str = "train") -> List[DatasetExample]:
+def prepare_dataset(
+    tokenizer: PreTrainedTokenizerBase,
+    model_mode: str,
+    system_prompt: str,
+    split: str = "train",
+) -> List[DatasetExample]:
     data = load_dataset("openai/gsm8k", "main")[split]
     formatted_data: List[DatasetExample] = []
 
     for raw in data:
         example: DatasetExample = cast(DatasetExample, raw)
-        if MODEL_MODE == "chat":
+        if model_mode == "chat":
             # Prime the assistant to continue with tags; Qwen benefits from this.
             prompt_str = build_prompt(
                 [
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": example["question"]},
                     {"role": "assistant", "content": "<reasoning>\n"},
                 ],
                 tokenizer,
+                model_mode,
             )
         else:
             prompt_str = build_prompt(
                 [
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": example["question"]},
                 ],
                 tokenizer,
+                model_mode,
             )
 
         formatted_data.append(
@@ -201,6 +209,7 @@ def evaluate_model(
     eval_examples: Sequence[DatasetExample],
     device: torch.device,
     batch_size: int = 32,
+    greedy_eval: bool = False,
 ) -> float:
     """Greedy generation over `eval_examples`; returns accuracy percent."""
     if batch_size <= 0:
@@ -245,7 +254,7 @@ def evaluate_model(
                 "forced_eos_token_id": eos_token_id,
                 "early_stopping": False,
             }
-            if GREEDY_EVAL:
+            if greedy_eval:
                 generate_params["do_sample"] = False  # greedy decoding
             else:
                 generate_params.update({
@@ -662,6 +671,13 @@ def enable_grads(model: PreTrainedModel) -> PreTrainedModel:
     return model
 
 def main():
+    seed = 42
+    model_mode = "completion"  # "chat" => use tokenizer chat template; "completion" => plain text prompt.
+    greedy_eval = False    # If False, eval uses temperature=0.7 sampling (noisy accuracy).
+    system_prompt = build_system_prompt(model_mode)
+
+    set_random_seed(seed)
+
     num_gpus = torch.cuda.device_count()
     if num_gpus == 0:
         raise RuntimeError("GRPO training requires at least one CUDA device.")
@@ -688,13 +704,19 @@ def main():
     device_ids = list(range(num_gpus))
 
     # Prepare data: a shuffled train split, with a small held-out eval slice.
-    all_data = prepare_dataset(tokenizer, "train")
+    all_data = prepare_dataset(tokenizer, model_mode, system_prompt, "train")
     random.shuffle(all_data)
     num_eval_examples = 30
     train_data = all_data[num_eval_examples:]
     eval_data = all_data[:num_eval_examples]
 
-    pre_grpo_accuracy = evaluate_model(model, tokenizer, eval_data, primary_device)
+    pre_grpo_accuracy = evaluate_model(
+        model,
+        tokenizer,
+        eval_data,
+        primary_device,
+        greedy_eval=greedy_eval,
+    )
     print(f"Pre-GRPO Accuracy: {pre_grpo_accuracy:.2f}%")
 
     model = enable_grads(model)
@@ -722,7 +744,13 @@ def main():
     )
 
     print("\nFinal model evaluation after GRPO RL finetuning:")
-    post_grpo_accuracy = evaluate_model(model, tokenizer, eval_data, primary_device)
+    post_grpo_accuracy = evaluate_model(
+        model,
+        tokenizer,
+        eval_data,
+        primary_device,
+        greedy_eval=greedy_eval,
+    )
     print(f"Post-GRPO Accuracy: {post_grpo_accuracy:.2f}%")
     print(f"Total Improvement: {post_grpo_accuracy - pre_grpo_accuracy:.2f}%")
 
