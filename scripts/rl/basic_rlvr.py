@@ -621,7 +621,7 @@ def run_grpo_training(
 
     logger.info("Downloading model %s...", model_name)
     model = AutoModelForCausalLM.from_pretrained(
-        model_name, torch_dtype=torch.bfloat16, device_map={"": device_id} if torch.cuda.is_available() else None, trust_remote_code=True,
+        model_name, dtype=torch.bfloat16, device_map={"": device_id} if torch.cuda.is_available() else None, trust_remote_code=True,
     )
     logger.info("Model download complete.")
 
