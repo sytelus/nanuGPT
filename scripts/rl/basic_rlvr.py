@@ -626,10 +626,28 @@ def run_grpo_training(
     logger.info("Model download complete.")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+    # validate and fix tokenizer
+    if tokenizer.eos_token is None:
+        raise ValueError("`tokenizer.eos_token` must be provided, but got None.")
+
+    logger.info("Model max length: %d", getattr(model.config, "n_positions", None))
+    logger.info("Tokenizer max length: %d", tokenizer.model_max_length)
+    if tokenizer.model_max_length != getattr(model.config, "n_positions", None):
+        logger.warning(
+            "Tokenizer max length (%d) != model max length (%d); using tokenizer's value.",
+            tokenizer.model_max_length, getattr(model.config, "n_positions", None),
+        )
+    # tokenizer.model_max_length = getattr(model.config, "n_positions", tokenizer.model_max_length) # TODO: check if needed
+    # tokenizer.truncation_side = "left" # TODO: check if left truncation is needed
+    logger.info("Tokenizer vocab size: %d", tokenizer.vocab_size)
+    logger.info("Tokenizer pad token: %s (id=%s)", repr(tokenizer.pad_token), tokenizer.pad_token_id)
+    logger.info("Tokenizer eos token: %s (id=%s)", repr(tokenizer.eos_token), tokenizer.eos_token_id)
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+        tokenizer.pad_token = tokenizer.eos_token
+        logger.warning("Setting `tokenizer.pad_token` to `tokenizer.eos_token` (%s).", repr(tokenizer.eos_token))
     tokenizer.padding_side = "left"  # centralized padding side
-    tokenizer.pad_token = tokenizer.eos_token
-    model.config.pad_token_id = tokenizer.eos_token_id
-    model.config.eos_token_id = tokenizer.eos_token_id
 
     if dataset not in KNOWN_DATASETS:
         raise ValueError(f"Unknown dataset '{dataset}'. Known datasets: {', '.join(sorted(KNOWN_DATASETS))}")
