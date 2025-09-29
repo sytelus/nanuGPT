@@ -591,7 +591,7 @@ def train_with_grpo(
 # -------------------------
 # Model init utilities
 # -------------------------
-def enable_grads(model: PreTrainedModel) -> PreTrainedModel:
+def enable_activation_checkpointing(model: PreTrainedModel) -> PreTrainedModel:
     """
     Prepare model for training with gradient checkpointing and disabled KV cache.
     """
@@ -696,7 +696,11 @@ def run_grpo_training(
     )
     logger.info("Pre-GRPO accuracy: %.2f%%", pre_grpo_accuracy)
 
-    model = enable_grads(model)
+    params = sum(p.numel() for p in model.parameters())
+    logger.info("Model has %d parameters.", params)
+    if params > 1e9 and torch.cuda.is_available():
+        logger.info("Enabling activation checkpointing for memory efficiency...")
+        model = enable_activation_checkpointing(model)
 
     logger.info("Starting RL finetuning using GRPO...")
     model = train_with_grpo(
