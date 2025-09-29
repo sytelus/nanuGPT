@@ -2,51 +2,15 @@
 GRPO (Group Relative Policy Optimization) training script
 ========================================================
 
-Goal
-----
-Fine-tune a causal LM to solve GSM8K math questions *and* emit results in a
-tagged XML format:
-    <reasoning> ... </reasoning><answer> ... </answer>
+Perform RL using verifiable rewards on datasets like GSM8K and pre-trained
+language models like Qwen2.5-1.5B-Instruct.
 
-Approach (high level)
----------------------
-1) Rollouts (no grad): For each prompt, sample `num_generations` completions.
-   Build a mask that keeps tokens up to the first EOS per sample.
-2) Cache static per-token log-probs from:
-     (a) "old policy" (the current model snapshot used to sample) and
-     (b) a frozen reference model for KL regularization.
-3) Policy updates: compute advantages by normalizing rewards within each
-   prompt’s group of generations; update the policy with a PPO-like clipped
-   objective + reverse-KL penalty to the reference.
-
-Design notes
-------------
-- **Multi-GPU**: We use `nn.DataParallel` for update steps when >1 GPU.
-  Rollout generation + log-prob caching runs on the *primary* device to avoid
-  cross-device overhead during `generate()`.
-- **Generation config**: We temporarily enable `use_cache=True` only for
-  generation to speed up decoding, then restore it for training
-  (needed for gradient checkpointing).
-- **Precision & perf**:
-  * Model params run in bfloat16.
-  * TF32 is enabled for faster float32 matmuls on Ampere+ GPUs.
-  * Fused AdamW is used when available.
-  * `torch.autocast` in the policy forward reduces cast overhead in updates.
-  * Batch decode completions when computing rewards.
-- **Determinism**: A fixed seed is set. Note that RL uses sampling, so full
-  bitwise determinism is not guaranteed.
-
-Inputs / outputs
-----------------
-- Dataset:  `openai/gsm8k`, split `"train"` (we sample a small eval slice).
-- Model:    Hugging Face `AutoModelForCausalLM` (Qwen2.5-1.5B-Instruct by default).
-- Saves:    Final weights + tokenizer at `grpo_finetuned_model/`.
-
-Known limitations & recommendations
------------------------------------
-- For serious training, prefer DDP over `DataParallel`.
-- The reward is rule-based (format + correctness). A trained reward model can
-  improve quality but is out of scope here.
+The script can work on single GPU or multiple GPUs, however, currently only data
+parallelism is supported. Each rank holds policy model and reference model. We generate rollouts
+and compare with reference on that rank to get reward per rank and generate loss
+for that replica to generate gradients for that replica. Gradients are averaged
+across replicas using DDP. After each iteration, the policy model is copied to
+the reference model and the process is repeated.
 """
 
 import argparse
@@ -80,7 +44,6 @@ BatchSample = Union[DatasetExample, Tuple[str, str]]
 RewardFn = Callable[[Sequence[str], Sequence[CompletionList], Sequence[Optional[str]]], Sequence[float]]
 PolicyModel = Union[PreTrainedModel, nn.parallel.DistributedDataParallel]
 
-
 class RolloutData(TypedDict):
     input_ids: torch.Tensor
     attention_mask: torch.Tensor
@@ -110,16 +73,18 @@ def init_torch(seed) -> Tuple[str, int]:
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
 
+        # let other values be controlled by env vars
         torch.backends.cudnn.enabled = True
         torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
         torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
         torch.set_float32_matmul_precision('high')
 
-    backend = "nccl" if torch.cuda.is_available() else "gloo"
     if not ("RANK" in os.environ and "WORLD_SIZE" in os.environ and "LOCAL_RANK" in os.environ):
         logger.warning("Not all distributed environment variables detected; defaulting to single-process.")
         os.environ.update(RANK="0", WORLD_SIZE="1", LOCAL_RANK="0", LOCAL_WORLD_SIZE="1", MASTER_ADDR="localhost", MASTER_PORT="12355")
-    dist.init_process_group(backend=backend, init_method="env://", device_id=torch.device(device_name))  # type: ignore[arg-type]
+
+    dist.init_process_group(backend="nccl" if torch.cuda.is_available() else "gloo", init_method="env://",
+                            device_id=torch.device(device_name))  # type: ignore[arg-type]
     logger.info("Distributed: rank=%d world_size=%d local_rank=%d", dist.get_rank(), dist.get_world_size(), int(os.environ["LOCAL_RANK"]))
 
     random.seed(seed+dist.get_rank())
@@ -326,6 +291,10 @@ def evaluate_model(
 
     accuracy = (correct / total) * 100 if total > 0 else 0.0
     logger.info("Accuracy: %.2f%% (%d/%d)", accuracy, correct, total)
+
+    # complete eval on all ranks before returning
+    torch.distributed.barrier()
+
     return accuracy
 
 
@@ -396,7 +365,7 @@ def compute_log_probs(model: PolicyModel, input_ids: torch.Tensor, attention_mas
     """
     Per-token log-probs for the `logits_to_keep` tokens at the end of the sequence.
     """
-    # Autocast for faster forward (model params are bfloat16).
+    # `torch.autocast` in the policy forward reduces cast overhead in updates
     with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
         logits = model(input_ids=input_ids, attention_mask=attention_mask).logits  # (B, T, V)
     logits = logits[:, :-1, :]                            # align next-token targets
