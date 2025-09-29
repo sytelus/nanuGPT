@@ -49,6 +49,7 @@ Known limitations & recommendations
   improve quality but is out of scope here.
 """
 
+import argparse
 import copy
 import random
 import re
@@ -376,6 +377,13 @@ def combined_reward(
     format_scores = format_reward(completions=completions)
     return [c + f for c, f in zip(correctness_scores, format_scores)]
 
+
+REWARD_FUNCTIONS: Dict[str, RewardFn] = {
+    "combined": combined_reward,
+    "correctness": correctness_reward,
+    "format": format_reward,
+}
+
 def selective_log_softmax(logits: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
     """
     Return log P(token_t) for each position t in `input_ids`, using logits.
@@ -681,7 +689,7 @@ def enable_grads(model: PreTrainedModel) -> PreTrainedModel:
 
     return model
 
-def main(
+def run_grpo_training(
     seed: int = 42,
     model_mode: str = "completion",  # "chat" => use tokenizer chat template; "completion" => plain text prompt.
     greedy_eval: bool = False,        # If False, eval uses temperature=0.7 sampling (noisy accuracy).
@@ -787,6 +795,78 @@ def main(
     print("\nSaving GRPO finetuned model...")
     model.save_pretrained("grpo_finetuned_model")
     tokenizer.save_pretrained("grpo_finetuned_model")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="GRPO training for GSM8K with XML-formatted answers")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for all libraries")
+    parser.add_argument(
+        "--model-mode",
+        type=str,
+        default="completion",
+        choices=("completion", "chat"),
+        help="Tokenizer prompt formatting mode",
+    )
+    parser.add_argument("--greedy-eval", action="store_true", help="Use greedy decoding for evaluation")
+    parser.add_argument("--model-name", type=str, default="Qwen/Qwen2.5-1.5B-Instruct", help="HF model id")
+    parser.add_argument("--train-split", type=str, default="train", help="Dataset split to load")
+    parser.add_argument("--num-eval-examples", type=int, default=30, help="Number of examples reserved for evaluation")
+    parser.add_argument("--eval-batch-size", type=int, default=32, help="Batch size for evaluation")
+    parser.add_argument("--eval-max-new-tokens", type=int, default=512, help="Max tokens generated during evaluation")
+    parser.add_argument(
+        "--eval-temperature",
+        type=float,
+        default=0.7,
+        help="Sampling temperature for evaluation when not greedy",
+    )
+    parser.add_argument("--num-iterations", type=int, default=1, help="Number of GRPO outer iterations")
+    parser.add_argument("--steps-per-iteration", type=int, default=500, help="Policy update steps per iteration")
+    parser.add_argument("--batch-size", type=int, default=7, help="Training batch size (number of prompts)")
+    parser.add_argument("--num-generations", type=int, default=12, help="Number of rollouts per prompt")
+    parser.add_argument(
+        "--max-completion-length",
+        type=int,
+        default=400,
+        help="Maximum tokens generated per completion during rollouts",
+    )
+    parser.add_argument("--beta", type=float, default=0.04, help="Reverse-KL penalty coefficient")
+    parser.add_argument("--learning-rate", type=float, default=5e-6, help="Optimizer learning rate")
+    parser.add_argument("--mu", type=int, default=1, help="Number of GRPO updates per rollout batch")
+    parser.add_argument("--epsilon", type=float, default=0.1, help="Clipping threshold for PPO objective")
+    parser.add_argument(
+        "--reward-function",
+        type=str,
+        default="combined",
+        choices=tuple(REWARD_FUNCTIONS.keys()),
+        help="Reward function to use during training",
+    )
+
+    args = parser.parse_args()
+
+    reward_function = REWARD_FUNCTIONS[args.reward_function]
+
+    run_grpo_training(
+        seed=args.seed,
+        model_mode=args.model_mode,
+        greedy_eval=args.greedy_eval,
+        model_name=args.model_name,
+        train_split=args.train_split,
+        num_eval_examples=args.num_eval_examples,
+        eval_batch_size=args.eval_batch_size,
+        eval_max_new_tokens=args.eval_max_new_tokens,
+        eval_temperature=args.eval_temperature,
+        num_iterations=args.num_iterations,
+        steps_per_iteration=args.steps_per_iteration,
+        batch_size=args.batch_size,
+        num_generations=args.num_generations,
+        max_completion_length=args.max_completion_length,
+        beta=args.beta,
+        learning_rate=args.learning_rate,
+        mu=args.mu,
+        epsilon=args.epsilon,
+        reward_function=reward_function,
+    )
+
 
 if __name__ == "__main__":
     main()
