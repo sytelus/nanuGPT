@@ -67,12 +67,7 @@ import torch.nn.functional as F
 import torch.distributed as dist
 
 from datasets import load_dataset
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    PreTrainedModel,
-    PreTrainedTokenizerBase,
-)
+from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 
 
 logger = logging.getLogger("nano_rlvr")
@@ -122,12 +117,11 @@ def init_torch(seed) -> Tuple[str, int]:
 
     torch.set_float32_matmul_precision("high")
 
+    backend = "nccl" if torch.cuda.is_available() else "gloo"
     if not ("RANK" in os.environ and "WORLD_SIZE" in os.environ and "LOCAL_RANK" in os.environ):
         logger.warning("Not all distributed environment variables detected; defaulting to single-process.")
-        os.environ.update(RANK="0", WORLD_SIZE="1", LOCAL_RANK="0", LOCAL_WORLD_SIZE="1",
-                            MASTER_ADDR="localhost", MASTER_PORT="12355")
-    dist.init_process_group(backend="nccl" if torch.cuda.is_available() else "gloo", init_method="env://",
-                            device_id=torch.device(device_name),)  # type: ignore
+        os.environ.update(RANK="0", WORLD_SIZE="1", LOCAL_RANK="0", LOCAL_WORLD_SIZE="1", MASTER_ADDR="localhost", MASTER_PORT="12355")
+    dist.init_process_group(backend=backend, init_method="env://", device_id=torch.device(device_name))  # type: ignore[arg-type]
     logger.info("Distributed: rank=%d world_size=%d local_rank=%d", dist.get_rank(), dist.get_world_size(), int(os.environ["LOCAL_RANK"]))
 
     random.seed(seed+dist.get_rank())
@@ -141,18 +135,21 @@ def init_torch(seed) -> Tuple[str, int]:
     return device_name, device_id
 
 def configure_logging(run_dir: Path) -> None:
+    rank = dist.get_rank() if dist.is_available() and dist.is_initialized() else 0
+
     class _Formatter(logging.Formatter):
         def __init__(self) -> None:
-            super().__init__("%(asctime)s [rank=%(rank)s] %(levelname)s %(message)s", "%H:%M:%S.%f")
+            super().__init__("%(asctime)s [rank=%(rank)s] %(levelname)s %(message)s", "%H:%M:%S")
 
         def format(self, record: logging.LogRecord) -> str:
-            record.rank = dist.get_rank() if dist.is_initialized() else 0
+            record.rank = rank
             return super().format(record)
 
     for handler in list(logger.handlers):
         handler.close()
         logger.removeHandler(handler)
-    logger.setLevel(logging.INFO)
+    level = logging.INFO if rank == 0 else logging.WARNING
+    logger.setLevel(level)
     logger.propagate = False
 
     handlers = [
@@ -161,6 +158,7 @@ def configure_logging(run_dir: Path) -> None:
     ]
     for handler in handlers:
         handler.setFormatter(_Formatter())
+        handler.setLevel(level)
         logger.addHandler(handler)
 
     logger.info("Run directory: %s", run_dir)
@@ -195,11 +193,7 @@ def extract_answer_from_dataset(text: str) -> Optional[str]:
         return None
     return text.split("####")[1].strip()
 
-def build_prompt(
-    messages: Sequence[CompletionMessage],
-    tokenizer: PreTrainedTokenizerBase,
-    model_mode: str,
-) -> str:
+def build_prompt(messages: Sequence[CompletionMessage], tokenizer: PreTrainedTokenizerBase, model_mode: str) -> str:
     if model_mode == "chat":
         # Use the model's chat template to serialize the conversation.
         return tokenizer.apply_chat_template(
@@ -225,12 +219,7 @@ def _extract_single_number(text: str) -> Optional[float]:
     numbers = re.findall(r"-?\d*\.?\d+", text)
     return float(numbers[0]) if len(numbers) == 1 else None
 
-def prepare_dataset(
-    tokenizer: PreTrainedTokenizerBase,
-    model_mode: str,
-    system_prompt: str,
-    split: str,
-) -> List[DatasetExample]:
+def prepare_dataset(tokenizer: PreTrainedTokenizerBase, model_mode: str, system_prompt: str, split: str) -> List[DatasetExample]:
     data = load_dataset("openai/gsm8k", "main")[split]
     formatted_data: List[DatasetExample] = []
 
@@ -253,13 +242,8 @@ def prepare_dataset(
     return formatted_data
 
 def evaluate_model(
-    model: PreTrainedModel,
-    tokenizer: PreTrainedTokenizerBase,
-    eval_examples: Sequence[DatasetExample],
-    batch_size: int,
-    greedy_eval: bool,
-    max_new_tokens: int,
-    sampling_temperature: Optional[float],
+    model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, eval_examples: Sequence[DatasetExample],
+    batch_size: int, greedy_eval: bool, max_new_tokens: int, sampling_temperature: Optional[float],
 ) -> float:
     if not greedy_eval and sampling_temperature is None:
         raise ValueError("sampling_temperature must be provided when greedy_eval is False")
@@ -350,11 +334,7 @@ def evaluate_model(
 # -------------------------
 # Reward functions
 # -------------------------
-def correctness_reward(
-    prompts: Sequence[str],
-    completions: Sequence[CompletionList],
-    answer: Sequence[Optional[str]],
-) -> List[float]:
+def correctness_reward(prompts: Sequence[str], completions: Sequence[CompletionList], answer: Sequence[Optional[str]]) -> List[float]:
     """2.0 for exact match; 1.5 for numeric-equivalent; else 0.0."""
     responses = [completion[0]["content"] for completion in completions]
     extracted = [extract_answer_from_model_output(r) for r in responses]
@@ -375,9 +355,7 @@ def correctness_reward(
     return rewards
 
 
-def format_reward(
-    completions: Sequence[CompletionList],
-) -> List[float]:
+def format_reward(completions: Sequence[CompletionList]) -> List[float]:
     """Up to 0.8 for using required XML tags."""
     responses = [completion[0]["content"] for completion in completions]
     rewards = []
@@ -395,11 +373,7 @@ def format_reward(
     return rewards
 
 
-def combined_reward(
-    prompts: Sequence[str],
-    completions: Sequence[CompletionList],
-    answer: Sequence[Optional[str]],
-) -> List[float]:
+def combined_reward(prompts: Sequence[str], completions: Sequence[CompletionList], answer: Sequence[Optional[str]]) -> List[float]:
     """Correctness (0..2.0) + format (0..0.8)."""
     correctness_scores = correctness_reward(prompts=prompts, completions=completions, answer=answer)
     format_scores = format_reward(completions=completions)
@@ -420,12 +394,7 @@ def selective_log_softmax(logits: torch.Tensor, input_ids: torch.Tensor) -> torc
     return log_probs.gather(dim=-1, index=input_ids.unsqueeze(-1)).squeeze(-1)
 
 
-def compute_log_probs(
-    model: PolicyModel,
-    input_ids: torch.Tensor,
-    attention_mask: torch.Tensor,
-    logits_to_keep: int,
-) -> torch.Tensor:
+def compute_log_probs(model: PolicyModel, input_ids: torch.Tensor, attention_mask: torch.Tensor, logits_to_keep: int) -> torch.Tensor:
     """
     Per-token log-probs for the `logits_to_keep` tokens at the end of the sequence.
     """
@@ -451,10 +420,7 @@ def create_completion_mask(completion_ids: torch.Tensor, eos_token_id: int) -> t
     return (seq_idx <= eos_idx.unsqueeze(1)).int()
 
 def generate_completions(
-    model: PreTrainedModel,
-    tokenizer: PreTrainedTokenizerBase,
-    prompts: Sequence[str],
-    num_generations: int = 4,
+    model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, prompts: Sequence[str], num_generations: int = 4,
     max_completion_length: int = 32,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
@@ -495,12 +461,8 @@ def generate_completions(
     return prompt_ids, prompt_mask, completion_ids, completion_mask
 
 def generate_rollout_data(
-    model: PreTrainedModel,
-    ref_model: PreTrainedModel,
-    tokenizer: PreTrainedTokenizerBase,
-    batch_samples: Sequence[BatchSample],
-    num_generations: int,
-    max_completion_length: int,
+    model: PreTrainedModel, ref_model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, batch_samples: Sequence[BatchSample],
+    num_generations: int, max_completion_length: int,
 ) -> RolloutData:
     """
     Generate completions and cache log-probs from:
@@ -532,13 +494,7 @@ def generate_rollout_data(
     )
 
 
-def grpo_loss(
-    model: PolicyModel,
-    rollout_data: RolloutData,
-    reward_function: RewardFn,
-    beta: float,
-    epsilon: float,
-) -> Tuple[torch.Tensor, float]:
+def grpo_loss(model: PolicyModel, rollout_data: RolloutData, reward_function: RewardFn, beta: float, epsilon: float) -> Tuple[torch.Tensor, float]:
     """
     GRPO objective with PPO-style clipping and reverse-KL penalty.
     """
@@ -593,19 +549,9 @@ def grpo_loss(
 # Training loop
 # -------------------------
 def train_with_grpo(
-    device_name: str, device_id:int,
-    model: PreTrainedModel,
-    tokenizer: PreTrainedTokenizerBase,
-    train_data: Sequence[DatasetExample],
-    num_iterations: int,
-    steps_per_iteration: int,
-    batch_size: int,
-    num_generations: int,
-    max_completion_length: int,
-    beta: float,
-    learning_rate: float,
-    mu: int,
-    epsilon: float,
+    device_name: str, device_id: int, model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase,
+    train_data: Sequence[DatasetExample], num_iterations: int, steps_per_iteration: int, batch_size: int,
+    num_generations: int, max_completion_length: int, beta: float, learning_rate: float, mu: int, epsilon: float,
     reward_function: RewardFn,
 ) -> PreTrainedModel:
     policy_model: PolicyModel = nn.parallel.DistributedDataParallel(
@@ -687,26 +633,12 @@ def enable_grads(model: PreTrainedModel) -> PreTrainedModel:
     return model
 
 def run_grpo_training(
-    device_name:str, device_id:str,
-    model_mode: str = "completion",  # "chat" => use tokenizer chat template; "completion" => plain text prompt.
-    greedy_eval: bool = False,  # If true, evaluation uses deterministic decoding instead of sampling.
-    model_name: str = "Qwen/Qwen2.5-1.5B-Instruct",  # Hugging Face model identifier to load.
-    train_split: str = "train",  # Dataset split to sample prompts from.
-    num_eval_examples: int = 30,  # Number of held-out examples used for evaluation.
-    eval_batch_size: int = 32,  # Batch size for evaluation forward passes.
-    eval_max_new_tokens: int = 512,  # Hard cap on generated tokens during evaluation.
-    eval_temperature: float = 0.7,  # Sampling temperature for evaluation when not greedy.
-    num_iterations: int = 1,  # Outer GRPO iterations; each snapshots a reference policy.
-    steps_per_iteration: int = 500,  # Policy update steps per iteration before resampling.
-    batch_size: int = 7,  # Prompts drawn per rollout batch during training.
-    num_generations: int = 12,  # Sampled completions per prompt in each rollout.
-    max_completion_length: int = 400,  # Maximum tokens generated per sampled completion.
-    beta: float = 0.04,  # Reverse-KL penalty coefficient to keep policy near reference.
-    learning_rate: float = 5e-6,  # Learning rate for the optimizer driving GRPO updates.
-    mu: int = 1,  # Number of GRPO optimizer steps performed per rollout batch.
-    epsilon: float = 0.1,  # PPO-style clipping threshold for the policy ratio.
-    reward_function: RewardFn = combined_reward,  # Callable scoring completions used during training.
-    out_dir: Optional[str] = None,  # Base directory override for placing logs and outputs.
+    device_name: str, device_id: str, model_mode: str = "completion", greedy_eval: bool = False,
+    model_name: str = "Qwen/Qwen2.5-1.5B-Instruct", train_split: str = "train", num_eval_examples: int = 30,
+    eval_batch_size: int = 32, eval_max_new_tokens: int = 512, eval_temperature: float = 0.7, num_iterations: int = 1,
+    steps_per_iteration: int = 500, batch_size: int = 7, num_generations: int = 12, max_completion_length: int = 400,
+    beta: float = 0.04, learning_rate: float = 5e-6, mu: int = 1, epsilon: float = 0.1,
+    reward_function: RewardFn = combined_reward, out_dir: Optional[str] = None,
 ) -> dict:
     """Run GRPO RL fine-tuning end-to-end."""
 
@@ -813,33 +745,19 @@ def main() -> None:
     device_name, device_id = init_torch(seed=args.seed)
 
     train_params = {
-        "device_name": device_name,
-        "device_id": device_id,
-        "model_mode": args.model_mode,
-        "greedy_eval": args.greedy_eval,
-        "model_name": args.model_name,
-        "train_split": args.train_split,
-        "num_eval_examples": args.num_eval_examples,
-        "eval_batch_size": args.eval_batch_size,
-        "eval_max_new_tokens": args.eval_max_new_tokens,
-        "eval_temperature": args.eval_temperature,
-        "num_iterations": args.num_iterations,
-        "steps_per_iteration": args.steps_per_iteration,
-        "batch_size": args.batch_size,
-        "num_generations": args.num_generations,
-        "max_completion_length": args.max_completion_length,
-        "beta": args.beta,
-        "learning_rate": args.learning_rate,
-        "mu": args.mu,
-        "epsilon": args.epsilon,
-        "out_dir": str(run_dir),
+        "device_name": device_name, "device_id": device_id, "model_mode": args.model_mode, "greedy_eval": args.greedy_eval,
+        "model_name": args.model_name, "train_split": args.train_split, "num_eval_examples": args.num_eval_examples,
+        "eval_batch_size": args.eval_batch_size, "eval_max_new_tokens": args.eval_max_new_tokens, "eval_temperature": args.eval_temperature,
+        "num_iterations": args.num_iterations, "steps_per_iteration": args.steps_per_iteration, "batch_size": args.batch_size,
+        "num_generations": args.num_generations, "max_completion_length": args.max_completion_length, "beta": args.beta,
+        "learning_rate": args.learning_rate, "mu": args.mu, "epsilon": args.epsilon, "out_dir": str(run_dir),
     }
 
     config = {
-        "seed": args.seed,
-        "world_size": dist.get_world_size(),
+        "seed": args.seed, "world_size": dist.get_world_size(),
         "timestamp": datetime.now().isoformat(timespec="seconds"),
-    }.update(train_params)
+    }
+    config.update(train_params)
 
     # save configuration
     if dist.get_rank() == 0:
