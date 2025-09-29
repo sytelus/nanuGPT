@@ -696,8 +696,12 @@ def train_with_grpo(
         else:
             clone_ctx = nullcontext()
         with clone_ctx:
-            reference_model = copy.deepcopy(base_policy)
+            state_dict = {k: v.detach().cpu() for k, v in base_policy.state_dict().items()}
+
+        reference_model = type(base_policy).from_config(base_policy.config)
+        reference_model.load_state_dict(state_dict)
         reference_model.to(device)
+        del state_dict
         reference_model.eval()
         for p in reference_model.parameters():
             p.requires_grad = False
