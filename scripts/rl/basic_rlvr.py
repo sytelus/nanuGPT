@@ -690,26 +690,27 @@ def enable_grads(model: PreTrainedModel) -> PreTrainedModel:
     return model
 
 def run_grpo_training(
-    seed: int = 42,
+    seed: int = 42,  # Sets deterministic seeds for Python, NumPy, and PyTorch.
     model_mode: str = "completion",  # "chat" => use tokenizer chat template; "completion" => plain text prompt.
-    greedy_eval: bool = False,        # If False, eval uses temperature=0.7 sampling (noisy accuracy).
-    model_name: str = "Qwen/Qwen2.5-1.5B-Instruct",
-    train_split: str = "train",
-    num_eval_examples: int = 30,
-    eval_batch_size: int = 32,
-    eval_max_new_tokens: int = 512,
-    eval_temperature: float = 0.7,
-    num_iterations: int = 1,
-    steps_per_iteration: int = 500,
-    batch_size: int = 7,
-    num_generations: int = 12,
-    max_completion_length: int = 400,
-    beta: float = 0.04,
-    learning_rate: float = 5e-6,
-    mu: int = 1,
-    epsilon: float = 0.1,
-    reward_function: RewardFn = combined_reward,
+    greedy_eval: bool = False,  # If true, evaluation uses deterministic decoding instead of sampling.
+    model_name: str = "Qwen/Qwen2.5-1.5B-Instruct",  # Hugging Face model identifier to load.
+    train_split: str = "train",  # Dataset split to sample prompts from.
+    num_eval_examples: int = 30,  # Number of held-out examples used for evaluation.
+    eval_batch_size: int = 32,  # Batch size for evaluation forward passes.
+    eval_max_new_tokens: int = 512,  # Hard cap on generated tokens during evaluation.
+    eval_temperature: float = 0.7,  # Sampling temperature for evaluation when not greedy.
+    num_iterations: int = 1,  # Outer GRPO iterations; each snapshots a reference policy.
+    steps_per_iteration: int = 500,  # Policy update steps per iteration before resampling.
+    batch_size: int = 7,  # Prompts drawn per rollout batch during training.
+    num_generations: int = 12,  # Sampled completions per prompt in each rollout.
+    max_completion_length: int = 400,  # Maximum tokens generated per sampled completion.
+    beta: float = 0.04,  # Reverse-KL penalty coefficient to keep policy near reference.
+    learning_rate: float = 5e-6,  # Learning rate for the optimizer driving GRPO updates.
+    mu: int = 1,  # Number of GRPO optimizer steps performed per rollout batch.
+    epsilon: float = 0.1,  # PPO-style clipping threshold for the policy ratio.
+    reward_function: RewardFn = combined_reward,  # Callable scoring completions used during training.
 ) -> None:
+    """Run GRPO RL fine-tuning end-to-end."""
     system_prompt = build_system_prompt(model_mode)
 
     set_random_seed(seed)
@@ -800,46 +801,24 @@ def run_grpo_training(
 def main() -> None:
     parser = argparse.ArgumentParser(description="GRPO training for GSM8K with XML-formatted answers")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for all libraries")
-    parser.add_argument(
-        "--model-mode",
-        type=str,
-        default="completion",
-        choices=("completion", "chat"),
-        help="Tokenizer prompt formatting mode",
-    )
+    parser.add_argument("--model-mode", type=str, default="completion", choices=("completion", "chat"), help="Tokenizer prompt formatting mode")
     parser.add_argument("--greedy-eval", action="store_true", help="Use greedy decoding for evaluation")
     parser.add_argument("--model-name", type=str, default="Qwen/Qwen2.5-1.5B-Instruct", help="HF model id")
     parser.add_argument("--train-split", type=str, default="train", help="Dataset split to load")
     parser.add_argument("--num-eval-examples", type=int, default=30, help="Number of examples reserved for evaluation")
     parser.add_argument("--eval-batch-size", type=int, default=32, help="Batch size for evaluation")
     parser.add_argument("--eval-max-new-tokens", type=int, default=512, help="Max tokens generated during evaluation")
-    parser.add_argument(
-        "--eval-temperature",
-        type=float,
-        default=0.7,
-        help="Sampling temperature for evaluation when not greedy",
-    )
+    parser.add_argument("--eval-temperature", type=float, default=0.7, help="Sampling temperature for evaluation when not greedy")
     parser.add_argument("--num-iterations", type=int, default=1, help="Number of GRPO outer iterations")
     parser.add_argument("--steps-per-iteration", type=int, default=500, help="Policy update steps per iteration")
     parser.add_argument("--batch-size", type=int, default=7, help="Training batch size (number of prompts)")
     parser.add_argument("--num-generations", type=int, default=12, help="Number of rollouts per prompt")
-    parser.add_argument(
-        "--max-completion-length",
-        type=int,
-        default=400,
-        help="Maximum tokens generated per completion during rollouts",
-    )
+    parser.add_argument("--max-completion-length", type=int, default=400, help="Maximum tokens generated per completion during rollouts")
     parser.add_argument("--beta", type=float, default=0.04, help="Reverse-KL penalty coefficient")
     parser.add_argument("--learning-rate", type=float, default=5e-6, help="Optimizer learning rate")
     parser.add_argument("--mu", type=int, default=1, help="Number of GRPO updates per rollout batch")
     parser.add_argument("--epsilon", type=float, default=0.1, help="Clipping threshold for PPO objective")
-    parser.add_argument(
-        "--reward-function",
-        type=str,
-        default="combined",
-        choices=tuple(REWARD_FUNCTIONS.keys()),
-        help="Reward function to use during training",
-    )
+    parser.add_argument("--reward-function", type=str, default="combined", choices=tuple(REWARD_FUNCTIONS.keys()), help="Reward function to use during training")
 
     args = parser.parse_args()
 
