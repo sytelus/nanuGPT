@@ -238,31 +238,18 @@ def prepare_dataset(
         example: DatasetExample = cast(DatasetExample, raw)
         if model_mode == "chat":
             # Prime the assistant to continue with tags; Qwen benefits from this.
-            prompt_str = build_prompt(
-                [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": example["question"]},
-                    {"role": "assistant", "content": "<reasoning>\n"},
-                ],
-                tokenizer,
-                model_mode,
-            )
+            prompt_str = build_prompt([
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": example["question"]},
+                {"role": "assistant", "content": "<reasoning>\n"},
+            ], tokenizer, model_mode)
         else:
-            prompt_str = build_prompt(
-                [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": example["question"]},
-                ],
-                tokenizer,
-                model_mode,
-            )
+            prompt_str = build_prompt([
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": example["question"]},
+            ], tokenizer, model_mode)
 
-        formatted_data.append(
-            {
-                "prompt": prompt_str,
-                "answer": extract_answer_from_dataset(example["answer"]),
-            }
-        )
+        formatted_data.append({"prompt": prompt_str, "answer": extract_answer_from_dataset(example["answer"])})
     return formatted_data
 
 def evaluate_model(
@@ -302,42 +289,24 @@ def evaluate_model(
             prompts = [ex["prompt"] for ex in batch_examples]
             expected_answers = [ex.get("answer") for ex in batch_examples]
 
-            inputs = tokenizer(
-                prompts,
-                return_tensors="pt",
-                padding=True,
-                truncation=False,
-            )
+            inputs = tokenizer(prompts, return_tensors="pt", padding=True, truncation=False)
             input_ids = inputs["input_ids"].to(device, non_blocking=True)
             attention_mask = inputs["attention_mask"].to(device, non_blocking=True)
 
             with torch.no_grad():
                 if greedy_eval:
                     generated = model.generate(  # type: ignore
-                        input_ids=input_ids,
-                        attention_mask=attention_mask,
-                        max_new_tokens=max_new_tokens,
-                        pad_token_id=pad_token_id,
-                        eos_token_id=eos_token_id,
-                        forced_eos_token_id=eos_token_id,
-                        early_stopping=False,
-                        do_sample=False,
+                        input_ids=input_ids, attention_mask=attention_mask, max_new_tokens=max_new_tokens, pad_token_id=pad_token_id,
+                        eos_token_id=eos_token_id, forced_eos_token_id=eos_token_id, early_stopping=False, do_sample=False,
                         num_return_sequences=num_return_sequences,
                     )
                 else:
                     if sampling_temperature is None:
                         raise AssertionError("sampling_temperature must be set when using sampled evaluation")
                     generated = model.generate(  # type: ignore
-                        input_ids=input_ids,
-                        attention_mask=attention_mask,
-                        max_new_tokens=max_new_tokens,
-                        pad_token_id=pad_token_id,
-                        eos_token_id=eos_token_id,
-                        forced_eos_token_id=eos_token_id,
-                        early_stopping=False,
-                        do_sample=True,
-                        temperature=float(sampling_temperature),
-                        num_return_sequences=num_return_sequences,
+                        input_ids=input_ids, attention_mask=attention_mask, max_new_tokens=max_new_tokens, pad_token_id=pad_token_id,
+                        eos_token_id=eos_token_id, forced_eos_token_id=eos_token_id, early_stopping=False, do_sample=True,
+                        temperature=float(sampling_temperature), num_return_sequences=num_return_sequences,
                     )
 
             # Decode only the *new* tokens (avoid the prompt leaking into parsing).
@@ -510,18 +479,10 @@ def generate_completions(
     if pad_token_id is None or eos_token_id is None:
         raise ValueError("Tokenizer must define both pad_token_id and eos_token_id for generation")
 
-    outputs = model.generate(
-        prompt_ids,
-        attention_mask=prompt_mask,
-        max_new_tokens=max_completion_length,
-        do_sample=True,
-        temperature=0.7,
-        top_p=0.9,
-        repetition_penalty=1.05,
-        pad_token_id=pad_token_id,
-        eos_token_id=eos_token_id,
-        early_stopping=False,
-    )  # type: ignore
+    outputs = model.generate(  # type: ignore
+        prompt_ids, attention_mask=prompt_mask, max_new_tokens=max_completion_length, do_sample=True, temperature=0.7, top_p=0.9,
+        repetition_penalty=1.05, pad_token_id=pad_token_id, eos_token_id=eos_token_id, early_stopping=False,
+    )
 
     # Generated tensor includes the prompt prefix.
     # Some HF models may insert additional special tokens; this assert protects
@@ -550,9 +511,7 @@ def generate_rollout_data(
     answers = [s["answer"] if isinstance(s, dict) else s[1] for s in batch_samples]
 
     with torch.no_grad():
-        p_ids, p_mask, c_ids, c_mask = generate_completions(
-            model, tokenizer, prompts, num_generations, max_completion_length
-        )
+        p_ids, p_mask, c_ids, c_mask = generate_completions(model, tokenizer, prompts, num_generations, max_completion_length)
         input_ids = torch.cat([p_ids, c_ids], dim=1)
         attention_mask = torch.cat([p_mask, c_mask], dim=1)  # type: ignore[arg-type]
         logits_to_keep = c_ids.size(1)
@@ -567,17 +526,9 @@ def generate_rollout_data(
     repeated_answers: List[Optional[str]] = [a for a in answers for _ in range(num_generations)]
 
     return RolloutData(
-        input_ids=input_ids,
-        attention_mask=attention_mask,
-        completion_mask=c_mask,
-        old_log_probs=old_log_probs,
-        ref_log_probs=ref_log_probs,
-        formatted_completions=formatted_completions,
-        repeated_prompts=repeated_prompts,
-        repeated_answers=repeated_answers,
-        logits_to_keep=logits_to_keep,
-        batch_size=len(prompts),
-        num_generations=num_generations,
+        input_ids=input_ids, attention_mask=attention_mask, completion_mask=c_mask, old_log_probs=old_log_probs,
+        ref_log_probs=ref_log_probs, formatted_completions=formatted_completions, repeated_prompts=repeated_prompts,
+        repeated_answers=repeated_answers, logits_to_keep=logits_to_keep, batch_size=len(prompts), num_generations=num_generations,
     )
 
 
@@ -605,8 +556,7 @@ def grpo_loss(
 
     rewards = torch.tensor(
         reward_function(
-            prompts=rollout_data["repeated_prompts"],
-            completions=rollout_data["formatted_completions"],
+            prompts=rollout_data["repeated_prompts"], completions=rollout_data["formatted_completions"],
             answer=rollout_data["repeated_answers"],
         ),
         dtype=torch.float32,
@@ -691,9 +641,7 @@ def train_with_grpo(
                 policy_module.config.use_cache = True
 
                 # TODO: would this work for distributed setup?
-                rollout_data = generate_rollout_data(
-                    policy_module, reference_model, tokenizer, batch_samples, num_generations, max_completion_length
-                )
+                rollout_data = generate_rollout_data(policy_module, reference_model, tokenizer, batch_samples, num_generations, max_completion_length)
 
                 # Restore training state.
                 policy_module.config.use_cache = prev_cache
@@ -764,10 +712,7 @@ def run_grpo_training(
 
     logger.info("Downloading model %s...", model_name)
     model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        torch_dtype=torch.bfloat16,
-        device_map={"": device_id} if torch.cuda.is_available() else None,
-        trust_remote_code=True,
+        model_name, torch_dtype=torch.bfloat16, device_map={"": device_id} if torch.cuda.is_available() else None, trust_remote_code=True,
     )
     logger.info("Model download complete.")
 
@@ -792,13 +737,8 @@ def run_grpo_training(
     logger.info("Dataset prepared from split '%s': total=%d, eval=%d, train=%d", train_split, total_examples, len(eval_data), len(train_data))
 
     pre_grpo_accuracy = evaluate_model(
-        model=model,
-        tokenizer=tokenizer,
-        eval_examples=eval_data,
-        batch_size=eval_batch_size,
-        greedy_eval=greedy_eval,
-        max_new_tokens=eval_max_new_tokens,
-        sampling_temperature=None if greedy_eval else eval_temperature,
+        model=model, tokenizer=tokenizer, eval_examples=eval_data, batch_size=eval_batch_size, greedy_eval=greedy_eval,
+        max_new_tokens=eval_max_new_tokens, sampling_temperature=None if greedy_eval else eval_temperature,
     )
     logger.info("Pre-GRPO accuracy: %.2f%%", pre_grpo_accuracy)
 
@@ -806,31 +746,16 @@ def run_grpo_training(
 
     logger.info("Starting RL finetuning using GRPO...")
     model = train_with_grpo(
-        device_name, device_id,
-        model=model,
-        tokenizer=tokenizer,
-        train_data=train_data,
-        num_iterations=num_iterations,
-        steps_per_iteration=steps_per_iteration,
-        batch_size=batch_size,
-        num_generations=num_generations,
-        max_completion_length=max_completion_length,
-        beta=beta,
-        learning_rate=learning_rate,
-        mu=mu,
-        epsilon=epsilon,
+        device_name, device_id, model=model, tokenizer=tokenizer, train_data=train_data, num_iterations=num_iterations,
+        steps_per_iteration=steps_per_iteration, batch_size=batch_size, num_generations=num_generations,
+        max_completion_length=max_completion_length, beta=beta, learning_rate=learning_rate, mu=mu, epsilon=epsilon,
         reward_function=reward_function,
     )
 
     logger.info("Final model evaluation after GRPO RL finetuning...")
     post_grpo_accuracy = evaluate_model(
-        model=model,
-        tokenizer=tokenizer,
-        eval_examples=eval_data,
-        batch_size=eval_batch_size,
-        greedy_eval=greedy_eval,
-        max_new_tokens=eval_max_new_tokens,
-        sampling_temperature=None if greedy_eval else eval_temperature,
+        model=model, tokenizer=tokenizer, eval_examples=eval_data, batch_size=eval_batch_size, greedy_eval=greedy_eval,
+        max_new_tokens=eval_max_new_tokens, sampling_temperature=None if greedy_eval else eval_temperature,
     )
     improvement = post_grpo_accuracy - pre_grpo_accuracy
     logger.info("Post-GRPO accuracy: %.2f%%", post_grpo_accuracy)
@@ -870,7 +795,8 @@ def main() -> None:
     parser.add_argument("--learning-rate", type=float, default=5e-6, help="Optimizer learning rate")
     parser.add_argument("--mu", type=int, default=1, help="Number of GRPO updates per rollout batch")
     parser.add_argument("--epsilon", type=float, default=0.1, help="Clipping threshold for PPO objective")
-    parser.add_argument("--reward-function", type=str, default="combined", choices=tuple(REWARD_FUNCTIONS.keys()), help="Reward function to use during training")
+    parser.add_argument("--reward-function", type=str, default="combined", choices=tuple(REWARD_FUNCTIONS.keys()),
+                        help="Reward function to use during training")
     parser.add_argument("--out-dir", type=str, default=None, help="Base directory for outputs (overrides OUT_DIR environment variable)")
 
     args = parser.parse_args()
@@ -922,10 +848,7 @@ def main() -> None:
             json.dump(config, config_file, indent=2)
         logger.info("Configuration saved to %s", config_path)
 
-    metrics = run_grpo_training(
-        **train_params,
-        reward_function=reward_function,
-    )
+    metrics = run_grpo_training(**train_params, reward_function=reward_function)
 
     if dist.get_rank() == 0:
         metrics_path = run_dir / "metrics.json"
