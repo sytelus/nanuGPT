@@ -60,6 +60,7 @@ BACKWARD_PREFETCH_MAP: Dict[str, Optional[BackwardPrefetch]] = {
 }
 
 DEFAULT_ACTIVATION_CHECKPOINT_THRESHOLD = 14_000_000_000
+LOG_PROB_CHUNK_SIZE = 8
 
 
 logger = logging.getLogger("nano_rlvr")
@@ -186,7 +187,8 @@ def build_fsdp_model(model: PreTrainedModel, device: torch.device, cfg: Dict[str
 
 
 def prepare_policy_model(model: PreTrainedModel, device: torch.device, cfg: Dict[str, Any]) -> PolicyModel:
-    fsdp_enabled = cfg.get("enabled", True) and torch.cuda.is_available()
+    world_size = dist.get_world_size() if dist.is_available() and dist.is_initialized() else 1
+    fsdp_enabled = cfg.get("enabled", True) and torch.cuda.is_available() and world_size > 1
     if fsdp_enabled:
         return build_fsdp_model(model, device, cfg)
     model.to(device)
@@ -355,11 +357,11 @@ def evaluate_model(
 
     module = cast(nn.Module, model)
     base_model = unwrap_model(model)
-    gather_ctx = (
-        FSDP.summon_full_params(module, recurse=True, offload_to_cpu=False)
-        if is_fsdp_model(module)
-        else nullcontext()
-    )  # keep shards on-device for faster eval; adjust if memory oversubscribes
+    gather_ctx = nullcontext()
+    if is_fsdp_model(module):
+        sharding_strategy = getattr(module, "sharding_strategy", None)
+        if sharding_strategy != ShardingStrategy.NO_SHARD:
+            gather_ctx = FSDP.summon_full_params(module, recurse=True, offload_to_cpu=False)
 
     device = next(base_model.parameters()).device
     num_return_sequences = 1  # Keep one completion per prompt for accuracy alignment.
@@ -516,17 +518,29 @@ def selective_log_softmax(logits: torch.Tensor, input_ids: torch.Tensor) -> torc
     return log_probs.gather(dim=-1, index=input_ids.unsqueeze(-1)).squeeze(-1)
 
 
-def compute_log_probs(model: PolicyModel, input_ids: torch.Tensor, attention_mask: torch.Tensor, logits_to_keep: int) -> torch.Tensor:
+def compute_log_probs(
+    model: PolicyModel, input_ids: torch.Tensor, attention_mask: torch.Tensor, logits_to_keep: int, chunk_size: int = LOG_PROB_CHUNK_SIZE,
+) -> torch.Tensor:
     """
     Per-token log-probs for the `logits_to_keep` tokens at the end of the sequence.
     """
-    # `torch.autocast` in the policy forward reduces cast overhead in updates
-    with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-        logits = model(input_ids=input_ids, attention_mask=attention_mask).logits  # (B, T, V)
-    logits = logits[:, :-1, :]                            # align next-token targets
-    toks = input_ids[:, -logits_to_keep:]                 # (B, K)
-    logits = logits[:, -logits_to_keep:, :]               # (B, K, V)
-    return selective_log_softmax(logits, toks)
+    total = input_ids.size(0)
+    chunk_size = max(1, int(chunk_size))
+    outputs: List[torch.Tensor] = []
+    for start in range(0, total, chunk_size):
+        end = min(total, start + chunk_size)
+        ids_chunk = input_ids[start:end]
+        mask_chunk = attention_mask[start:end]
+
+        # `torch.autocast` in the policy forward reduces cast overhead in updates
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            logits = model(input_ids=ids_chunk, attention_mask=mask_chunk).logits  # (C, T, V)
+        logits = logits[:, :-1, :]                      # align next-token targets
+        toks = ids_chunk[:, -logits_to_keep:]           # (C, K)
+        logits = logits[:, -logits_to_keep:, :]         # (C, K, V)
+        outputs.append(selective_log_softmax(logits, toks))
+
+    return torch.cat(outputs, dim=0)
 
 
 def create_completion_mask(completion_ids: torch.Tensor, eos_token_id: int) -> torch.Tensor:
@@ -688,23 +702,22 @@ def train_with_grpo(
         # Snapshot the current policy. Under FSDP we temporarily materialize full
         # parameters (offloaded to CPU) before cloning so the reference model
         # stays unsharded but recomp  only once per outer iteration.
-        if is_fsdp_model(policy_model):
-            if sharding_strategy == ShardingStrategy.NO_SHARD:
-                clone_ctx = FSDP.summon_full_params(policy_model, recurse=True, offload_to_cpu=False)
-            else:
-                clone_ctx = FSDP.summon_full_params(policy_model, recurse=True, offload_to_cpu=True)
-        else:
-            clone_ctx = nullcontext()
-        with clone_ctx:
-            state_dict = {k: v.detach().cpu() for k, v in base_policy.state_dict().items()}
+        if is_fsdp_model(policy_model) and sharding_strategy != ShardingStrategy.NO_SHARD:
+            clone_ctx = FSDP.summon_full_params(policy_model, recurse=True, offload_to_cpu=True)
+            with clone_ctx:
+                state_dict = {k: v.detach().cpu() for k, v in base_policy.state_dict().items()}
 
-        try:
-            reference_model = AutoModelForCausalLM.from_config(base_policy.config, trust_remote_code=True)
-        except TypeError:
-            reference_model = AutoModelForCausalLM.from_config(base_policy.config)
-        reference_model.load_state_dict(state_dict)
-        reference_model.to(device)
-        del state_dict
+            base_dtype = next(base_policy.parameters()).dtype
+            try:
+                reference_model = AutoModelForCausalLM.from_config(base_policy.config, trust_remote_code=True)
+            except TypeError:
+                reference_model = AutoModelForCausalLM.from_config(base_policy.config)
+            reference_model.to(dtype=base_dtype)
+            reference_model.load_state_dict(state_dict)
+            reference_model.to(device=device, dtype=base_dtype)
+            del state_dict
+        else:
+            reference_model = copy.deepcopy(base_policy).to(device)
         reference_model.eval()
         for p in reference_model.parameters():
             p.requires_grad = False
@@ -903,7 +916,7 @@ def run_grpo_training(
 
     artifact_dir = run_dir / "grpo_finetuned_model"
     model_to_save = unwrap_model(policy_model)
-    if is_fsdp_model(policy_model):
+    if is_fsdp_model(policy_model) and getattr(policy_model, "sharding_strategy", None) != ShardingStrategy.NO_SHARD:
         state_cfg = StateDictConfig(offload_to_cpu=True, rank0_only=True)
         with FSDP.state_dict_type(policy_model, StateDictType.FULL_STATE_DICT, state_cfg):  # type: ignore[arg-type]
             state_dict = policy_model.state_dict()
