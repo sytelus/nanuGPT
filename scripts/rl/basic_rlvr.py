@@ -698,7 +698,10 @@ def train_with_grpo(
         with clone_ctx:
             state_dict = {k: v.detach().cpu() for k, v in base_policy.state_dict().items()}
 
-        reference_model = type(base_policy).from_config(base_policy.config)
+        try:
+            reference_model = AutoModelForCausalLM.from_config(base_policy.config, trust_remote_code=True)
+        except TypeError:
+            reference_model = AutoModelForCausalLM.from_config(base_policy.config)
         reference_model.load_state_dict(state_dict)
         reference_model.to(device)
         del state_dict
