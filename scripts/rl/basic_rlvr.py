@@ -688,12 +688,13 @@ def train_with_grpo(
         # Snapshot the current policy. Under FSDP we temporarily materialize full
         # parameters (offloaded to CPU) before cloning so the reference model
         # stays unsharded but recomp  only once per outer iteration.
-        summon_needed = is_fsdp_model(policy_model) and sharding_strategy != ShardingStrategy.NO_SHARD
-        clone_ctx = (
-            FSDP.summon_full_params(policy_model, recurse=True, offload_to_cpu=True)
-            if summon_needed
-            else nullcontext()
-        )
+        if is_fsdp_model(policy_model):
+            if sharding_strategy == ShardingStrategy.NO_SHARD:
+                clone_ctx = FSDP.summon_full_params(policy_model, recurse=True, offload_to_cpu=False)
+            else:
+                clone_ctx = FSDP.summon_full_params(policy_model, recurse=True, offload_to_cpu=True)
+        else:
+            clone_ctx = nullcontext()
         with clone_ctx:
             reference_model = copy.deepcopy(base_policy)
         reference_model.to(device)
