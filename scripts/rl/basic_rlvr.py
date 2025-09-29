@@ -211,18 +211,16 @@ def evaluate_model(
     batch_size: int,
     greedy_eval: bool,
     max_new_tokens: int,
-    sampling_temperature: float,
-    num_return_sequences: int,
+    sampling_temperature: Optional[float],
 ) -> float:
     """Greedy generation over `eval_examples`; returns accuracy percent."""
     if batch_size <= 0:
         raise ValueError("batch_size must be a positive integer")
     if max_new_tokens <= 0:
         raise ValueError("max_new_tokens must be positive")
-    if num_return_sequences <= 0:
-        raise ValueError("num_return_sequences must be positive")
-    if num_return_sequences != 1:
-        raise ValueError("Evaluation expects num_return_sequences=1 to align outputs with prompts")
+    if not greedy_eval and sampling_temperature is None:
+        raise ValueError("sampling_temperature must be provided when greedy_eval is False")
+    num_return_sequences = 1  # Keep one completion per prompt for accuracy alignment.
     pad_token_id = tokenizer.pad_token_id
     eos_token_id = tokenizer.eos_token_id
     if pad_token_id is None or eos_token_id is None:
@@ -265,8 +263,11 @@ def evaluate_model(
                         forced_eos_token_id=eos_token_id,
                         early_stopping=False,
                         do_sample=False,
+                        num_return_sequences=num_return_sequences,
                     )
                 else:
+                    if sampling_temperature is None:
+                        raise AssertionError("sampling_temperature must be set when using sampled evaluation")
                     generated = model.generate(  # type: ignore
                         input_ids=input_ids,
                         attention_mask=attention_mask,
@@ -276,7 +277,7 @@ def evaluate_model(
                         forced_eos_token_id=eos_token_id,
                         early_stopping=False,
                         do_sample=True,
-                        temperature=sampling_temperature,
+                        temperature=float(sampling_temperature),
                         num_return_sequences=num_return_sequences,
                     )
 
@@ -690,7 +691,6 @@ def main(
     eval_batch_size: int = 32,
     eval_max_new_tokens: int = 512,
     eval_temperature: float = 0.7,
-    eval_num_return_sequences: int = 1,
     num_iterations: int = 1,
     steps_per_iteration: int = 500,
     batch_size: int = 7,
@@ -733,10 +733,8 @@ def main(
     # Prepare data: a shuffled train split, with a small held-out eval slice.
     all_data = prepare_dataset(tokenizer, model_mode, system_prompt, train_split)
     random.shuffle(all_data)
-    if num_eval_examples < 0 or num_eval_examples > len(all_data):
-        raise ValueError(
-            f"num_eval_examples must be between 0 and {len(all_data)}; received {num_eval_examples}"
-        )
+    if num_eval_examples > len(all_data):
+        num_eval_examples = len(all_data)
     train_data = all_data[num_eval_examples:]
     eval_data = all_data[:num_eval_examples]
 
@@ -748,8 +746,7 @@ def main(
         batch_size=eval_batch_size,
         greedy_eval=greedy_eval,
         max_new_tokens=eval_max_new_tokens,
-        sampling_temperature=eval_temperature,
-        num_return_sequences=eval_num_return_sequences,
+        sampling_temperature=None if greedy_eval else eval_temperature,
     )
     print(f"Pre-GRPO Accuracy: {pre_grpo_accuracy:.2f}%")
 
@@ -782,8 +779,7 @@ def main(
         batch_size=eval_batch_size,
         greedy_eval=greedy_eval,
         max_new_tokens=eval_max_new_tokens,
-        sampling_temperature=eval_temperature,
-        num_return_sequences=eval_num_return_sequences,
+        sampling_temperature=None if greedy_eval else eval_temperature,
     )
     print(f"Post-GRPO Accuracy: {post_grpo_accuracy:.2f}%")
     print(f"Total Improvement: {post_grpo_accuracy - pre_grpo_accuracy:.2f}%")
