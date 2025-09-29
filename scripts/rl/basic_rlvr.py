@@ -22,7 +22,7 @@ import random
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple, TypedDict, Union, cast
+from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple, TypedDict, Union, cast
 
 import numpy as np
 import torch
@@ -182,8 +182,14 @@ def _extract_single_number(text: str) -> Optional[float]:
     numbers = re.findall(r"-?\d*\.?\d+", text)
     return float(numbers[0]) if len(numbers) == 1 else None
 
-def prepare_dataset(tokenizer: PreTrainedTokenizerBase, model_mode: str, system_prompt: str, split: str) -> List[DatasetExample]:
-    data = load_dataset("openai/gsm8k", "main")[split]
+def prepare_dataset(
+    tokenizer: PreTrainedTokenizerBase, model_mode: str, system_prompt: str, dataset_cfg: Mapping[str, str], split: str,
+) -> List[DatasetExample]:
+    args: List[str] = [dataset_cfg["path"]]
+    subset = dataset_cfg.get("subset")
+    if subset:
+        args.append(subset)
+    data = load_dataset(*args, split=split)
     formatted_data: List[DatasetExample] = []
 
     for raw in data:
@@ -351,6 +357,10 @@ REWARD_FUNCTIONS: Dict[str, RewardFn] = {
     "combined": combined_reward,
     "correctness": correctness_reward,
     "format": format_reward,
+}
+
+KNOWN_DATASETS: Dict[str, Dict[str, str]] = {
+    "gsm8k": {"path": "openai/gsm8k", "subset": "main", "train_split": "train", "test_split": "test"},
 }
 
 def selective_log_softmax(logits: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
@@ -601,7 +611,7 @@ def enable_grads(model: PreTrainedModel) -> PreTrainedModel:
 
 def run_grpo_training(
     device_name: str, device_id: str, model_mode: str = "completion", greedy_eval: bool = False,
-    model_name: str = "Qwen/Qwen2.5-1.5B-Instruct", train_split: str = "train", num_eval_examples: int = 30,
+    model_name: str = "Qwen/Qwen2.5-1.5B-Instruct", dataset: str = "gsm8k", num_eval_examples: int = 30,
     eval_batch_size: int = 32, eval_max_new_tokens: int = 512, eval_temperature: float = 0.7, num_iterations: int = 1,
     steps_per_iteration: int = 500, batch_size: int = 7, num_generations: int = 12, max_completion_length: int = 400,
     beta: float = 0.04, learning_rate: float = 5e-6, mu: int = 1, epsilon: float = 0.1,
@@ -621,19 +631,46 @@ def run_grpo_training(
     model.config.pad_token_id = tokenizer.eos_token_id
     model.config.eos_token_id = tokenizer.eos_token_id
 
+    if dataset not in KNOWN_DATASETS:
+        raise ValueError(f"Unknown dataset '{dataset}'. Known datasets: {', '.join(sorted(KNOWN_DATASETS))}")
+    dataset_cfg = KNOWN_DATASETS[dataset]
+
     system_prompt = build_system_prompt(model_mode)
     logger.info("System prompt:\n%s", system_prompt)
-    all_data = prepare_dataset(tokenizer, model_mode, system_prompt, train_split)
-    random.shuffle(all_data)
-    total_examples = len(all_data)
 
-    effective_eval_examples = min(num_eval_examples if num_eval_examples >= 0 else total_examples, total_examples)
-    if effective_eval_examples < num_eval_examples:
-        logger.warning("Requested %d eval examples but only %d available; using %d instead.", num_eval_examples, total_examples, effective_eval_examples)
-    train_data = all_data[effective_eval_examples:]
-    eval_data = all_data[:effective_eval_examples]
+    train_data = prepare_dataset(tokenizer, model_mode, system_prompt, dataset_cfg, dataset_cfg["train_split"])
+    random.shuffle(train_data)
+    eval_split_name = dataset_cfg.get("test_split")
+    if eval_split_name:
+        eval_data = prepare_dataset(tokenizer, model_mode, system_prompt, dataset_cfg, eval_split_name)
+        total_eval_examples = len(eval_data)
+        if num_eval_examples >= 0:
+            effective_eval_examples = min(num_eval_examples, total_eval_examples)
+            if effective_eval_examples < num_eval_examples:
+                logger.warning(
+                    "Requested %d eval examples but only %d available; using %d instead.",
+                    num_eval_examples, total_eval_examples, effective_eval_examples,
+                )
+        else:
+            effective_eval_examples = total_eval_examples
+        eval_data = eval_data[:effective_eval_examples]
+        eval_label = eval_split_name if effective_eval_examples == total_eval_examples else f"{eval_split_name}[:{effective_eval_examples}]"
+    else:
+        total_examples = len(train_data)
+        effective_eval_examples = min(num_eval_examples if num_eval_examples >= 0 else total_examples, total_examples)
+        if effective_eval_examples < (num_eval_examples if num_eval_examples >= 0 else total_examples):
+            logger.warning(
+                "Requested %d eval examples but only %d available; using %d instead.",
+                num_eval_examples, total_examples, effective_eval_examples,
+            )
+        eval_data = train_data[:effective_eval_examples]
+        train_data = train_data[effective_eval_examples:]
+        eval_label = f"{dataset_cfg['train_split']}[:{effective_eval_examples}]"
 
-    logger.info("Dataset prepared from split '%s': total=%d, eval=%d, train=%d", train_split, total_examples, len(eval_data), len(train_data))
+    logger.info(
+        "Dataset '%s': train=%d (split=%s) eval=%d (split=%s)",
+        dataset, len(train_data), dataset_cfg["train_split"], len(eval_data), eval_label,
+    )
 
     pre_grpo_accuracy = evaluate_model(
         model=model, tokenizer=tokenizer, eval_examples=eval_data, batch_size=eval_batch_size, greedy_eval=greedy_eval,
@@ -675,12 +712,12 @@ def run_grpo_training(
     return metrics
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="GRPO training for GSM8K with XML-formatted answers")
+    parser = argparse.ArgumentParser(description="GRPO training with XML-formatted answers")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for all libraries")
     parser.add_argument("--model-mode", type=str, default="completion", choices=("completion", "chat"), help="Tokenizer prompt formatting mode")
     parser.add_argument("--greedy-eval", action="store_true", help="Use greedy decoding for evaluation")
     parser.add_argument("--model-name", type=str, default="Qwen/Qwen2.5-1.5B-Instruct", help="HF model id")
-    parser.add_argument("--train-split", type=str, default="train", help="Dataset split to load")
+    parser.add_argument("--dataset", type=str, default="gsm8k", choices=tuple(KNOWN_DATASETS.keys()), help="Dataset to use")
     parser.add_argument("--num-eval-examples", type=int, default=30, help="Number of examples reserved for evaluation")
     parser.add_argument("--eval-batch-size", type=int, default=32, help="Batch size for evaluation")
     parser.add_argument("--eval-max-new-tokens", type=int, default=512, help="Max tokens generated during evaluation")
@@ -713,7 +750,7 @@ def main() -> None:
 
     train_params = {
         "device_name": device_name, "device_id": device_id, "model_mode": args.model_mode, "greedy_eval": args.greedy_eval,
-        "model_name": args.model_name, "train_split": args.train_split, "num_eval_examples": args.num_eval_examples,
+        "model_name": args.model_name, "dataset": args.dataset, "num_eval_examples": args.num_eval_examples,
         "eval_batch_size": args.eval_batch_size, "eval_max_new_tokens": args.eval_max_new_tokens, "eval_temperature": args.eval_temperature,
         "num_iterations": args.num_iterations, "steps_per_iteration": args.steps_per_iteration, "batch_size": args.batch_size,
         "num_generations": args.num_generations, "max_completion_length": args.max_completion_length, "beta": args.beta,
