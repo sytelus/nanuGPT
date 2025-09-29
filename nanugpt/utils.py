@@ -227,7 +227,7 @@ class TorchInfo:
     is_distributed: bool
     device_type:str
     dtype:str # floating point type
-    device_id:int   # GPU ID that process sees
+    device_id:int   # GPU ID that process sees, needed to init DistributedDataParallel
     device_name:str # this can include GPU ID
     global_rank: int
     local_rank: int
@@ -257,7 +257,7 @@ def setup_torch(seed:int,
 
     is_cuda = device_type == 'cuda'
     device_name = device_type # we will add GPU ID later
-    device_id = -1  # we will set this later
+    device_id = -1  # we will set this later, needed to init DistributedDataParallel
     pt_dtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
 
     if is_cuda: # setup cuda
