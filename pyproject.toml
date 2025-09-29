@@ -7,7 +7,7 @@ where = ["."]
 
 [project]
 name = "nanugpt"
-version = "0.4.2"
+version = "0.4.3"
 requires-python = ">=3.8" # importlib.metadata requires python >=3.8
 authors = [
     { name = "Shital Shah", email = "sytelus@gmail.com" }
