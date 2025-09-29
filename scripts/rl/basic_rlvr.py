@@ -631,12 +631,12 @@ def run_grpo_training(
     if tokenizer.eos_token is None:
         raise ValueError("`tokenizer.eos_token` must be provided, but got None.")
 
-    logger.info("Model max length: %d", getattr(model.config, "n_positions", None))
-    logger.info("Tokenizer max length: %d", tokenizer.model_max_length)
+    logger.info("Model max length: %s", str(getattr(model.config, "n_positions", None)))
+    logger.info("Tokenizer max length: %s", str(tokenizer.model_max_length))
     if tokenizer.model_max_length != getattr(model.config, "n_positions", None):
         logger.warning(
-            "Tokenizer max length (%d) != model max length (%d); using tokenizer's value.",
-            tokenizer.model_max_length, getattr(model.config, "n_positions", None),
+            "Tokenizer max length (%s) != model max length (%s); using tokenizer's value.",
+            str(tokenizer.model_max_length), str(getattr(model.config, "n_positions", None)),
         )
     # tokenizer.model_max_length = getattr(model.config, "n_positions", tokenizer.model_max_length) # TODO: check if needed
     # tokenizer.truncation_side = "left" # TODO: check if left truncation is needed
