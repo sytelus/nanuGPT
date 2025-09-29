@@ -114,3 +114,6 @@ venv.bak/
 
 model.th
 log.txt
+
+# grpo training
+grpo_finetuned_model/
