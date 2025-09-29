@@ -540,7 +540,7 @@ def train_with_grpo(
     def unwrap(module_like: PolicyModel) -> PreTrainedModel:
         return cast(PreTrainedModel, module_like.module)
 
-    for iteration in range(1, num_iterations + 1):
+    for iteration in range(1, num_iterations + 1): # number of times we freeze the reference model and copy from policy model
         logger.info("Starting iteration %d/%d", iteration, num_iterations)
 
         # Snapshot policy -> reference (no grads).
@@ -553,7 +553,7 @@ def train_with_grpo(
 
         policy_model.train()
 
-        for step in range(1, steps_per_iteration + 1):
+        for step in range(1, steps_per_iteration + 1):  # number of policy updates per iteration
             batch_samples = random.sample(train_data, batch_size)
 
             # Generate with current policy snapshot on the primary device.
@@ -573,16 +573,15 @@ def train_with_grpo(
                 if was_training:
                     policy_module.train()
 
-            # Do `mu` GRPO steps per rollout batch.
-            for grpo_iter in range(1, mu + 1):
+            for grpo_iter in range(1, mu + 1):  # number of GRPO updates per batch
                 loss, avg_reward = grpo_loss(policy_model, rollout_data, reward_function, beta, epsilon)
                 optimizer.zero_grad(set_to_none=True)  # TODO: check if this would work because gradient_as_bucket_view=True
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(policy_model.parameters(), max_norm=0.1)
+                total_norm = torch.nn.utils.clip_grad_norm_(policy_model.parameters(), max_norm=0.1)
                 optimizer.step()
                 logger.info(
-                    "Iteration %d/%d, Step %d/%d, GRPO update %d/%d, Loss: %.4f, Avg reward: %.4f",
-                    iteration, num_iterations, step, steps_per_iteration, grpo_iter, mu, loss.item(), avg_reward,
+                    "Itr %d/%d, Step %d/%d, mu %d/%d, Loss: %.1g, reward: %.1g, norm: %.1g",
+                    iteration, num_iterations, step, steps_per_iteration, grpo_iter, mu, loss.item(), avg_reward, total_norm.item()
                 )
 
         logger.info("Completed iteration %d. (Placeholder: reward model update would happen here.)", iteration)
