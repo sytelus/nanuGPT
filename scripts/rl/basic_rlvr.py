@@ -110,12 +110,10 @@ def init_torch(seed) -> Tuple[str, int]:
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
 
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-
-    torch.set_float32_matmul_precision("high")
+        torch.backends.cudnn.enabled = True
+        torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
+        torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
+        torch.set_float32_matmul_precision('high')
 
     backend = "nccl" if torch.cuda.is_available() else "gloo"
     if not ("RANK" in os.environ and "WORLD_SIZE" in os.environ and "LOCAL_RANK" in os.environ):
