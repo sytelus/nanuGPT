@@ -16,21 +16,20 @@ class LlamaConfig:
     d_model: int = 4096
     n_layers: int = 32
     n_heads: int = 32
-    n_kv_heads: Optional[int] = None
+    n_kv_heads: int = 8
     swiglu_multiple_of: int = 256  # make SwiGLU hidden layer size multiple of large power of 2
     ffn_dim_multiplier: Optional[float] = None
     rms_norm_eps: float = 1e-5
     rope_theta: float = 10000 # TODO: original is 500000 but because of https://github.com/NVIDIA/TransformerEngine/issues/1245 we set lower
     max_seq_len: int = 4096
     # defined later by tokenizer
-    vocab_size: int = -1
+    vocab_size: int = 32000 # 128256 for Llama3
+    # ffn_dim is 14336 for llama3-8b, 11008 for llama-2-7b
 
 TE_LLAMA_TINY_CONFIG = LlamaConfig(
     d_model=1024,
     n_layers=4,
     n_heads=8,
-    n_kv_heads=None,
-    vocab_size=-1,
     swiglu_multiple_of=256,
     ffn_dim_multiplier=1.3,
 )
@@ -39,8 +38,6 @@ TE_LLAMA_360M_CONFIG = LlamaConfig(
     d_model=1024,
     n_layers=24,
     n_heads=8,
-    n_kv_heads=None,
-    vocab_size=-1,
     swiglu_multiple_of=256,
     ffn_dim_multiplier=1.3,
 )
@@ -49,8 +46,6 @@ TE_LLAMA_2B_CONFIG = LlamaConfig(
     d_model=2048,
     n_layers=24,
     n_heads=16,
-    n_kv_heads=None,
-    vocab_size=-1,
     swiglu_multiple_of=256,
     ffn_dim_multiplier=1.3,
 )
@@ -59,8 +54,6 @@ TE_LLAMA_3B_CONFIG = LlamaConfig(
     d_model=3072,
     n_layers=28,
     n_heads=24,
-    n_kv_heads=None,
-    vocab_size=-1,
     swiglu_multiple_of=256,
     ffn_dim_multiplier=1,
 )
@@ -69,8 +62,6 @@ TE_LLAMA_8B_CONFIG = LlamaConfig(
     d_model=4096,
     n_layers=32,
     n_heads=32,
-    n_kv_heads=8,
-    vocab_size=-1,
     swiglu_multiple_of=1024,
     ffn_dim_multiplier=1.3,
 )
@@ -103,10 +94,10 @@ class TeLlama3DecoderLayer(te.TransformerLayer):
         te_rope = RotaryPositionEmbedding(d_model//n_heads, rotary_base=rope_theta)
         self.te_rope_emb = te_rope(max_seq_len=max_seq_len).cuda()
 
-    def forward(self,
-                hidden_states: torch.Tensor,
-                attention_mask,):
-        return super().forward(hidden_states, attention_mask=attention_mask, rotary_pos_emb=self.te_rope_emb)
+    def forward(self, hidden_states: torch.Tensor, attention_mask:Optional[torch.Tensor], is_first_microbatch: bool):
+        return super().forward(hidden_states, attention_mask=attention_mask,
+                               rotary_pos_emb=self.te_rope_emb,
+                               is_first_microbatch=is_first_microbatch)
 
 
 class TeLlama3Model(nn.Module):
@@ -150,9 +141,18 @@ class TeLlama3Model(nn.Module):
 
     def forward(self,
                 input_ids: torch.Tensor,
-                attention_mask=None,):
+                attention_mask: Optional[torch.Tensor],
+                is_first_micro_batch: bool):
         h = self.tok_embeddings(input_ids)
         for layer in self.layers:
-            h = layer(h, attention_mask=attention_mask)
+            h = layer(h, attention_mask=attention_mask, is_first_micro_batch=is_first_micro_batch)
         logits = self.lm_head(h)
         return logits
+
+
+# References:
+# Config: https://huggingface.co/unsloth/llama-3-8b/blob/main/config.json
+# Karpathy llm.c: https://github.com/karpathy/llm.c/blob/master/train_llama3.py
+# TE reference: https://docs.nvidia.com/deeplearning/transformer-engine/user-guide/index.html
+# B200 benchmarking: https://github.com/HoomanRamezani/b200_benchmarking/blob/main/bench_te.py
+
