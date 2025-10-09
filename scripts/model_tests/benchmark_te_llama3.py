@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Benchmark TeLlama3Model configurations with timing and memory stats.
 
-This utility walks every public `TE_*` configuration declared in
+This utility walks every public `CONFIG_*` configuration declared in
 `nanugpt.models.te_llama3` and reports forward/backward timing plus memory for
 both eager and `torch.compile` modes.  The script was written with the
 following guard-rails in mind:
@@ -148,7 +148,7 @@ def configure_torch_runtime(device: torch.device) -> None:
         torch.backends.cudnn.deterministic = False
 
 
-def discover_configs(prefix: str = "TE_") -> Dict[str, LlamaConfig]:
+def discover_configs(prefix: str = "CONFIG_") -> Dict[str, LlamaConfig]:
     """Discover LlamaConfig instances in te_llama3 that match the prefix."""
     return {
         name: value
@@ -933,7 +933,7 @@ def parse_args() -> argparse.Namespace:
         "--config",
         type=str,
         default=None,
-        help="Run a single config (name must match TE_* attribute).",
+        help="Run a single config (name must match CONFIG_* attribute).",
     )
     return parser.parse_args()
 
@@ -978,7 +978,7 @@ def main() -> None:
         configs = {args.config: configs[args.config]}
 
     if not configs:
-        console.print("[bold red]No TE_ prefixed LlamaConfig found in te_llama3.[/bold red]")
+        console.print("[bold red]No CONFIG_ prefixed LlamaConfig found in te_llama3.[/bold red]")
         return
 
     summaries: List[BenchmarkSummary] = []

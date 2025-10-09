@@ -74,7 +74,7 @@ class LlamaConfig:
     # ffn_dim is 14336 for llama3-8b, 11008 for llama-2-7b
     initializer_range: float = 0.023 # 0.02 in HF, 0.023 in TE
 
-TE_LLAMA_TINY_CONFIG = LlamaConfig(
+CONFIG_322M = LlamaConfig(
     n_embd=1024,
     n_layer=4,
     n_head=8,
@@ -82,7 +82,7 @@ TE_LLAMA_TINY_CONFIG = LlamaConfig(
     ffn_dim_multiplier=1.3,
 )
 
-TE_LLAMA_360M_CONFIG = LlamaConfig(
+CONFIG_627M = LlamaConfig(
     n_embd=1024,
     n_layer=24,
     n_head=8,
@@ -90,7 +90,7 @@ TE_LLAMA_360M_CONFIG = LlamaConfig(
     ffn_dim_multiplier=1.3,
 )
 
-TE_LLAMA_2B_CONFIG = LlamaConfig(
+CONFIG_2B = LlamaConfig(
     n_embd=2048,
     n_layer=24,
     n_head=16,
@@ -98,7 +98,7 @@ TE_LLAMA_2B_CONFIG = LlamaConfig(
     ffn_dim_multiplier=1.3,
 )
 
-TE_LLAMA_3B_CONFIG = LlamaConfig(
+CONFIG_3p6B = LlamaConfig(
     n_embd=3072,
     n_layer=28,
     n_head=24,
@@ -106,7 +106,7 @@ TE_LLAMA_3B_CONFIG = LlamaConfig(
     ffn_dim_multiplier=1,
 )
 
-TE_LLAMA_8B_CONFIG = LlamaConfig(
+CONFIG_8B = LlamaConfig(
     n_embd=4096,
     n_layer=32,
     n_head=32,
