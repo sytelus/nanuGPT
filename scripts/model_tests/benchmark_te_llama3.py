@@ -13,6 +13,9 @@ following guard-rails in mind:
   summary table rather than bubbling an exception.
 * Capture a fused AdamW optimizer step so optimizer timing/memory is visible
   alongside pure forward/backward passes.
+* Isolate inference, gradient, and optimizer stages: every run rebuilds its
+  own model, data, and optimizer and scrubs CUDA state before and after
+  measurement so torch.compile sees a pristine module.
 * Keep GPU state tidy between configs: TF32 is enabled for performance,
   allocator segments are expanded to mitigate fragmentation, and caches are
   cleared after each run.
@@ -31,7 +34,8 @@ import time
 import warnings
 from functools import lru_cache
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, Mapping
+import gc
 import os
 
 import torch
@@ -42,6 +46,7 @@ from torch.optim import Optimizer
 
 from nanugpt.models import te_llama3
 from nanugpt.models.te_llama3 import LlamaConfig, TeLlama3Model
+from nanugpt import utils
 
 
 console = Console()
@@ -66,25 +71,23 @@ def _synchronize_cuda(device: torch.device) -> None:
 
 
 @dataclass
+class ScenarioMetrics:
+    """Per-stage measurements for eager and compiled modes."""
+    eager: Optional[Metrics]
+    compiled: Optional[Metrics]
+    eager_oom: bool = False
+    compiled_oom: bool = False
+    supported: bool = True
+
+
+@dataclass
 class BenchmarkSummary:
     """Printable snapshot of a single config's parameters and timing results."""
     name: str
     config: LlamaConfig
     param_stats: ParamStats
-    eager_metrics: Optional[Metrics]
-    compiled_metrics: Optional[Metrics]
+    stages: Dict[str, ScenarioMetrics]
     batch_size: int
-    eager_oom: bool = False
-    compiled_oom: bool = False
-    adamw_supported: bool = False
-
-
-@dataclass
-class TrainingPassMetrics:
-    forward_time: float
-    forward_memory: float
-    backward_time: float
-    backward_memory: float
 
 
 def _torch_compile_model(
@@ -182,48 +185,132 @@ def aggregate_metrics(records: List[Metrics]) -> Metrics:
     return summary
 
 
-def run_inference_forward(
+def _cleanup_device_state(device: torch.device) -> None:
+    """Clear cached memory and reset CUDA stats to isolate stages."""
+    if _is_cuda_device(device):
+        try:
+            _synchronize_cuda(device)
+        except (torch.cuda.CudaError, RuntimeError):
+            pass
+        torch.cuda.reset_peak_memory_stats(device)
+        torch.cuda.empty_cache()
+    gc.collect()
+
+
+def _seed_everything(device: torch.device) -> None:
+    """Re-seed all RNGs so each stage is repeatable and isolated."""
+    torch.manual_seed(42)
+    if _is_cuda_device(device):
+        torch.cuda.manual_seed_all(42)
+
+
+def _synthetic_loss(logits: torch.Tensor, labels: torch.Tensor) -> Tuple[torch.Tensor, int]:
+    # model_output: [batch_size, seq_len, vocab_size]
+    # cross entropy loss expects a tensor of shape [batch_size, num_classes] and [batch_size]
+
+    if isinstance(logits, Mapping):
+        logits = logits['logits']
+
+    preds = logits.view(-1, logits.size(-1)) # [batch_size*seq_len, vocab_size]
+    targets = labels.view(-1) # [batch_size*seq_len]
+
+    # ignore_index=-1 is actually not needed because we never output -ve index for tokens.
+    # PyTorch default is -100. The negative index is used to ignore the loss for padding tokens.
+    loss = torch.nn.functional.cross_entropy(preds, targets, ignore_index=-1)
+    # dim=-1 means we take the max along the last dimension, which is the vocab_size, so max is taken over the vocab
+    correct = utils.safe_int_item((torch.argmax(preds, dim=-1) == targets).sum())
+
+    return loss, correct # total num of predictions
+
+
+def _prepare_inputs(
+    config: LlamaConfig,
+    batch_size: int,
+    seq_len: int,
+    device: torch.device,
+    with_labels: bool,
+) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    context_length = min(seq_len, config.block_size)
+    input_ids = torch.randint(
+        low=0,
+        high=config.vocab_size,
+        size=(batch_size, context_length),
+        device=device,
+        dtype=torch.long,
+    )
+    labels = None
+    if with_labels:
+        labels = torch.randint(
+            low=0,
+            high=config.vocab_size,
+            size=(batch_size, context_length),
+            device=device,
+            dtype=torch.long,
+        )
+    return input_ids, labels
+
+
+def _zero_grad(module: torch.nn.Module) -> None:
+    try:
+        module.zero_grad(set_to_none=True)
+    except TypeError:
+        module.zero_grad()
+
+
+def _zero_optimizer(optimizer: Optimizer) -> None:
+    try:
+        optimizer.zero_grad(set_to_none=True)
+    except TypeError:
+        optimizer.zero_grad()
+
+
+def _measure_inference_iteration(
     model: TeLlama3Model,
     input_ids: torch.Tensor,
     device: torch.device,
-) -> Tuple[float, float]:
-    was_training = model.training
+) -> Metrics:
+    """Profile a single inference forward pass."""
     model.eval()
-
     is_cuda = _is_cuda_device(device)
     if is_cuda:
         torch.cuda.reset_peak_memory_stats(device)
         mem_before = torch.cuda.memory_allocated(device)
         _synchronize_cuda(device)
     else:
-        mem_before = 0
+        mem_before = 0.0
 
     start = time.perf_counter()
-    with torch.no_grad():  # detach activations so training graph remains untouched
+    with torch.no_grad():
         model(input_ids, return_logits=True)
     if is_cuda:
         _synchronize_cuda(device)
-    elapsed = time.perf_counter() - start
+    forward_time = time.perf_counter() - start
 
-    if is_cuda:
-        memory = torch.cuda.max_memory_allocated(device) - mem_before
-    else:
-        memory = float("nan")
+    forward_memory = (
+        torch.cuda.max_memory_allocated(device) - mem_before if is_cuda else float("nan")
+    )
 
-    if was_training:
-        model.train()
+    return {
+        "forward_time": forward_time,
+        "forward_memory": float(forward_memory) if is_cuda else float("nan"),
+    }
 
-    return elapsed, memory
 
-
-def _run_forward_backward(
+def _measure_training_iteration(
     model: TeLlama3Model,
     input_ids: torch.Tensor,
     labels: torch.Tensor,
     device: torch.device,
-) -> TrainingPassMetrics:
-    """Execute a forward/backward pass and return timing + memory stats."""
+    optimizer: Optional[Optimizer] = None,
+) -> Metrics:
+    """Profile a training iteration with optional optimizer step."""
+    model.train()
     is_cuda = _is_cuda_device(device)
+
+    if optimizer is not None:
+        _zero_optimizer(optimizer)
+    _zero_grad(model)
+
     if is_cuda:
         torch.cuda.reset_peak_memory_stats(device)
         mem_before_forward = torch.cuda.memory_allocated(device)
@@ -232,7 +319,7 @@ def _run_forward_backward(
         mem_before_forward = 0.0
 
     start_forward = time.perf_counter()
-    logits, _, _ = model(input_ids, return_logits=True)
+    _, loss, _ = model(input_ids, labels=labels, return_logits=False)
     if is_cuda:
         _synchronize_cuda(device)
     forward_time = time.perf_counter() - start_forward
@@ -245,10 +332,6 @@ def _run_forward_backward(
         forward_memory = float("nan")
         mem_before_backward = 0.0
 
-    loss = F.cross_entropy(logits.view(-1, logits.size(-1)), labels.view(-1))
-
-    if is_cuda:
-        _synchronize_cuda(device)
     start_backward = time.perf_counter()
     loss.backward()
     if is_cuda:
@@ -260,130 +343,65 @@ def _run_forward_backward(
     else:
         backward_memory = float("nan")
 
-    return TrainingPassMetrics(
-        forward_time=forward_time,
-        forward_memory=float(forward_memory) if is_cuda else float("nan"),
-        backward_time=backward_time,
-        backward_memory=float(backward_memory) if is_cuda else float("nan"),
-    )
-
-
-def run_training_step(
-    model: TeLlama3Model,
-    input_ids: torch.Tensor,
-    labels: torch.Tensor,
-    device: torch.device,
-) -> Metrics:
-    """One training micro-step with full grads; returns timing/memory slices."""
-    was_training = model.training
-    model.train()
-
-    is_cuda = _is_cuda_device(device)
-
-    model.zero_grad(set_to_none=True)
-    pass_metrics = _run_forward_backward(model, input_ids, labels, device)
-    model.zero_grad(set_to_none=True)
-
-    if was_training is False:
-        model.eval()
-
-    training_step_time = pass_metrics.forward_time + pass_metrics.backward_time
-    training_step_memory = (
-        max(pass_metrics.forward_memory, pass_metrics.backward_memory)
-        if is_cuda
-        else float("nan")
-    )
-
-    return {
-        "training_forward_time": float(pass_metrics.forward_time),
-        "training_forward_memory": float(pass_metrics.forward_memory)
-        if is_cuda
-        else float("nan"),
-        "training_backward_time": float(pass_metrics.backward_time),
-        "training_backward_memory": float(pass_metrics.backward_memory)
-        if is_cuda
-        else float("nan"),
-        "training_step_time": training_step_time,
-        "training_step_memory": float(training_step_memory) if is_cuda else float("nan"),
+    metrics: Metrics = {
+        "forward_time": float(forward_time),
+        "forward_memory": float(forward_memory) if is_cuda else float("nan"),
+        "backward_time": float(backward_time),
+        "backward_memory": float(backward_memory) if is_cuda else float("nan"),
     }
 
+    if optimizer is not None:
+        if is_cuda:
+            torch.cuda.reset_peak_memory_stats(device)
+            mem_before_step = torch.cuda.memory_allocated(device)
+            _synchronize_cuda(device)
+        else:
+            mem_before_step = 0.0
 
-def run_training_with_optimizer(
-    model: TeLlama3Model,
-    optimizer: Optimizer,
-    input_ids: torch.Tensor,
-    labels: torch.Tensor,
-    device: torch.device,
-) -> Metrics:
-    """Training micro-step that includes a fused AdamW optimizer step."""
-    was_training = model.training
-    model.train()
-    is_cuda = _is_cuda_device(device)
+        start_step = time.perf_counter()
+        optimizer.step()
+        if is_cuda:
+            _synchronize_cuda(device)
+        step_time = time.perf_counter() - start_step
 
-    try:
-        optimizer.zero_grad(set_to_none=True)
-    except TypeError:
-        optimizer.zero_grad()
-    model.zero_grad(set_to_none=True)
+        step_memory = (
+            torch.cuda.max_memory_allocated(device) - mem_before_step
+            if is_cuda
+            else float("nan")
+        )
 
-    pass_metrics = _run_forward_backward(model, input_ids, labels, device)
+        metrics.update(
+            {
+                "optimizer_step_time": float(step_time),
+                "optimizer_step_memory": float(step_memory) if is_cuda else float("nan"),
+            }
+        )
+        _zero_optimizer(optimizer)
 
-    if is_cuda:
-        torch.cuda.reset_peak_memory_stats(device)
-        mem_before_step = torch.cuda.memory_allocated(device)
-        _synchronize_cuda(device)
-    else:
-        mem_before_step = 0.0
-
-    start_step = time.perf_counter()
-    optimizer.step()
-    if is_cuda:
-        _synchronize_cuda(device)
-    step_time = time.perf_counter() - start_step
-
-    if is_cuda:
-        step_memory = torch.cuda.max_memory_allocated(device) - mem_before_step
-    else:
-        step_memory = float("nan")
-
-    try:
-        optimizer.zero_grad(set_to_none=True)
-    except TypeError:
-        optimizer.zero_grad()
-    model.zero_grad(set_to_none=True)
-
-    if was_training is False:
-        model.eval()
-
-    iteration_time = pass_metrics.forward_time + pass_metrics.backward_time + step_time
+    iteration_time = metrics["forward_time"] + metrics["backward_time"]
     iteration_memory = (
-        max(pass_metrics.forward_memory, pass_metrics.backward_memory, step_memory)
+        max(metrics["forward_memory"], metrics["backward_memory"])
         if is_cuda
         else float("nan")
     )
+    if optimizer is not None:
+        iteration_time += metrics["optimizer_step_time"]
+        if is_cuda:
+            iteration_memory = max(iteration_memory, metrics["optimizer_step_memory"])
 
-    return {
-        "adamw_forward_time": float(pass_metrics.forward_time),
-        "adamw_forward_memory": float(pass_metrics.forward_memory)
-        if is_cuda
-        else float("nan"),
-        "adamw_backward_time": float(pass_metrics.backward_time),
-        "adamw_backward_memory": float(pass_metrics.backward_memory)
-        if is_cuda
-        else float("nan"),
-        "adamw_step_time": step_time,
-        "adamw_step_memory": float(step_memory) if is_cuda else float("nan"),
-        "adamw_iteration_time": iteration_time,
-        "adamw_iteration_memory": float(iteration_memory) if is_cuda else float("nan"),
-    }
+    metrics["iteration_time"] = float(iteration_time)
+    metrics["iteration_memory"] = float(iteration_memory)
+
+    _zero_grad(model)
+    return metrics
 
 
-def build_fused_adamw(model: TeLlama3Model, device: torch.device) -> Optional[Optimizer]:
-    """Return a fused AdamW optimizer when supported by the runtime."""
+def _build_fused_adamw(model: TeLlama3Model, device: torch.device) -> Optional[Optimizer]:
+    """Instantiate a fused AdamW optimizer if the runtime supports it."""
     if not _is_cuda_device(device):
         return None
     try:
-        return torch.optim.AdamW(
+        optimizer = torch.optim.AdamW(
             model.parameters(),
             lr=1e-4,
             betas=(0.9, 0.95),
@@ -392,6 +410,162 @@ def build_fused_adamw(model: TeLlama3Model, device: torch.device) -> Optional[Op
         )
     except (TypeError, RuntimeError, ValueError):
         return None
+    return optimizer
+
+
+@dataclass
+class StageRunResult:
+    metrics: Optional[Metrics]
+    oom: bool
+    supported: bool = True
+
+
+INFERENCE_STAGE = "inference"
+TRAINING_STAGE = "training"
+OPTIMIZER_STAGE = "training_adamw"
+
+
+def _stage_label(stage: str) -> str:
+    return {
+        INFERENCE_STAGE: "inference",
+        TRAINING_STAGE: "training",
+        OPTIMIZER_STAGE: "training (AdamW)",
+    }.get(stage, stage)
+
+
+def _run_stage_once(
+    config_name: str,
+    config: LlamaConfig,
+    device: torch.device,
+    batch_size: int,
+    seq_len: int,
+    warmup: int,
+    steps: int,
+    stage: str,
+    compile_model: bool,
+) -> StageRunResult:
+    """Run a single stage (optionally compiled) and collect aggregated metrics."""
+    _cleanup_device_state(device)
+    _seed_everything(device)
+
+    requires_labels = stage != INFERENCE_STAGE
+    requires_optimizer = stage == OPTIMIZER_STAGE
+    stage_label = _stage_label(stage)
+
+    try:
+        model = TeLlama3Model(
+            config,
+            get_loss=_synthetic_loss if requires_labels else None,
+        )
+    except torch.cuda.OutOfMemoryError:
+        console.print(
+            f"[bold red]{config_name}: OOM creating {stage_label} model ({'compiled' if compile_model else 'eager'}).[/bold red]"
+        )
+        return StageRunResult(metrics=None, oom=True)
+
+    try:
+        model = model.to(device)
+    except torch.cuda.OutOfMemoryError:
+        console.print(
+            f"[bold red]{config_name}: OOM moving {stage_label} model to {device} ({'compiled' if compile_model else 'eager'}).[/bold red]"
+        )
+        del model
+        return StageRunResult(metrics=None, oom=True)
+
+    optimizer: Optional[Optimizer] = None
+    try:
+        if compile_model:
+            console.print(
+                f"[dim]{config_name}: compiling {stage_label} model with torch.compile...[/dim]"
+            )
+            if stage == INFERENCE_STAGE:
+                model.eval()
+            else:
+                model.train()
+            try:
+                model = _torch_compile_model(model, device)
+            except torch.cuda.OutOfMemoryError:
+                console.print(
+                    f"[bold red]{config_name}: OOM compiling {stage_label} model.[/bold red]"
+                )
+                return StageRunResult(metrics=None, oom=True)
+            except Exception as exc:
+                console.print(
+                    f"[bold red]{config_name}: torch.compile failed for {stage_label} ({exc.__class__.__name__}: {exc}).[/bold red]"
+                )
+                return StageRunResult(metrics=None, oom=True)
+            if _is_cuda_device(device):
+                torch.cuda.reset_peak_memory_stats(device)
+                _synchronize_cuda(device)
+
+        if requires_optimizer:
+            optimizer = _build_fused_adamw(model, device)
+            if optimizer is None:
+                console.print(
+                    f"[bold yellow]{config_name}: fused AdamW not available; skipping {stage_label} measurements.[/bold yellow]"
+                )
+                return StageRunResult(metrics=None, oom=False, supported=False)
+
+        try:
+            input_ids, labels = _prepare_inputs(
+                config,
+                batch_size=batch_size,
+                seq_len=seq_len,
+                device=device,
+                with_labels=requires_labels,
+            )
+        except torch.cuda.OutOfMemoryError:
+            console.print(
+                f"[bold red]{config_name}: OOM generating synthetic data for {stage_label} ({'compiled' if compile_model else 'eager'}).[/bold red]"
+            )
+            return StageRunResult(metrics=None, oom=True)
+
+        for i in range(max(warmup, 0)):
+            console.print(
+                f"[dim]{config_name}: {stage_label} warmup {i + 1}/{warmup} ({'compiled' if compile_model else 'eager'})[/dim]"
+            )
+            try:
+                if stage == INFERENCE_STAGE:
+                    _measure_inference_iteration(model, input_ids, device)
+                else:
+                    assert labels is not None
+                    _measure_training_iteration(
+                        model, input_ids, labels, device, optimizer=optimizer
+                    )
+            except torch.cuda.OutOfMemoryError:
+                console.print(
+                    f"[bold red]{config_name}: OOM during {stage_label} warmup ({'compiled' if compile_model else 'eager'}).[/bold red]"
+                )
+                return StageRunResult(metrics=None, oom=True)
+
+        records: List[Metrics] = []
+        for i in range(max(steps, 0)):
+            console.print(
+                f"[dim]{config_name}: {stage_label} step {i + 1}/{steps} ({'compiled' if compile_model else 'eager'})[/dim]"
+            )
+            try:
+                if stage == INFERENCE_STAGE:
+                    metrics = _measure_inference_iteration(model, input_ids, device)
+                else:
+                    assert labels is not None
+                    metrics = _measure_training_iteration(
+                        model, input_ids, labels, device, optimizer=optimizer
+                    )
+            except torch.cuda.OutOfMemoryError:
+                console.print(
+                    f"[bold red]{config_name}: OOM during {stage_label} measurement ({'compiled' if compile_model else 'eager'}).[/bold red]"
+                )
+                return StageRunResult(metrics=None, oom=True)
+            records.append(metrics)
+
+        aggregated = aggregate_metrics(records)
+        return StageRunResult(metrics=aggregated, oom=False)
+
+    finally:
+        if optimizer is not None:
+            del optimizer
+        del model
+        _cleanup_device_state(device)
 
 
 def benchmark_config(
@@ -402,164 +576,126 @@ def benchmark_config(
     batch_size: int,
     warmup: int,
     steps: int,
-    do_compile: bool,
-) -> Tuple[Optional[Metrics], ParamStats, bool, bool]:
-    """Benchmark a configuration, optionally using torch.compile.
+    run_compiled: bool,
+) -> Tuple[Dict[str, ScenarioMetrics], ParamStats]:
+    """Benchmark all stages for a configuration, optionally including torch.compile."""
+    param_stats: ParamStats = {"total": None, "trainable": None, "embedding": None}
 
-    Returns average metrics plus a params summary; the booleans indicate whether
-    benchmarking aborted early (OOM or torch.compile failure) and whether fused
-    AdamW optimizer measurements were gathered. When aborted is True, the
-    metrics dict will be `None`.
-    """
-    is_cuda = _is_cuda_device(device)
-    torch.manual_seed(42)
-    if is_cuda:
-        torch.cuda.manual_seed_all(42)
-
-    model: Optional[TeLlama3Model] = None
-    optimizer: Optional[Optimizer] = None
-    optimizer_available = False
-    param_stats: ParamStats = {
-        "total": None,
-        "trainable": None,
-        "embedding": None,
-    }
     try:
-        try:
-            model = TeLlama3Model(config, get_loss=None)
-        except torch.cuda.OutOfMemoryError:
-            console.print(f"[bold red]{name}: OOM while constructing the model (compile={do_compile}).[/bold red]")
-            if is_cuda:
-                torch.cuda.empty_cache()
-            return None, param_stats, True, False
-
-        param_stats["total"] = sum(p.numel() for p in model.parameters())
-        param_stats["trainable"] = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        param_stats["embedding"] = model.tok_embeddings.weight.numel()
-
-        try:
-            model = model.to(device)
-        except torch.cuda.OutOfMemoryError:
-            console.print(f"[bold red]{name}: OOM while moving model to {device}.[/bold red]")
-            return None, param_stats, True, False
-
-        if is_cuda:
-            torch.cuda.reset_peak_memory_stats(device)
-            _synchronize_cuda(device)
-
-        if do_compile:
-            console.print(f"[dim]{name}: compiling model with torch.compile...[/dim]")
-            try:
-                model.train()
-                model = _torch_compile_model(model, device)
-            except torch.cuda.OutOfMemoryError:
-                console.print(f"[bold red]{name}: OOM while compiling model.[/bold red]")
-                return None, param_stats, True, False
-            except Exception as exc:  # torch.compile surfaced a user error
-                console.print(
-                    f"[bold red]{name}: torch.compile failed ({exc.__class__.__name__}: {exc}).[/bold red]"
-                )
-                return None, param_stats, True, False
-            if is_cuda:
-                torch.cuda.reset_peak_memory_stats(device)
-                _synchronize_cuda(device)
-
-        optimizer = build_fused_adamw(model, device)
-        optimizer_available = optimizer is not None
-        if optimizer is None and is_cuda and not do_compile:
-            console.print(
-                f"[bold yellow]{name}: Fused AdamW optimizer not available; skipping optimizer-step metrics.[/bold yellow]"
-            )
-        if optimizer is not None:
-            try:
-                optimizer.zero_grad(set_to_none=True)
-            except TypeError:
-                optimizer.zero_grad()
-
-        vocab_size = config.vocab_size
-        context_length = min(seq_len, config.block_size)
-
-        try:
-            input_ids = torch.randint(
-                low=0,
-                high=vocab_size,
-                size=(batch_size, context_length),
-                device=device,
-                dtype=torch.long,
-            )
-            labels = torch.randint(
-                low=0,
-                high=vocab_size,
-                size=(batch_size, context_length),
-                device=device,
-                dtype=torch.long,
-            )
-        except torch.cuda.OutOfMemoryError:
-            console.print(f"[bold red]{name}: OOM while allocating synthetic data.[/bold red]")
-            return None, param_stats, True, optimizer_available
-
-        oom = False
-        for i in range(max(warmup, 0)):
-            console.print(f"[dim]{name}: warmup {i + 1}/{warmup}[/dim]")
-            try:
-                run_inference_forward(model, input_ids, device)
-                run_training_step(model, input_ids, labels, device)
-                if optimizer is not None:
-                    run_training_with_optimizer(model, optimizer, input_ids, labels, device)
-            except torch.cuda.OutOfMemoryError:
-                console.print(
-                    f"[bold red]{name}: OOM during warmup (compile={do_compile}).[/bold red]"
-                )
-                oom = True
-                break
-
-        records: List[Metrics] = []
-        if not oom:
-            for i in range(max(steps, 0)):
-                console.print(f"[dim]{name}: measuring {i + 1}/{steps}[/dim]")
-                adamw_metrics: Optional[Metrics] = None
-                try:
-                    inference_time, inference_memory = run_inference_forward(
-                        model, input_ids, device
-                    )
-                    training_metrics = run_training_step(model, input_ids, labels, device)
-                    if optimizer is not None:
-                        adamw_metrics = run_training_with_optimizer(
-                            model, optimizer, input_ids, labels, device
-                        )
-                except torch.cuda.OutOfMemoryError:
-                    console.print(
-                        f"[bold red]{name}: OOM during measurement (compile={do_compile}).[/bold red]"
-                    )
-                    oom = True
-                    break
-                record = {
-                    "inference_forward_time": inference_time,
-                    "inference_forward_memory": inference_memory,
-                }
-                record.update(training_metrics)
-                if adamw_metrics:
-                    record.update(adamw_metrics)
-                records.append(record)
-
-        if oom:
-            return None, param_stats, True, optimizer_available
-
-        metrics = aggregate_metrics(records)
-        return metrics, param_stats, False, optimizer_available
-
+        reference_model = TeLlama3Model(config, get_loss=_synthetic_loss)
+        param_stats["total"] = sum(p.numel() for p in reference_model.parameters())
+        param_stats["trainable"] = sum(
+            p.numel() for p in reference_model.parameters() if p.requires_grad
+        )
+        param_stats["embedding"] = reference_model.tok_embeddings.weight.numel()
+    except Exception:
+        console.print(
+            f"[bold yellow]{name}: Unable to compute parameter statistics for this configuration.[/bold yellow]"
+        )
     finally:
-        if is_cuda:
-            try:
-                _synchronize_cuda(device)
-            except (torch.cuda.CudaError, RuntimeError):
-                pass
-            torch.cuda.reset_peak_memory_stats(device)
-            torch.cuda.empty_cache()
-        if model is not None:
-            del model
-        if optimizer is not None:
-            del optimizer
+        try:
+            del reference_model
+        except UnboundLocalError:
+            pass
+        gc.collect()
+
+    stages: Dict[str, ScenarioMetrics] = {}
+    for stage in (INFERENCE_STAGE, TRAINING_STAGE, OPTIMIZER_STAGE):
+        eager_result = _run_stage_once(
+            config_name=name,
+            config=config,
+            device=device,
+            batch_size=batch_size,
+            seq_len=seq_len,
+            warmup=warmup,
+            steps=steps,
+            stage=stage,
+            compile_model=False,
+        )
+
+        if eager_result.oom and stage != OPTIMIZER_STAGE:
+            stages[stage] = ScenarioMetrics(
+                eager=None,
+                compiled=None,
+                eager_oom=True,
+                compiled_oom=False,
+                supported=True,
+            )
+            continue
+
+        if not eager_result.supported:
+            stages[stage] = ScenarioMetrics(
+                eager=None,
+                compiled=None,
+                eager_oom=eager_result.oom,
+                compiled_oom=False,
+                supported=False,
+            )
+            continue
+
+        compiled_result = StageRunResult(metrics=None, oom=False, supported=True)
+        if run_compiled and not eager_result.oom:
+            compiled_result = _run_stage_once(
+                config_name=name,
+                config=config,
+                device=device,
+                batch_size=batch_size,
+                seq_len=seq_len,
+                warmup=max(warmup, 1),
+                steps=steps,
+                stage=stage,
+                compile_model=True,
+            )
+
+        stages[stage] = ScenarioMetrics(
+            eager=eager_result.metrics,
+            compiled=compiled_result.metrics if run_compiled else None,
+            eager_oom=eager_result.oom,
+            compiled_oom=compiled_result.oom if run_compiled else False,
+            supported=eager_result.supported and (compiled_result.supported or not run_compiled),
+        )
+
+    return stages, param_stats
+
+
+SCENARIO_SPECS = {
+    INFERENCE_STAGE: {
+        "label": "Inference",
+        "color": "cyan",
+        "time_rows": [("Forward ms", "forward_time")],
+        "memory_rows": [("Forward MB", "forward_memory")],
+    },
+    TRAINING_STAGE: {
+        "label": "Training (Grad)",
+        "color": "magenta",
+        "time_rows": [
+            ("Forward ms", "forward_time"),
+            ("Backward ms", "backward_time"),
+            ("Iteration ms", "iteration_time"),
+        ],
+        "memory_rows": [
+            ("Forward MB", "forward_memory"),
+            ("Backward MB", "backward_memory"),
+            ("Iteration MB", "iteration_memory"),
+        ],
+    },
+    OPTIMIZER_STAGE: {
+        "label": "Training + AdamW",
+        "color": "green",
+        "time_rows": [
+            ("Forward ms", "forward_time"),
+            ("Backward ms", "backward_time"),
+            ("Optimizer Step ms", "optimizer_step_time"),
+            ("Iteration ms", "iteration_time"),
+        ],
+        "memory_rows": [
+            ("Forward MB", "forward_memory"),
+            ("Backward MB", "backward_memory"),
+            ("Optimizer Step MB", "optimizer_step_memory"),
+            ("Iteration MB", "iteration_memory"),
+        ],
+    },
+}
 
 
 def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -> None:
@@ -569,10 +705,6 @@ def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -
         return
 
     device_is_cuda = _is_cuda_device(device)
-    add_compile_rows = any(
-        summary.compiled_metrics is not None or summary.compiled_oom for summary in results
-    )
-
     table = Table(title="TeLlama3 Benchmark Summary", expand=True, show_lines=True)
     table.add_column("Metric", justify="left", style="bold")
     for summary in results:
@@ -596,58 +728,54 @@ def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -
 
         return _formatter
 
-    def fmt_bool(field: str) -> Callable[[BenchmarkSummary], str]:
+    def fmt_stage_supported(stage: str) -> Callable[[BenchmarkSummary], str]:
         def _formatter(summary: BenchmarkSummary) -> str:
-            return "[green]Yes[/]" if getattr(summary, field) else "[dim]No[/dim]"
+            stage_metrics = summary.stages.get(stage)
+            if not stage_metrics or not stage_metrics.supported:
+                return "[dim]No[/dim]"
+            if (
+                stage_metrics.eager is None
+                and stage_metrics.eager_oom
+                and not scenario_has_compiled(stage)
+            ):
+                return "[bold red]OOM[/bold red]"
+            return "[green]Yes[/green]"
 
         return _formatter
 
-    def fmt_time(key: str, metrics_type: str) -> Callable[[BenchmarkSummary], str]:
-        def _formatter(summary: BenchmarkSummary) -> str:
-            metrics = summary.eager_metrics if metrics_type == "eager" else summary.compiled_metrics
-            oom = summary.eager_oom if metrics_type == "eager" else summary.compiled_oom
-            if oom:
-                return "OOM"
-            if not metrics or key not in metrics:
-                return "n/a"
-            value = metrics[key]
-            if value is None or (isinstance(value, float) and math.isnan(value)):
-                return "n/a"
-            return f"{value * 1e3:,.2f}"
-
-        return _formatter
-
-    def fmt_mem(key: str, metrics_type: str) -> Callable[[BenchmarkSummary], str]:
-        def _formatter(summary: BenchmarkSummary) -> str:
-            metrics = summary.eager_metrics if metrics_type == "eager" else summary.compiled_metrics
-            oom = summary.eager_oom if metrics_type == "eager" else summary.compiled_oom
-            if oom:
-                return "OOM"
-            if not metrics or key not in metrics:
-                return "n/a"
-            value = metrics[key]
-            if value is None or (isinstance(value, float) and math.isnan(value)):
-                return "n/a"
-            return f"{format_bytes_as_mb(value):,.2f}"
-
-        return _formatter
-
-    def add_scenario(
-        label: str,
-        color: str,
-        time_rows: List[Tuple[str, str, str]],
-        memory_rows: List[Tuple[str, str, str]],
-    ) -> None:
-        add_group_header(label, color)
-        for row_label, key, metrics_type in time_rows:
-            if metrics_type == "compiled" and not add_compile_rows:
+    def scenario_has_compiled(stage: str) -> bool:
+        for summary in results:
+            stage_metrics = summary.stages.get(stage)
+            if not stage_metrics:
                 continue
-            add_row(row_label, fmt_time(key, metrics_type))
-        if device_is_cuda:
-            for row_label, key, metrics_type in memory_rows:
-                if metrics_type == "compiled" and not add_compile_rows:
-                    continue
-                add_row(row_label, fmt_mem(key, metrics_type))
+            if stage_metrics.compiled is not None or stage_metrics.compiled_oom:
+                return True
+        return False
+
+    def extract_metric(summary: BenchmarkSummary, stage: str, mode: str, key: str) -> str:
+        stage_metrics = summary.stages.get(stage)
+        if not stage_metrics or not stage_metrics.supported:
+            return "n/a"
+        metrics = stage_metrics.eager if mode == "eager" else stage_metrics.compiled
+        oom = stage_metrics.eager_oom if mode == "eager" else stage_metrics.compiled_oom
+        if mode == "compiled" and not scenario_has_compiled(stage):
+            return "n/a"
+        if oom:
+            return "OOM"
+        if not metrics or key not in metrics:
+            return "n/a"
+        value = metrics[key]
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            return "n/a"
+        if key.endswith("_time"):
+            return f"{value * 1e3:,.2f}"
+        if key.endswith("_memory"):
+            return (
+                f"{format_bytes_as_mb(value):,.2f}"
+                if device_is_cuda
+                else "n/a"
+            )
+        return f"{value:,.4f}"
 
     add_group_header("Configuration", "bright_blue")
     add_row("n_embd", fmt_config("n_embd"))
@@ -657,71 +785,122 @@ def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -
     add_row("block_size", fmt_config("block_size"))
     add_row("vocab_size", fmt_config("vocab_size"))
     add_row("Batch Size", lambda summary: str(summary.batch_size))
-    add_row("Fused AdamW", fmt_bool("adamw_supported"))
+    add_row("Fused AdamW", fmt_stage_supported(OPTIMIZER_STAGE))
 
     add_group_header("Parameter Counts", "bright_blue")
     add_row("Embedding Params (M)", fmt_params("embedding"))
     add_row("Trainable Params (M)", fmt_params("trainable"))
     add_row("Total Params (M)", fmt_params("total"))
 
-    add_scenario(
-        "Inference",
-        "cyan",
-        [
-            ("Forward ms (eager)", "inference_forward_time", "eager"),
-            ("Forward ms (compiled)", "inference_forward_time", "compiled"),
-        ],
-        [
-            ("Forward MB (eager)", "inference_forward_memory", "eager"),
-            ("Forward MB (compiled)", "inference_forward_memory", "compiled"),
-        ],
-    )
+    for stage, spec in SCENARIO_SPECS.items():
+        add_group_header(spec["label"], spec["color"])
+        add_row(
+            "Supported",
+            fmt_stage_supported(stage),
+        )
 
-    add_scenario(
-        "Training (Grad)",
-        "magenta",
-        [
-            ("Forward ms (eager)", "training_forward_time", "eager"),
-            ("Backward ms (eager)", "training_backward_time", "eager"),
-            ("Iteration ms (eager)", "training_step_time", "eager"),
-            ("Forward ms (compiled)", "training_forward_time", "compiled"),
-            ("Backward ms (compiled)", "training_backward_time", "compiled"),
-            ("Iteration ms (compiled)", "training_step_time", "compiled"),
-        ],
-        [
-            ("Forward MB (eager)", "training_forward_memory", "eager"),
-            ("Backward MB (eager)", "training_backward_memory", "eager"),
-            ("Iteration MB (eager)", "training_step_memory", "eager"),
-            ("Forward MB (compiled)", "training_forward_memory", "compiled"),
-            ("Backward MB (compiled)", "training_backward_memory", "compiled"),
-            ("Iteration MB (compiled)", "training_step_memory", "compiled"),
-        ],
-    )
+        compiled_available = scenario_has_compiled(stage)
 
-    add_scenario(
-        "Training + AdamW",
-        "green",
-        [
-            ("Forward ms (eager)", "adamw_forward_time", "eager"),
-            ("Backward ms (eager)", "adamw_backward_time", "eager"),
-            ("Optimizer Step ms (eager)", "adamw_step_time", "eager"),
-            ("Iteration ms (eager)", "adamw_iteration_time", "eager"),
-            ("Forward ms (compiled)", "adamw_forward_time", "compiled"),
-            ("Backward ms (compiled)", "adamw_backward_time", "compiled"),
-            ("Optimizer Step ms (compiled)", "adamw_step_time", "compiled"),
-            ("Iteration ms (compiled)", "adamw_iteration_time", "compiled"),
-        ],
-        [
-            ("Forward MB (eager)", "adamw_forward_memory", "eager"),
-            ("Backward MB (eager)", "adamw_backward_memory", "eager"),
-            ("Optimizer Step MB (eager)", "adamw_step_memory", "eager"),
-            ("Iteration MB (eager)", "adamw_iteration_memory", "eager"),
-            ("Forward MB (compiled)", "adamw_forward_memory", "compiled"),
-            ("Backward MB (compiled)", "adamw_backward_memory", "compiled"),
-            ("Optimizer Step MB (compiled)", "adamw_step_memory", "compiled"),
-            ("Iteration MB (compiled)", "adamw_iteration_memory", "compiled"),
-        ],
-    )
+        add_row(
+            "Forward ms (eager)",
+            lambda summary, stage=stage: extract_metric(summary, stage, "eager", "forward_time"),
+        )
+        if compiled_available:
+            add_row(
+                "Forward ms (compiled)",
+                lambda summary, stage=stage: extract_metric(summary, stage, "compiled", "forward_time"),
+            )
+
+        if stage != INFERENCE_STAGE:
+            add_row(
+                "Backward ms (eager)",
+                lambda summary, stage=stage: extract_metric(summary, stage, "eager", "backward_time"),
+            )
+            if compiled_available:
+                add_row(
+                    "Backward ms (compiled)",
+                    lambda summary, stage=stage: extract_metric(summary, stage, "compiled", "backward_time"),
+                )
+
+        if stage == OPTIMIZER_STAGE:
+            add_row(
+                "Optimizer Step ms (eager)",
+                lambda summary, stage=stage: extract_metric(
+                    summary, stage, "eager", "optimizer_step_time"
+                ),
+            )
+            if compiled_available:
+                add_row(
+                    "Optimizer Step ms (compiled)",
+                    lambda summary, stage=stage: extract_metric(
+                        summary, stage, "compiled", "optimizer_step_time"
+                    ),
+                )
+
+        if stage != INFERENCE_STAGE:
+            add_row(
+                "Iteration ms (eager)",
+                lambda summary, stage=stage: extract_metric(summary, stage, "eager", "iteration_time"),
+            )
+            if compiled_available:
+                add_row(
+                    "Iteration ms (compiled)",
+                    lambda summary, stage=stage: extract_metric(
+                        summary, stage, "compiled", "iteration_time"
+                    ),
+                )
+
+        if device_is_cuda:
+            add_row(
+                "Forward MB (eager)",
+                lambda summary, stage=stage: extract_metric(summary, stage, "eager", "forward_memory"),
+            )
+            if compiled_available:
+                add_row(
+                    "Forward MB (compiled)",
+                    lambda summary, stage=stage: extract_metric(summary, stage, "compiled", "forward_memory"),
+                )
+
+            if stage != INFERENCE_STAGE:
+                add_row(
+                    "Backward MB (eager)",
+                    lambda summary, stage=stage: extract_metric(summary, stage, "eager", "backward_memory"),
+                )
+                if compiled_available:
+                    add_row(
+                        "Backward MB (compiled)",
+                        lambda summary, stage=stage: extract_metric(summary, stage, "compiled", "backward_memory"),
+                    )
+
+            if stage == OPTIMIZER_STAGE:
+                add_row(
+                    "Optimizer Step MB (eager)",
+                    lambda summary, stage=stage: extract_metric(
+                        summary, stage, "eager", "optimizer_step_memory"
+                    ),
+                )
+                if compiled_available:
+                    add_row(
+                        "Optimizer Step MB (compiled)",
+                        lambda summary, stage=stage: extract_metric(
+                            summary, stage, "compiled", "optimizer_step_memory"
+                        ),
+                    )
+
+            if stage != INFERENCE_STAGE:
+                add_row(
+                    "Iteration MB (eager)",
+                    lambda summary, stage=stage: extract_metric(
+                        summary, stage, "eager", "iteration_memory"
+                    ),
+                )
+                if compiled_available:
+                    add_row(
+                        "Iteration MB (compiled)",
+                        lambda summary, stage=stage: extract_metric(
+                            summary, stage, "compiled", "iteration_memory"
+                        ),
+                    )
 
     console.print(table)
 
@@ -737,7 +916,7 @@ def parse_args() -> argparse.Namespace:
         default=512,
         help="Sequence length for synthetic data (capped at config block_size).",
     )
-    parser.add_argument("--warmup", type=int, default=1, help="Number of warmup iterations.")
+    parser.add_argument("--warmup", type=int, default=2, help="Number of warmup iterations.")
     parser.add_argument("--steps", type=int, default=1, help="Number of timed iterations.")
     parser.add_argument(
         "--no-compile",
@@ -811,8 +990,8 @@ def main() -> None:
             torch.cuda.reset_peak_memory_stats(device)
             _synchronize_cuda(device)
 
-        console.print(f"[cyan]Running eager benchmark for {name}[/cyan]")
-        eager_metrics, param_stats, eager_oom, eager_adamw = benchmark_config(
+        console.print(f"[cyan]Benchmarking {name}[/cyan]")
+        stages, param_stats = benchmark_config(
             name=name,
             config=config,
             device=device,
@@ -820,37 +999,15 @@ def main() -> None:
             batch_size=args.batch_size,
             warmup=args.warmup,
             steps=args.steps,
-            do_compile=False,
+            run_compiled=run_compiled,
         )
-        compiled_metrics = None
-        compiled_oom = False
-        compiled_adamw = False
-        if run_compiled:
-            console.print(f"[cyan]Running compiled benchmark for {name}[/cyan]")
-            compiled_metrics, _, compiled_oom, compiled_adamw = benchmark_config(
-                name=name,
-                config=config,
-                device=device,
-                seq_len=args.seq_length,
-                batch_size=args.batch_size,
-                warmup=max(args.warmup, 1),
-                steps=args.steps,
-                do_compile=True,
-            )
-
-        adamw_supported = eager_adamw or compiled_adamw
-
         summaries.append(
             BenchmarkSummary(
                 name=name,
                 config=config,
                 param_stats=param_stats,
-                eager_metrics=eager_metrics,
-                compiled_metrics=compiled_metrics,
+                stages=stages,
                 batch_size=args.batch_size,
-                eager_oom=eager_oom,
-                compiled_oom=compiled_oom,
-                adamw_supported=adamw_supported,
             )
         )
 

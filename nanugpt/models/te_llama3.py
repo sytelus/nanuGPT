@@ -224,7 +224,10 @@ class TeLlama3Model(nn.Module):
             x = x + ln_bias
 
         # Final projection using the same TE weight so parameters stay tied/updated correctly.
-        logits = F.linear(x, self.lm_head.weight, getattr(self.lm_head, "bias", None))
+        bias = getattr(self.lm_head, "bias", None)
+        if isinstance(bias, torch.Tensor) and bias.numel() == 0:
+            bias = None
+        logits = F.linear(x, self.lm_head.weight, bias)
         return logits
 
     def forward(self,
