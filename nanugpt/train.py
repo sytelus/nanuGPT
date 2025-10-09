@@ -238,9 +238,11 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
             n_samples = len(x)
             step_sample_count += n_samples
             step_token_count += x.numel()
-
+            # is_first_microbatch is used in TransformerEngine models for perf optimization
+            is_first_microbatch = (micro_step == 0) if grad_acc_steps > 1 else None
             with amp_ctx:
-                _, loss, correct = model(x, y, return_logits=False)
+                _, loss, correct = model(x, labels=y, return_logits=False,
+                                         is_first_microbatch=is_first_microbatch)
                 # Accumulate on device; detach to avoid tracking grads
                 loss_sum_t += loss.detach() * n_samples
                 correct_sum += correct

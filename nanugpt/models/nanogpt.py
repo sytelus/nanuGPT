@@ -88,7 +88,8 @@ class CausalSelfAttention(nn.Module):
             self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
                                         .view(1, 1, config.block_size, config.block_size))
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor, *,
+                attention_mask: Optional[torch.Tensor] = None,):
         batch_size, seq_len, n_embd = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
@@ -192,9 +193,6 @@ class GPT(nn.Module):
 
     def __init__(self, config:GPTConfig, get_loss: Optional[common.GetLossType]):
         super().__init__()
-        assert config.vocab_size is not None
-        assert config.block_size is not None # seq_len
-
         self.config = config
         self.get_loss = get_loss
 
@@ -217,7 +215,8 @@ class GPT(nn.Module):
         # "UserWarning: functional_call was passed multiple values for tied weights.
         # This behavior is deprecated and will be an error in future versions"
         # not 100% sure what this is, so far seems to be harmless. TODO investigate
-        self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
+        # https://paperswithcode.com/method/weight-tying
+        self.transformer.wte.weight = self.lm_head.weight # type: ignore
 
         # init all weights, use a torch rng object to be very careful
         self.init_rng = torch.Generator()
@@ -255,7 +254,9 @@ class GPT(nn.Module):
                 labels: Optional[torch.Tensor] = None,
                 return_logits: bool = True,
                 only_last=False,
-    )-> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[int]]: # logits, loss, num_correct
+                attention_mask: Optional[torch.Tensor] = None,
+                is_first_microbatch: Optional[bool]=None,
+    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[int]]:  # logits, loss, num_correct
 
         device = idx.device
         batch_size, seq_len = idx.size()
@@ -265,17 +266,17 @@ class GPT(nn.Module):
         pos = torch.arange(0, seq_len, dtype=torch.long, device=device) # shape (seq_len)
 
         # forward the GPT model itself
-        tok_emb = self.transformer.wte(idx) # token embeddings of shape (batch_size, seq_len, n_embd)
-        pos_emb = self.transformer.wpe(pos) # position embeddings of shape (seq_len, n_embd)
+        tok_emb = self.transformer.wte(idx) # type: ignore # token embeddings of shape (batch_size, seq_len, n_embd)
+        pos_emb = self.transformer.wpe(pos) # type: ignore # position embeddings of shape (seq_len, n_embd)
         if self.config.embed_dropout:
-            x = self.transformer.embed_dropout(tok_emb + pos_emb)
+            x = self.transformer.embed_dropout(tok_emb + pos_emb) # type: ignore
         else:
             x = tok_emb + pos_emb
-        for block in self.transformer.h:
-            x = block(x)
+        for block in self.transformer.h: # type: ignore
+            x = block(x, attention_mask=attention_mask) # (batch_size, seq_len, n_embd)
 
         # apply layer norm. Typically layer norm is applied before and after attention but not after MLP.
-        x = self.transformer.ln_f(x) # [batch, seq_len, emb_dim]
+        x = self.transformer.ln_f(x) # type:ignore # [batch, seq_len, emb_dim]
 
         if not only_last:
             logits:torch.Tensor = self.lm_head(x) # [batch, seq_len, vocab_size]
