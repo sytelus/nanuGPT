@@ -453,9 +453,19 @@ def _run_stage_once(
     stage_label = _stage_label(stage)
 
     try:
-        model = TeLlama3Model(
-            config,
+        model = te_llama3.get_model(
+            vocab_size=config.vocab_size,
             get_loss=_synthetic_loss if requires_labels else None,
+            n_layer=config.n_layer,
+            n_embd=config.n_embd,
+            n_head=config.n_head,
+            context_length=config.block_size,
+            n_kv_heads=config.n_kv_heads,
+            ffn_dim_multiplier=config.ffn_dim_multiplier,
+            swiglu_multiple_of=config.swiglu_multiple_of,
+            rope_theta=config.rope_theta,
+            rms_norm_eps=config.rms_norm_eps,
+            initializer_range=config.initializer_range,
         )
     except torch.cuda.OutOfMemoryError:
         console.print(
@@ -582,7 +592,20 @@ def benchmark_config(
     param_stats: ParamStats = {"total": None, "trainable": None, "embedding": None}
 
     try:
-        reference_model = TeLlama3Model(config, get_loss=_synthetic_loss)
+        reference_model = te_llama3.get_model(
+            vocab_size=config.vocab_size,
+            get_loss=_synthetic_loss,
+            n_layer=config.n_layer,
+            n_embd=config.n_embd,
+            n_head=config.n_head,
+            context_length=config.block_size,
+            n_kv_heads=config.n_kv_heads,
+            ffn_dim_multiplier=config.ffn_dim_multiplier,
+            swiglu_multiple_of=config.swiglu_multiple_of,
+            rope_theta=config.rope_theta,
+            rms_norm_eps=config.rms_norm_eps,
+            initializer_range=config.initializer_range,
+        )
         param_stats["total"] = sum(p.numel() for p in reference_model.parameters())
         param_stats["trainable"] = sum(
             p.numel() for p in reference_model.parameters() if p.requires_grad

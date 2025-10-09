@@ -42,6 +42,28 @@ class GPTConfig:
     embed_dropout: float = 0.0
     initializer_range: float = 0.02
 
+# GPT-2 124M-like config
+CONFIG_124M = GPTConfig(
+    n_embd=768,
+    n_layer=12,
+    n_head=12,
+)
+
+# GPT-2 355M-like config
+CONFIG_345M = GPTConfig(
+    n_embd=1024,
+    n_layer=24,
+    n_head=16,
+)
+
+# GPT-3 1.3B-like config
+CONFIG_1p3B = GPTConfig(
+    n_embd=2048,
+    n_layer=24,
+    n_head=16,
+    block_size=2048,
+)
+
 class LayerNorm(nn.Module):
     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
 
