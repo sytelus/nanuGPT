@@ -74,18 +74,38 @@ class LlamaConfig:
     # ffn_dim is 14336 for llama3-8b, 11008 for llama-2-7b
     initializer_range: float = 0.023 # 0.02 in HF, 0.023 in TE
 
-CONFIG_322M = LlamaConfig(
-    n_embd=1024,
-    n_layer=4,
-    n_head=8,
+# GPT-2 124M-like config
+CONFIG_124M = LlamaConfig(
+    n_embd=768,
+    n_layer=12,
+    n_head=12,
+    n_kv_heads=12,
+    block_size=1024,
+    vocab_size=50304,
     swiglu_multiple_of=256,
     ffn_dim_multiplier=1.3,
 )
 
-CONFIG_627M = LlamaConfig(
+# GPT-2 355M-like config
+CONFIG_345M = LlamaConfig(
     n_embd=1024,
     n_layer=24,
-    n_head=8,
+    n_head=16,
+    n_kv_heads=16,
+    block_size=1024,
+    vocab_size=50304,
+    swiglu_multiple_of=256,
+    ffn_dim_multiplier=1.3,
+)
+
+# GPT-3 1.3B-like config
+CONFIG_1p3B = LlamaConfig(
+    n_embd=2048,
+    n_layer=24,
+    n_head=16,
+    n_kv_heads=16,
+    block_size=2048,
+    vocab_size=50304,
     swiglu_multiple_of=256,
     ffn_dim_multiplier=1.3,
 )
