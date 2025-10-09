@@ -130,7 +130,7 @@ echo "UPDATE_PYTHONPATH: ${UPDATE_PYTHONPATH:-<not set>}"
 # some clusters may need additional env vars in which case specify script that sets them
 if [ ! -z "${ENV_SETUP_SCRIPT}" ]; then
     # copy to job out dir so its available in the container
-    cp "${ENV_SETUP_SCRIPT}" "${LOCAL_JOB_OUT_DIR}/env_setup.sh"
+    cp "${ENV_SETUP_SCRIPT}" "${LOCAL_JOB_OUT_DIR}/job_env_setup.sh"
 fi
 
 # We wll also install package requirements from this directory
