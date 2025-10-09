@@ -245,10 +245,14 @@ class TeLlama3Model(nn.Module):
         # If labels are provided, compute the head in torch so torch.compile can fuse Linear+CE.
         # Otherwise, keep using TE's fused head for inference throughput.
         if labels is not None:
+            # we can use _torch_lm_head that will fuse RMSNorm + Linear + CE loss
+            # howver it doesn't show any perf improvement so we are just using
+            # TE's lm_head
+            head_to_use = self.lm_head
             if not only_last:
-                logits:torch.Tensor = self._torch_lm_head(x) # [batch, seq_len, vocab_size]
+                logits:torch.Tensor = head_to_use(x) # [batch, seq_len, vocab_size]
             else:
-                logits:torch.Tensor = self._torch_lm_head(x[:, [-1], :]) # [batch, 1, vocab_size]
+                logits:torch.Tensor = head_to_use(x[:, [-1], :]) # [batch, 1, vocab_size]
 
             assert self.get_loss is not None, "Loss function is not defined"
             loss, correct = self.get_loss(logits, labels)
