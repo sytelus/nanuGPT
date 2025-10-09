@@ -4,16 +4,17 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import math
 import statistics
-import time
-from dataclasses import asdict
-from typing import Dict, Iterable, List, Optional, Tuple
 import sys
+import time
+import warnings
+from dataclasses import dataclass
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import torch
 from rich.console import Console
-from rich.panel import Panel
 from rich.table import Table
 
 from nanugpt.models import te_llama3
@@ -21,6 +22,15 @@ from nanugpt.models.te_llama3 import LlamaConfig, TeLlama3Model
 
 
 console = Console()
+
+
+@dataclass
+class BenchmarkSummary:
+    name: str
+    config: LlamaConfig
+    param_stats: Dict[str, int]
+    eager_metrics: Dict[str, float]
+    compiled_metrics: Optional[Dict[str, float]]
 
 
 def _active_debugger_name() -> Optional[str]:
@@ -68,6 +78,7 @@ def _torch_compile_model(
         dynamo_module.config.use_cudagraphs = False
 
     try:
+        _configure_compile_environment()
         return torch.compile(model, mode="reduce-overhead", dynamic=True)
     except TypeError as exc:
         if "unhashable type: 'dict'" in str(exc):
@@ -79,6 +90,32 @@ def _torch_compile_model(
     finally:
         if dynamo_module and original_cudagraphs is not None:
             dynamo_module.config.use_cudagraphs = original_cudagraphs
+
+
+_SUPPRESSED_WARNINGS = False
+
+
+def _configure_compile_environment() -> None:
+    global _SUPPRESSED_WARNINGS
+    if _SUPPRESSED_WARNINGS:
+        return
+
+    warning_patterns = [
+        r"Dynamo detected a call to a `functools\.lru_cache`-wrapped function",
+        r"Dynamo does not know how to trace the builtin `<unknown module>\.ArgsKwargs\.__new__`",
+        r"Dynamo does not know how to trace the builtin `transformer_engine_torch\.PyCapsule\.fused_rope_forward`",
+        r"The CUDA Graph is empty\.",
+    ]
+    for pattern in warning_patterns:
+        warnings.filterwarnings("ignore", message=pattern, category=UserWarning)
+
+    logging.getLogger("torch.fx.experimental.symbolic_shapes").setLevel(logging.ERROR)
+
+    console.print(
+        "[bold yellow]Suppressing known torch.compile warnings. Use --no-compile to skip compilation entirely.[/bold yellow]"
+    )
+
+    _SUPPRESSED_WARNINGS = True
 
 
 def discover_configs(prefix: str = "TE_") -> Dict[str, LlamaConfig]:
@@ -170,12 +207,19 @@ def benchmark_config(
     warmup: int,
     steps: int,
     do_compile: bool,
-) -> Tuple[Dict[str, float], int]:
+) -> Tuple[Dict[str, float], Dict[str, int]]:
     """Benchmark a configuration, optionally using torch.compile."""
     torch.manual_seed(42)
 
     model = TeLlama3Model(config, get_loss=None)
-    param_count = sum(p.numel() for p in model.parameters())
+    param_total = sum(p.numel() for p in model.parameters())
+    param_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    embedding_params = model.tok_embeddings.weight.numel()
+    param_stats = {
+        "total": param_total,
+        "trainable": param_trainable,
+        "embedding": embedding_params,
+    }
     model = model.to(device)
 
     if do_compile:
@@ -218,57 +262,77 @@ def benchmark_config(
                 }
             )
 
-    return aggregate_metrics(records), param_count
+    return aggregate_metrics(records), param_stats
 
 
-def make_config_panel(name: str, config: LlamaConfig, param_count: int) -> Panel:
-    config_table = Table(show_header=False, expand=True)
-    for key, value in asdict(config).items():
-        config_table.add_row(f"[bold]{key}[/bold]", str(value))
+def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -> None:
+    if not results:
+        console.print("[bold red]No benchmark results to display.[/bold red]")
+        return
 
-    config_table.add_row("[bold]parameters[/bold]", f"{param_count:,} ({param_count/1e6:.2f}M)")
-    return Panel(config_table, title=name, subtitle="core configuration", expand=False)
+    table = Table(title="TeLlama3 Benchmark Summary", expand=True)
+    table.add_column("Metric", justify="left", style="bold")
+    for summary in results:
+        table.add_column(summary.name, justify="right")
 
+    def add_row(label: str, extractor: Callable[[BenchmarkSummary], str]) -> None:
+        table.add_row(label, *[extractor(summary) for summary in results])
 
-def print_results(
-    name: str,
-    config: LlamaConfig,
-    eager_metrics: Dict[str, float],
-    compiled_metrics: Dict[str, float] | None,
-    device: torch.device,
-    param_count: int,
-):
-    console.print()
-    console.print(make_config_panel(name, config, param_count))
+    def fmt_config(attr: str) -> Callable[[BenchmarkSummary], str]:
+        return lambda summary: str(getattr(summary.config, attr))
 
-    table = Table(title=f"{name} performance", expand=True)
-    table.add_column("Mode", justify="center", style="cyan")
-    table.add_column("Avg Fwd (ms)", justify="right")
-    table.add_column("Avg Bwd (ms)", justify="right")
-    table.add_column("Fwd Mem (MB)", justify="right")
-    table.add_column("Bwd Mem (MB)", justify="right")
+    def fmt_params(key: str) -> Callable[[BenchmarkSummary], str]:
+        return lambda summary: f"{summary.param_stats[key] / 1e6:.2f}M"
 
-    def add_row(mode_name: str, metrics: Dict[str, float]):
-        forward_ms = metrics["forward_time"] * 1e3
-        backward_ms = metrics["backward_time"] * 1e3
-        if device.type == "cuda":
-            fwd_mem = format_bytes_as_mb(metrics["forward_memory"])
-            bwd_mem = format_bytes_as_mb(metrics["backward_memory"])
-        else:
-            fwd_mem = bwd_mem = float("nan")
-        fwd_display = "n/a" if math.isnan(fwd_mem) else f"{fwd_mem:8.2f}"
-        bwd_display = "n/a" if math.isnan(bwd_mem) else f"{bwd_mem:8.2f}"
-        table.add_row(
-            mode_name,
-            f"{forward_ms:8.2f}",
-            f"{backward_ms:8.2f}",
-            fwd_display,
-            bwd_display,
-        )
+    def fmt_time(key: str, metrics_type: str) -> Callable[[BenchmarkSummary], str]:
+        def _formatter(summary: BenchmarkSummary) -> str:
+            metrics = summary.eager_metrics if metrics_type == "eager" else summary.compiled_metrics
+            if not metrics or key not in metrics:
+                return "n/a"
+            value = metrics[key]
+            if value is None or math.isnan(value):
+                return "n/a"
+            return f"{value * 1e3:,.2f}"
 
-    add_row("eager", eager_metrics)
-    if compiled_metrics is not None:
-        add_row("compiled", compiled_metrics)
+        return _formatter
+
+    add_row("n_embd", fmt_config("n_embd"))
+    add_row("n_layer", fmt_config("n_layer"))
+    add_row("n_head", fmt_config("n_head"))
+    add_row("n_kv_heads", fmt_config("n_kv_heads"))
+    add_row("block_size", fmt_config("block_size"))
+    add_row("vocab_size", fmt_config("vocab_size"))
+
+    add_row("Embedding Params (M)", fmt_params("embedding"))
+    add_row("Trainable Params (M)", fmt_params("trainable"))
+    add_row("Total Params (M)", fmt_params("total"))
+
+    add_row("Forward ms (eager)", fmt_time("forward_time", "eager"))
+    add_row("Backward ms (eager)", fmt_time("backward_time", "eager"))
+
+    add_compile_rows = any(summary.compiled_metrics is not None for summary in results)
+    if add_compile_rows:
+        add_row("Forward ms (compiled)", fmt_time("forward_time", "compiled"))
+        add_row("Backward ms (compiled)", fmt_time("backward_time", "compiled"))
+
+    if device.type == "cuda":
+        def fmt_mem(key: str, metrics_type: str) -> Callable[[BenchmarkSummary], str]:
+            def _formatter(summary: BenchmarkSummary) -> str:
+                metrics = summary.eager_metrics if metrics_type == "eager" else summary.compiled_metrics
+                if not metrics or key not in metrics:
+                    return "n/a"
+                value = metrics[key]
+                if value is None or math.isnan(value):
+                    return "n/a"
+                return f"{format_bytes_as_mb(value):,.2f}"
+
+            return _formatter
+
+        add_row("Forward MB (eager)", fmt_mem("forward_memory", "eager"))
+        add_row("Backward MB (eager)", fmt_mem("backward_memory", "eager"))
+        if add_compile_rows:
+            add_row("Forward MB (compiled)", fmt_mem("forward_memory", "compiled"))
+            add_row("Backward MB (compiled)", fmt_mem("backward_memory", "compiled"))
 
     console.print(table)
 
@@ -331,9 +395,11 @@ def main() -> None:
         console.print("[bold red]No TE_ prefixed LlamaConfig found in te_llama3.[/bold red]")
         return
 
+    summaries: List[BenchmarkSummary] = []
+
     for name, config in configs.items():
         try:
-            eager_metrics, param_count = benchmark_config(
+            eager_metrics, param_stats = benchmark_config(
                 name=name,
                 config=config,
                 device=device,
@@ -364,17 +430,20 @@ def main() -> None:
                 console.print(f"[bold yellow]Skipping compile benchmark for {name}: {exc}[/bold yellow]")
                 compiled_metrics = None
 
-        print_results(
-            name=name,
-            config=config,
-            eager_metrics=eager_metrics,
-            compiled_metrics=compiled_metrics,
-            device=device,
-            param_count=param_count,
+        summaries.append(
+            BenchmarkSummary(
+                name=name,
+                config=config,
+                param_stats=param_stats,
+                eager_metrics=eager_metrics,
+                compiled_metrics=compiled_metrics,
+            )
         )
 
         if device.type == "cuda":
             torch.cuda.empty_cache()
+
+    print_summary_table(summaries, device)
 
 
 if __name__ == "__main__":
