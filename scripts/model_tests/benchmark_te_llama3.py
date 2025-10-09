@@ -8,7 +8,8 @@ import math
 import statistics
 import time
 from dataclasses import asdict
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
+import sys
 
 import torch
 from rich.console import Console
@@ -20,6 +21,64 @@ from nanugpt.models.te_llama3 import LlamaConfig, TeLlama3Model
 
 
 console = Console()
+
+
+def _active_debugger_name() -> Optional[str]:
+    """Return name of active debugger trace if any."""
+    gettrace = getattr(sys, "gettrace", None)
+    if gettrace is None:
+        return None
+    trace = gettrace()
+    if trace is None:
+        return None
+    module = getattr(trace, "__module__", "")
+    qualname = getattr(trace, "__qualname__", getattr(trace, "__name__", ""))
+    identifier = ".".join(filter(None, [module, qualname])).strip(".")
+    return identifier or repr(trace)
+
+
+def _torch_compile_model(
+    model: TeLlama3Model,
+    device: torch.device,
+) -> TeLlama3Model:
+    debugger = _active_debugger_name()
+    if debugger:
+        console.print(
+            f"[bold yellow]torch.compile is disabled while debugger '{debugger}' is active. "
+            "Rerun without the debugger or pass --no-compile.[/bold yellow]"
+        )
+        raise RuntimeError(
+            f"torch.compile is not supported while a debugger trace ({debugger}) is active. "
+            "Rerun without the debugger or pass --no-compile."
+        )
+    if device.type != "cuda":
+        raise RuntimeError(
+            "torch.compile() with Transformer Engine layers currently requires a CUDA device."
+        )
+
+    dynamo_module = None
+    original_cudagraphs: Optional[bool] = None
+    try:
+        import torch._dynamo as dynamo_module  # type: ignore[attr-defined]
+    except Exception:
+        dynamo_module = None
+
+    if dynamo_module and hasattr(dynamo_module.config, "use_cudagraphs"):
+        original_cudagraphs = dynamo_module.config.use_cudagraphs
+        dynamo_module.config.use_cudagraphs = False
+
+    try:
+        return torch.compile(model, mode="reduce-overhead", dynamic=True)
+    except TypeError as exc:
+        if "unhashable type: 'dict'" in str(exc):
+            raise RuntimeError(
+                "torch.compile triggered PyDevd 'unhashable dict' failures. "
+                "Run the benchmark outside the debugger or use --no-compile."
+            ) from exc
+        raise
+    finally:
+        if dynamo_module and original_cudagraphs is not None:
+            dynamo_module.config.use_cudagraphs = original_cudagraphs
 
 
 def discover_configs(prefix: str = "TE_") -> Dict[str, LlamaConfig]:
@@ -122,7 +181,7 @@ def benchmark_config(
     if do_compile:
         if not hasattr(torch, "compile"):
             raise RuntimeError("torch.compile is not available in this PyTorch build.")
-        model = torch.compile(model, mode="reduce-overhead", dynamic=True)
+        model = _torch_compile_model(model, device)
 
     vocab_size = config.vocab_size
     context_length = min(seq_len, config.block_size)

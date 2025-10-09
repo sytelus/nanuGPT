@@ -97,7 +97,7 @@ class TeLlama3DecoderLayer(te.TransformerLayer):
             num_gqa_groups=n_kv_heads,
             # init_method=torch_init_method, # TODO: check if needed
             # output_layer_init_method=torch_init_method, # TODO: check if needed
-            layer_number=layer_num,
+            layer_number=layer_num+1,
             self_attn_mask_type="causal", # default
             seq_length=math.ceil(block_size // 128) * 128,
             #params_dtype=torch.bfloat16,
