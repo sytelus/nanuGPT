@@ -94,6 +94,8 @@ class BenchmarkSummary:
     param_stats: ParamStats
     stages: Dict[str, ScenarioMetrics]
     batch_size: int
+    context_length: int
+    tokens_per_step: int
 
 
 def _torch_compile_model(
@@ -759,6 +761,8 @@ SCENARIO_SPECS = {
     },
 }
 
+TEN_B_TOKENS = 10_000_000_000
+
 
 def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -> None:
     """Render a Rich table with comparable stats across all requested configs."""
@@ -811,6 +815,12 @@ def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -
 
         return _formatter
 
+    def fmt_tokens_per_step(summary: BenchmarkSummary) -> str:
+        value = summary.tokens_per_step
+        if value <= 0:
+            return "n/a"
+        return f"[bold]{value:,}[/bold]"
+
     def scenario_has_compiled(stage: str) -> bool:
         for summary in results:
             stage_metrics = summary.stages.get(stage)
@@ -819,6 +829,30 @@ def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -
             if stage_metrics.compiled is not None or stage_metrics.compiled_oom:
                 return True
         return False
+
+    def fmt_time_for_tokens(stage: str, mode: str) -> Callable[[BenchmarkSummary], str]:
+        def _formatter(summary: BenchmarkSummary) -> str:
+            stage_metrics = summary.stages.get(stage)
+            if not stage_metrics or not stage_metrics.supported:
+                return "n/a"
+            if summary.tokens_per_step <= 0:
+                return "n/a"
+            if mode == "compiled" and not scenario_has_compiled(stage):
+                return "n/a"
+            metrics = stage_metrics.eager if mode == "eager" else stage_metrics.compiled
+            oom = stage_metrics.eager_oom if mode == "eager" else stage_metrics.compiled_oom
+            if oom:
+                return "OOM"
+            if not metrics or "iteration_time" not in metrics:
+                return "n/a"
+            iteration_time = metrics["iteration_time"]
+            if iteration_time is None or (isinstance(iteration_time, float) and math.isnan(iteration_time)):
+                return "n/a"
+            seconds = (TEN_B_TOKENS / summary.tokens_per_step) * iteration_time
+            hours = seconds / 3600.0
+            return f"[bold]{hours:,.2f}h[/bold]"
+
+        return _formatter
 
     def extract_metric(summary: BenchmarkSummary, stage: str, mode: str, key: str) -> str:
         stage_metrics = summary.stages.get(stage)
@@ -917,6 +951,24 @@ def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -
                         summary, stage, "compiled", "iteration_time"
                     ),
                 )
+            if stage in (TRAINING_STAGE, OPTIMIZER_STAGE):
+                add_row(
+                    "Tokens / step",
+                    lambda summary, stage=stage: (
+                        fmt_tokens_per_step(summary)
+                        if (stage_metrics := summary.stages.get(stage)) and stage_metrics.supported
+                        else "n/a"
+                    ),
+                )
+                add_row(
+                    "10B tokens h (eager)",
+                    fmt_time_for_tokens(stage, "eager"),
+                )
+                if compiled_available:
+                    add_row(
+                        "10B tokens h (compiled)",
+                        fmt_time_for_tokens(stage, "compiled"),
+                    )
 
         if device_is_cuda:
             add_row(
@@ -1077,6 +1129,9 @@ def main() -> None:
                 param_stats=param_stats,
                 stages=stages,
                 batch_size=args.batch_size,
+                context_length=min(args.seq_length, getattr(config, "block_size", args.seq_length)),
+                tokens_per_step=args.batch_size
+                * min(args.seq_length, getattr(config, "block_size", args.seq_length)),
             )
         )
 
