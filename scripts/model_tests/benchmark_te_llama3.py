@@ -65,10 +65,6 @@ def _provider_name() -> str:
     return MODEL_PROVIDER.__name__
 
 
-def _provider_requires_cuda_compile() -> bool:
-    return MODEL_PROVIDER is te_llama3
-
-
 def _is_cuda_device(device: torch.device) -> bool:
     """Return True when the target device can execute CUDA kernels."""
     return device.type == "cuda" and torch.cuda.is_available()
@@ -105,7 +101,7 @@ def _torch_compile_model(
     device: torch.device,
 ) -> torch.nn.Module:
     """Wrap `torch.compile` with provider-friendly defaults (no cudagraph capture)."""
-    if device.type != "cuda" and _provider_requires_cuda_compile():
+    if device.type != "cuda":
         raise RuntimeError(
             f"torch.compile() for provider {_provider_name()} requires a CUDA device."
         )
@@ -1024,10 +1020,9 @@ def main() -> None:
     configure_torch_runtime(device)
     is_cuda = _is_cuda_device(device)
 
-    if not is_cuda and _provider_requires_cuda_compile():
+    if not is_cuda:
         console.print(
-            "[bold yellow]CUDA device not detected. "
-            "Transformer Engine layers generally require GPU support.[/bold yellow]"
+            f"[bold yellow]CUDA device not detected. {_provider_name()} generally requires GPU support for benchmarking.[/bold yellow]"
         )
 
     run_compiled = not args.no_compile
@@ -1036,7 +1031,7 @@ def main() -> None:
             "[bold yellow]torch.compile is unavailable in this PyTorch build; skipping compiled benchmarks.[/bold yellow]"
         )
         run_compiled = False
-    if run_compiled and not is_cuda and _provider_requires_cuda_compile():
+    if run_compiled and not is_cuda:
         console.print(
             f"[bold yellow]Skipping compiled benchmarks because {_provider_name()} compilation requires a CUDA-capable device.[/bold yellow]"
         )

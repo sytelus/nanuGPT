@@ -206,8 +206,10 @@ class Block(nn.Module):
         self.ln_2 = nn.LayerNorm(config.n_embd, bias=config.layer_norm_bias)
         self.mlp = MLP(config)
 
-    def forward(self, x):
-        x = x + self.attn(self.ln_1(x))
+    def forward(self, x,
+                attention_mask: Optional[torch.Tensor] = None,
+                ):
+        x = x + self.attn(self.ln_1(x), attention_mask=attention_mask)
         x = x + self.mlp(self.ln_2(x))
         return x
 
