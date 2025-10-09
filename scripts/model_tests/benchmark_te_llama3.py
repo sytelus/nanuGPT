@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Benchmark TeLlama3Model configurations with timing and memory stats.
+"""Benchmark configurable NanoGPT model providers with timing and memory stats.
 
-This utility walks every public `CONFIG_*` configuration declared in
-`nanugpt.models.te_llama3` and reports forward/backward timing plus memory for
-both eager and `torch.compile` modes.  The script was written with the
+This utility walks every public `CONFIG_*` configuration declared in the
+selected model provider module and reports forward/backward timing plus memory
+for both eager and `torch.compile` modes.  The script was written with the
 following guard-rails in mind:
 
 * Treat inference and training measurements separately so Transformer Engine
@@ -28,13 +28,14 @@ configuration and per-config cleanup.
 from __future__ import annotations
 
 import argparse
+import inspect
 import math
 import statistics
 import time
 import warnings
 from functools import lru_cache
-from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List, Optional, Tuple, Mapping
+from dataclasses import asdict, dataclass, is_dataclass
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Mapping
 import gc
 import os
 
@@ -44,8 +45,7 @@ from rich.console import Console
 from rich.table import Table
 from torch.optim import Optimizer
 
-from nanugpt.models import te_llama3
-from nanugpt.models.te_llama3 import LlamaConfig, TeLlama3Model
+from nanugpt.models import nanogpt as nanogpt_models, te_llama3
 from nanugpt import utils
 
 
@@ -55,8 +55,18 @@ SUPPRESS_COMPILE_WARNINGS = False  # Set to False to see full torch.compile warn
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
+MODEL_PROVIDER = nanogpt_models  # Update this to switch between te_llama3 and nanogpt_models.
+
 Metrics = Dict[str, float]
 ParamStats = Dict[str, Optional[int]]
+
+
+def _provider_name() -> str:
+    return MODEL_PROVIDER.__name__
+
+
+def _provider_requires_cuda_compile() -> bool:
+    return MODEL_PROVIDER is te_llama3
 
 
 def _is_cuda_device(device: torch.device) -> bool:
@@ -84,20 +94,20 @@ class ScenarioMetrics:
 class BenchmarkSummary:
     """Printable snapshot of a single config's parameters and timing results."""
     name: str
-    config: LlamaConfig
+    config: Any
     param_stats: ParamStats
     stages: Dict[str, ScenarioMetrics]
     batch_size: int
 
 
 def _torch_compile_model(
-    model: TeLlama3Model,
+    model: torch.nn.Module,
     device: torch.device,
-) -> TeLlama3Model:
-    """Wrap `torch.compile` with TE-friendly defaults (no cudagraph capture)."""
-    if device.type != "cuda":
+) -> torch.nn.Module:
+    """Wrap `torch.compile` with provider-friendly defaults (no cudagraph capture)."""
+    if device.type != "cuda" and _provider_requires_cuda_compile():
         raise RuntimeError(
-            "torch.compile() with Transformer Engine layers currently requires a CUDA device."
+            f"torch.compile() for provider {_provider_name()} requires a CUDA device."
         )
 
     if SUPPRESS_COMPILE_WARNINGS:
@@ -148,13 +158,16 @@ def configure_torch_runtime(device: torch.device) -> None:
         torch.backends.cudnn.deterministic = False
 
 
-def discover_configs(prefix: str = "CONFIG_") -> Dict[str, LlamaConfig]:
-    """Discover LlamaConfig instances in te_llama3 that match the prefix."""
-    return {
-        name: value
-        for name in dir(te_llama3)
-        if name.startswith(prefix) and isinstance(value := getattr(te_llama3, name), LlamaConfig)
-    }
+def discover_configs(prefix: str = "CONFIG_") -> Dict[str, Any]:
+    """Discover dataclass configs in the configured model provider that match the prefix."""
+    configs: Dict[str, Any] = {}
+    for name in dir(MODEL_PROVIDER):
+        if not name.startswith(prefix):
+            continue
+        value = getattr(MODEL_PROVIDER, name)
+        if is_dataclass(value) and not isinstance(value, type):
+            configs[name] = value
+    return configs
 
 
 def format_bytes_as_mb(num_bytes: float) -> float:
@@ -216,7 +229,7 @@ def _synthetic_loss(logits: torch.Tensor, labels: torch.Tensor) -> Tuple[torch.T
 
     # ignore_index=-1 is actually not needed because we never output -ve index for tokens.
     # PyTorch default is -100. The negative index is used to ignore the loss for padding tokens.
-    loss = torch.nn.functional.cross_entropy(preds, targets, ignore_index=-1)
+    loss = F.cross_entropy(preds, targets, ignore_index=-1)
     # dim=-1 means we take the max along the last dimension, which is the vocab_size, so max is taken over the vocab
     correct = utils.safe_int_item((torch.argmax(preds, dim=-1) == targets).sum())
 
@@ -224,7 +237,7 @@ def _synthetic_loss(logits: torch.Tensor, labels: torch.Tensor) -> Tuple[torch.T
 
 
 def _prepare_inputs(
-    config: LlamaConfig,
+    config: Any,
     batch_size: int,
     seq_len: int,
     device: torch.device,
@@ -264,8 +277,59 @@ def _zero_optimizer(optimizer: Optimizer) -> None:
         optimizer.zero_grad()
 
 
+def _config_to_model_kwargs(config: Any) -> Dict[str, Any]:
+    """Convert a provider config dataclass into kwargs accepted by `get_model`."""
+    if is_dataclass(config):
+        cfg_dict = asdict(config)
+    else:
+        cfg_dict = dict(vars(config))
+    if "block_size" in cfg_dict and "context_length" not in cfg_dict:
+        cfg_dict["context_length"] = cfg_dict["block_size"]
+    return cfg_dict
+
+
+def _build_model_from_provider(
+    config: Any,
+    get_loss: Optional[Callable[..., Tuple[torch.Tensor, int]]],
+) -> torch.nn.Module:
+    """Instantiate a model using the configured provider's `get_model` entrypoint."""
+    model_kwargs = _config_to_model_kwargs(config)
+    get_model_fn = MODEL_PROVIDER.get_model
+    signature = inspect.signature(get_model_fn)
+    constructed_kwargs: Dict[str, Any] = {}
+
+    for name, param in signature.parameters.items():
+        if name == "get_loss":
+            constructed_kwargs[name] = get_loss
+            continue
+        if name in model_kwargs:
+            constructed_kwargs[name] = model_kwargs[name]
+            continue
+        if param.default is inspect._empty:
+            raise KeyError(
+                f"Required parameter '{name}' is missing from config {config} for provider {MODEL_PROVIDER.__name__}."
+            )
+
+    return get_model_fn(**constructed_kwargs)
+
+
+def _embedding_parameter_count(model: torch.nn.Module) -> Optional[int]:
+    """Best-effort retrieval of embedding parameter counts across providers."""
+    embedding_module = getattr(model, "tok_embeddings", None)
+    if embedding_module is None:
+        transformer = getattr(model, "transformer", None)
+        if transformer is not None:
+            embedding_module = getattr(transformer, "wte", None)
+    if embedding_module is None:
+        return None
+    weight = getattr(embedding_module, "weight", None)
+    if weight is None:
+        return None
+    return weight.numel()
+
+
 def _measure_inference_iteration(
-    model: TeLlama3Model,
+    model: torch.nn.Module,
     input_ids: torch.Tensor,
     device: torch.device,
 ) -> Metrics:
@@ -297,7 +361,7 @@ def _measure_inference_iteration(
 
 
 def _measure_training_iteration(
-    model: TeLlama3Model,
+    model: torch.nn.Module,
     input_ids: torch.Tensor,
     labels: torch.Tensor,
     device: torch.device,
@@ -396,7 +460,7 @@ def _measure_training_iteration(
     return metrics
 
 
-def _build_fused_adamw(model: TeLlama3Model, device: torch.device) -> Optional[Optimizer]:
+def _build_fused_adamw(model: torch.nn.Module, device: torch.device) -> Optional[Optimizer]:
     """Instantiate a fused AdamW optimizer if the runtime supports it."""
     if not _is_cuda_device(device):
         return None
@@ -435,7 +499,7 @@ def _stage_label(stage: str) -> str:
 
 def _run_stage_once(
     config_name: str,
-    config: LlamaConfig,
+    config: Any,
     device: torch.device,
     batch_size: int,
     seq_len: int,
@@ -453,19 +517,9 @@ def _run_stage_once(
     stage_label = _stage_label(stage)
 
     try:
-        model = te_llama3.get_model(
-            vocab_size=config.vocab_size,
-            get_loss=_synthetic_loss if requires_labels else None,
-            n_layer=config.n_layer,
-            n_embd=config.n_embd,
-            n_head=config.n_head,
-            context_length=config.block_size,
-            n_kv_heads=config.n_kv_heads,
-            ffn_dim_multiplier=config.ffn_dim_multiplier,
-            swiglu_multiple_of=config.swiglu_multiple_of,
-            rope_theta=config.rope_theta,
-            rms_norm_eps=config.rms_norm_eps,
-            initializer_range=config.initializer_range,
+        model = _build_model_from_provider(
+            config,
+            _synthetic_loss if requires_labels else None,
         )
     except torch.cuda.OutOfMemoryError:
         console.print(
@@ -580,7 +634,7 @@ def _run_stage_once(
 
 def benchmark_config(
     name: str,
-    config: LlamaConfig,
+    config: Any,
     device: torch.device,
     seq_len: int,
     batch_size: int,
@@ -592,25 +646,14 @@ def benchmark_config(
     param_stats: ParamStats = {"total": None, "trainable": None, "embedding": None}
 
     try:
-        reference_model = te_llama3.get_model(
-            vocab_size=config.vocab_size,
-            get_loss=_synthetic_loss,
-            n_layer=config.n_layer,
-            n_embd=config.n_embd,
-            n_head=config.n_head,
-            context_length=config.block_size,
-            n_kv_heads=config.n_kv_heads,
-            ffn_dim_multiplier=config.ffn_dim_multiplier,
-            swiglu_multiple_of=config.swiglu_multiple_of,
-            rope_theta=config.rope_theta,
-            rms_norm_eps=config.rms_norm_eps,
-            initializer_range=config.initializer_range,
-        )
+        reference_model = _build_model_from_provider(config, _synthetic_loss)
         param_stats["total"] = sum(p.numel() for p in reference_model.parameters())
         param_stats["trainable"] = sum(
             p.numel() for p in reference_model.parameters() if p.requires_grad
         )
-        param_stats["embedding"] = reference_model.tok_embeddings.weight.numel()
+        embedding_params = _embedding_parameter_count(reference_model)
+        if embedding_params is not None:
+            param_stats["embedding"] = embedding_params
     except Exception:
         console.print(
             f"[bold yellow]{name}: Unable to compute parameter statistics for this configuration.[/bold yellow]"
@@ -728,7 +771,7 @@ def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -
         return
 
     device_is_cuda = _is_cuda_device(device)
-    table = Table(title="TeLlama3 Benchmark Summary", expand=True, show_lines=True)
+    table = Table(title=f"{_provider_name()} Benchmark Summary", expand=True, show_lines=True)
     table.add_column("Metric", justify="left", style="bold")
     for summary in results:
         table.add_column(summary.name, justify="right")
@@ -740,7 +783,13 @@ def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -
         table.add_row(f"[bold {color}]{label}[/bold {color}]", *["" for _ in results])
 
     def fmt_config(attr: str) -> Callable[[BenchmarkSummary], str]:
-        return lambda summary: str(getattr(summary.config, attr))
+        def _formatter(summary: BenchmarkSummary) -> str:
+            value = getattr(summary.config, attr, None)
+            if value is None:
+                return "n/a"
+            return str(value)
+
+        return _formatter
 
     def fmt_params(key: str) -> Callable[[BenchmarkSummary], str]:
         def _formatter(summary: BenchmarkSummary) -> str:
@@ -930,7 +979,7 @@ def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Benchmark TeLlama3Model configs with timing and memory stats."
+        description=f"Benchmark {_provider_name()} configs with timing and memory stats."
     )
     parser.add_argument("--batch-size", type=int, default=1, help="Batch size for synthetic data.")
     parser.add_argument(
@@ -975,7 +1024,7 @@ def main() -> None:
     configure_torch_runtime(device)
     is_cuda = _is_cuda_device(device)
 
-    if not is_cuda:
+    if not is_cuda and _provider_requires_cuda_compile():
         console.print(
             "[bold yellow]CUDA device not detected. "
             "Transformer Engine layers generally require GPU support.[/bold yellow]"
@@ -987,9 +1036,9 @@ def main() -> None:
             "[bold yellow]torch.compile is unavailable in this PyTorch build; skipping compiled benchmarks.[/bold yellow]"
         )
         run_compiled = False
-    if run_compiled and not is_cuda:
+    if run_compiled and not is_cuda and _provider_requires_cuda_compile():
         console.print(
-            "[bold yellow]Skipping compiled benchmarks because Transformer Engine compilation requires a CUDA-capable device.[/bold yellow]"
+            f"[bold yellow]Skipping compiled benchmarks because {_provider_name()} compilation requires a CUDA-capable device.[/bold yellow]"
         )
         run_compiled = False
 
@@ -1001,7 +1050,9 @@ def main() -> None:
         configs = {args.config: configs[args.config]}
 
     if not configs:
-        console.print("[bold red]No CONFIG_ prefixed LlamaConfig found in te_llama3.[/bold red]")
+        console.print(
+            f"[bold red]No CONFIG_ prefixed dataclass configs found in {_provider_name()}.[/bold red]"
+        )
         return
 
     summaries: List[BenchmarkSummary] = []
