@@ -1,5 +1,24 @@
 #!/usr/bin/env python3
-"""Benchmark TeLlama3Model configurations with timing and memory stats."""
+"""Benchmark TeLlama3Model configurations with timing and memory stats.
+
+This utility walks every public `TE_*` configuration declared in
+`nanugpt.models.te_llama3` and reports forward/backward timing plus memory for
+both eager and `torch.compile` modes.  The script was written with the
+following guard-rails in mind:
+
+* Treat inference and training measurements separately so Transformer Engine
+  kernels (which can require graph capture) do not leak across modes.
+* Fail loudly but gracefully when `torch.compile` or the CUDA allocator hit an
+  unsupported path—every OOM or compile failure is surfaced as "OOM" in the
+  summary table rather than bubbling an exception.
+* Keep GPU state tidy between configs: TF32 is enabled for performance,
+  allocator segments are expanded to mitigate fragmentation, and caches are
+  cleared after each run.
+
+Future maintainers should skim `_torch_compile_model()` and
+`benchmark_config()` first—they contain the subtleties around Dynamo
+configuration and per-config cleanup.
+"""
 
 from __future__ import annotations
 
@@ -30,6 +49,7 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 @dataclass
 class BenchmarkSummary:
+    """Printable snapshot of a single config's parameters and timing results."""
     name: str
     config: LlamaConfig
     param_stats: Dict[str, int]
@@ -44,6 +64,7 @@ def _torch_compile_model(
     model: TeLlama3Model,
     device: torch.device,
 ) -> TeLlama3Model:
+    """Wrap `torch.compile` with TE-friendly defaults (no cudagraph capture)."""
     if device.type != "cuda":
         raise RuntimeError(
             "torch.compile() with Transformer Engine layers currently requires a CUDA device."
@@ -51,7 +72,20 @@ def _torch_compile_model(
 
     if SUPPRESS_COMPILE_WARNINGS:
         _configure_compile_environment()
-    return torch.compile(model, mode="reduce-overhead", dynamic=True)
+    previous_cudagraphs = None
+    try:
+        import torch._dynamo as dynamo  # type: ignore[attr-defined]
+
+        if hasattr(dynamo.config, "use_cudagraphs"):
+            previous_cudagraphs = dynamo.config.use_cudagraphs
+            dynamo.config.use_cudagraphs = False  # compiled inference prefers raw streams
+        return torch.compile(model, mode="reduce-overhead", dynamic=True)
+    finally:
+        if previous_cudagraphs is not None:
+            try:
+                dynamo.config.use_cudagraphs = previous_cudagraphs  # type: ignore[name-defined]
+            except Exception:
+                pass
 
 @lru_cache(maxsize=1)
 def _configure_compile_environment() -> None:
@@ -73,6 +107,7 @@ def _configure_compile_environment() -> None:
 
 
 def configure_torch_runtime(device: torch.device) -> None:
+    """Set global knobs (TF32, cudnn) for repeatable high-throughput runs."""
     torch.set_float32_matmul_precision("high")
     if device.type == "cuda" and torch.cuda.is_available():
         device_index = device.index if device.index is not None else 0
@@ -97,6 +132,7 @@ def format_bytes_as_mb(num_bytes: float) -> float:
 
 
 def average_or_zero(values: Iterable[float]) -> float:
+    """Mean that skips None/NaN entries so missing samples do not skew results."""
     filtered = [
         value
         for value in values
@@ -134,7 +170,7 @@ def run_inference_forward(
         mem_before = 0
 
     start = time.perf_counter()
-    with torch.no_grad():
+    with torch.no_grad():  # detach activations so training graph remains untouched
         model(input_ids, return_logits=True)
     if device.type == "cuda":
         torch.cuda.synchronize(device)
@@ -157,6 +193,7 @@ def run_training_step(
     labels: torch.Tensor,
     device: torch.device,
 ) -> Dict[str, float]:
+    """One training micro-step with full grads; returns timing/memory slices."""
     was_training = model.training
     model.train()
 
@@ -234,25 +271,35 @@ def benchmark_config(
     steps: int,
     do_compile: bool,
 ) -> Tuple[Optional[Dict[str, float]], Dict[str, int], bool]:
-    """Benchmark a configuration, optionally using torch.compile."""
+    """Benchmark a configuration, optionally using torch.compile.
+
+    Returns average metrics plus a params summary; the boolean indicates whether
+    any OOM short-circuited the measurement (and therefore the metrics dict will
+    be `None`).
+    """
     torch.manual_seed(42)
     if device.type == "cuda" and torch.cuda.is_available():
         torch.cuda.manual_seed_all(42)
 
-    model = TeLlama3Model(config, get_loss=None)
-    input_ids: Optional[torch.Tensor] = None
-    labels: Optional[torch.Tensor] = None
-
-    param_total = sum(p.numel() for p in model.parameters())
-    param_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    embedding_params = model.tok_embeddings.weight.numel()
-    param_stats = {
-        "total": param_total,
-        "trainable": param_trainable,
-        "embedding": embedding_params,
+    model: Optional[TeLlama3Model] = None
+    param_stats: Dict[str, float] = {
+        "total": float("nan"),
+        "trainable": float("nan"),
+        "embedding": float("nan"),
     }
-
     try:
+        try:
+            model = TeLlama3Model(config, get_loss=None)
+        except torch.cuda.OutOfMemoryError:
+            console.print(f"[bold red]{name}: OOM while constructing the model (compile={do_compile}).[/bold red]")
+            if device.type == "cuda" and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            return None, param_stats, True
+
+        param_stats["total"] = float(sum(p.numel() for p in model.parameters()))
+        param_stats["trainable"] = float(sum(p.numel() for p in model.parameters() if p.requires_grad))
+        param_stats["embedding"] = float(model.tok_embeddings.weight.numel())
+
         try:
             model = model.to(device)
         except torch.cuda.OutOfMemoryError:
@@ -266,6 +313,7 @@ def benchmark_config(
         if do_compile:
             console.print(f"[dim]{name}: compiling model with torch.compile...[/dim]")
             try:
+                model.train()
                 model = _torch_compile_model(model, device)
             except torch.cuda.OutOfMemoryError:
                 console.print(f"[bold red]{name}: OOM while compiling model.[/bold red]")
@@ -303,7 +351,9 @@ def benchmark_config(
             for i in range(max(steps, 0)):
                 console.print(f"[dim]{name}: measuring {i + 1}/{steps}[/dim]")
                 try:
-                    inference_time, inference_memory = run_inference_forward(model, input_ids, device)
+                    inference_time, inference_memory = run_inference_forward(
+                        model, input_ids, device
+                    )
                     training_metrics = run_training_step(model, input_ids, labels, device)
                 except torch.cuda.OutOfMemoryError:
                     console.print(
@@ -332,14 +382,12 @@ def benchmark_config(
                 pass
             torch.cuda.reset_peak_memory_stats(device)
             torch.cuda.empty_cache()
-        del model
-        if input_ids is not None:
-            del input_ids
-        if labels is not None:
-            del labels
+        if model is not None:
+            del model
 
 
 def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -> None:
+    """Render a Rich table with comparable stats across all requested configs."""
     if not results:
         console.print("[bold red]No benchmark results to display.[/bold red]")
         return
@@ -356,7 +404,13 @@ def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -
         return lambda summary: str(getattr(summary.config, attr))
 
     def fmt_params(key: str) -> Callable[[BenchmarkSummary], str]:
-        return lambda summary: f"{summary.param_stats[key] / 1e6:.2f}M"
+        def _formatter(summary: BenchmarkSummary) -> str:
+            value = summary.param_stats.get(key)
+            if value is None or (isinstance(value, float) and math.isnan(value)):
+                return "n/a"
+            return f"{value / 1e6:.2f}M"
+
+        return _formatter
 
     def fmt_time(key: str, metrics_type: str) -> Callable[[BenchmarkSummary], str]:
         def _formatter(summary: BenchmarkSummary) -> str:
@@ -502,6 +556,7 @@ def main() -> None:
     summaries: List[BenchmarkSummary] = []
 
     for name, config in configs.items():
+        # scrub allocator state so each config starts from the same baseline
         if device.type == "cuda" and torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats(device)
