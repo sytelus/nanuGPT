@@ -51,7 +51,7 @@ from nanugpt import utils
 
 console = Console()
 
-SUPPRESS_COMPILE_WARNINGS = True  # Set to False to see full torch.compile warning output.
+SUPPRESS_COMPILE_WARNINGS = False  # Set to False to see full torch.compile warning output.
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
