@@ -16,11 +16,41 @@ from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
+from torch.compiler import allow_in_graph  # PyTorch 2.1+
 
 from transformer_engine import pytorch as te
 from transformer_engine.pytorch.attention import RotaryPositionEmbedding
+from transformer_engine.pytorch.attention import rope as te_rope
 
 from nanugpt import common
+
+_orig_apply_rope = te_rope.apply_rotary_pos_emb
+@allow_in_graph
+def apply_rope_tracing_safe(x, rope, fmt, *args, **kwargs):
+    # During compile (FakeTensor world), avoid fused=True to prevent data_ptr access
+    if torch.compiler.is_compiling():
+        kwargs = dict(kwargs); kwargs["fused"] = False
+    return _orig_apply_rope(x, rope, fmt, *args, **kwargs)
+te_rope.apply_rotary_pos_emb = apply_rope_tracing_safe
+
+# def torch_compile_friendly():
+#     if hasattr(te, "TransformerLayer") and hasattr(te.TransformerLayer, "forward"):
+#         te.TransformerLayer.forward = allow_in_graph(te.TransformerLayer.forward)
+#     if hasattr(te, "LayerNormLinear") and hasattr(te.LayerNormLinear, "forward"):
+#         te.LayerNormLinear.forward = allow_in_graph(te.LayerNormLinear.forward)
+
+#     # Also mark common RoPE helpers (TE versions vary; wrap what exists)
+#     for _name in (
+#         "apply_rotary_pos_emb",
+#         "apply_rotary_pos_emb_thd",
+#         "apply_rotary_pos_emb_fused",
+#     ):
+#         if hasattr(te_rope, _name):
+#             setattr(te_rope, _name, allow_in_graph(getattr(te_rope, _name)))
+
+
+# # Call the function to make TE components compatible with torch.compile
+# torch_compile_friendly()
 
 @dataclass
 class LlamaConfig:
@@ -103,8 +133,10 @@ class TeLlama3DecoderLayer(te.TransformerLayer):
             #params_dtype=torch.bfloat16,
 
         )
-        te_rope = RotaryPositionEmbedding(n_embd//n_head, rotary_base=rope_theta)
-        self.te_rope_emb = te_rope(max_seq_len=block_size).cuda()
+
+        te_rope = RotaryPositionEmbedding(n_embd // n_head, rotary_base=rope_theta)
+        rope = te_rope(max_seq_len=block_size)
+        self.register_buffer("te_rope_emb", rope, persistent=False)
 
     def forward(self, hidden_states: torch.Tensor, attention_mask:Optional[torch.Tensor],
                 is_first_microbatch: Optional[bool]):
