@@ -33,24 +33,25 @@ def apply_rope_tracing_safe(x, rope, fmt, *args, **kwargs):
     return _orig_apply_rope(x, rope, fmt, *args, **kwargs)
 te_rope.apply_rotary_pos_emb = apply_rope_tracing_safe
 
-# def torch_compile_friendly():
-#     if hasattr(te, "TransformerLayer") and hasattr(te.TransformerLayer, "forward"):
-#         te.TransformerLayer.forward = allow_in_graph(te.TransformerLayer.forward)
-#     if hasattr(te, "LayerNormLinear") and hasattr(te.LayerNormLinear, "forward"):
-#         te.LayerNormLinear.forward = allow_in_graph(te.LayerNormLinear.forward)
+def torch_compile_friendly():
+    if hasattr(te, "TransformerLayer") and hasattr(te.TransformerLayer, "forward"):
+        te.TransformerLayer.forward = allow_in_graph(te.TransformerLayer.forward)
+    if hasattr(te, "LayerNormLinear") and hasattr(te.LayerNormLinear, "forward"):
+        te.LayerNormLinear.forward = allow_in_graph(te.LayerNormLinear.forward)
 
-#     # Also mark common RoPE helpers (TE versions vary; wrap what exists)
-#     for _name in (
-#         "apply_rotary_pos_emb",
-#         "apply_rotary_pos_emb_thd",
-#         "apply_rotary_pos_emb_fused",
-#     ):
-#         if hasattr(te_rope, _name):
-#             setattr(te_rope, _name, allow_in_graph(getattr(te_rope, _name)))
+    # Also mark common RoPE helpers (TE versions vary; wrap what exists)
+    for _name in (
+        "apply_rotary_pos_emb",
+        "apply_rotary_pos_emb_thd",
+        "apply_rotary_pos_emb_fused",
+    ):
+        if hasattr(te_rope, _name):
+            setattr(te_rope, _name, allow_in_graph(getattr(te_rope, _name)))
 
 
-# # Call the function to make TE components compatible with torch.compile
-# torch_compile_friendly()
+# Call the function to make TE components compatible with torch.compile
+torch_compile_friendly()
+
 
 @dataclass
 class LlamaConfig:
