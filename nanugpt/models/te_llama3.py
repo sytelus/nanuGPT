@@ -209,21 +209,13 @@ class TeLlama3Model(nn.Module):
     # Torch-only version of TE's LayerNormLinear (RMSNorm + Linear) using TE parameters.
     # This is used only when labels are provided so that torch.compile can fuse Linear + CrossEntropy.
     def _torch_lm_head(self, x: torch.Tensor) -> torch.Tensor:
-        # TE names: layer_norm_weight / layer_norm_bias are used in NVIDIA’s own models
-        # (see esm_nv: NVEsmLMHead/LayerNormLinear). Keep eps consistent with module config.  # noqa
         ln_weight = getattr(self.lm_head, "layer_norm_weight", None)
         ln_bias = getattr(self.lm_head, "layer_norm_bias", None)
         eps = float(getattr(self.lm_head, "eps", self.config.rms_norm_eps))
-
-        # RMSNorm (no mean subtraction): x * rsqrt(mean(x^2) + eps), then scale + bias
-        rms = x.pow(2).mean(dim=-1, keepdim=True)
-        x = x * torch.rsqrt(rms + eps)
-        if ln_weight is not None:
-            x = x * ln_weight
+        # Functional RMSNorm keeps us out of TE while sharing the same parameters
+        x = F.rms_norm(x, (self.config.n_embd,), weight=ln_weight, eps=eps)
         if ln_bias is not None:
             x = x + ln_bias
-
-        # Final projection using the same TE weight so parameters stay tied/updated correctly.
         logits = F.linear(x, self.lm_head.weight, getattr(self.lm_head, "bias", None))
         return logits
 
