@@ -17,6 +17,8 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 from torch.compiler import allow_in_graph  # PyTorch 2.1+
+import torch.nn.functional as F  # used for torch-only head + CE fusion
+from torch._dynamo import disable as dynamo_disable  # NOTE: keep TE out of Dynamo
 
 from transformer_engine import pytorch as te
 from transformer_engine.pytorch.attention import RotaryPositionEmbedding
@@ -34,10 +36,13 @@ def apply_rope_tracing_safe(x, rope, fmt, *args, **kwargs):
 te_rope.apply_rotary_pos_emb = apply_rope_tracing_safe
 
 def torch_compile_friendly():
+    # TE and torch.compile: current TE Python/C++ boundaries often cause Dynamo warnings/graph breaks.
+    # The most robust approach today is to keep TE modules *out of* Dynamo by disabling tracing on them.
+    # This preserves TE's own fused CUDA kernels while allowing us to compile torch-only parts (the head+loss).
     if hasattr(te, "TransformerLayer") and hasattr(te.TransformerLayer, "forward"):
-        te.TransformerLayer.forward = allow_in_graph(te.TransformerLayer.forward)
+        te.TransformerLayer.forward = dynamo_disable(te.TransformerLayer.forward)
     if hasattr(te, "LayerNormLinear") and hasattr(te.LayerNormLinear, "forward"):
-        te.LayerNormLinear.forward = allow_in_graph(te.LayerNormLinear.forward)
+        te.LayerNormLinear.forward = dynamo_disable(te.LayerNormLinear.forward)
 
     # Also mark common RoPE helpers (TE versions vary; wrap what exists)
     for _name in (
@@ -46,7 +51,7 @@ def torch_compile_friendly():
         "apply_rotary_pos_emb_fused",
     ):
         if hasattr(te_rope, _name):
-            setattr(te_rope, _name, allow_in_graph(getattr(te_rope, _name)))
+            setattr(te_rope, _name, dynamo_disable(getattr(te_rope, _name)))
 
 
 # Call the function to make TE components compatible with torch.compile
@@ -201,6 +206,27 @@ class TeLlama3Model(nn.Module):
             torch.nn.init.normal_(module.weight, mean=0.0, std=self.config.initializer_range, generator=self.init_rng)
         # leave other initializations to TE defaults
 
+    # Torch-only version of TE's LayerNormLinear (RMSNorm + Linear) using TE parameters.
+    # This is used only when labels are provided so that torch.compile can fuse Linear + CrossEntropy.
+    def _torch_lm_head(self, x: torch.Tensor) -> torch.Tensor:
+        # TE names: layer_norm_weight / layer_norm_bias are used in NVIDIA’s own models
+        # (see esm_nv: NVEsmLMHead/LayerNormLinear). Keep eps consistent with module config.  # noqa
+        ln_weight = getattr(self.lm_head, "layer_norm_weight", None)
+        ln_bias = getattr(self.lm_head, "layer_norm_bias", None)
+        eps = float(getattr(self.lm_head, "eps", self.config.rms_norm_eps))
+
+        # RMSNorm (no mean subtraction): x * rsqrt(mean(x^2) + eps), then scale + bias
+        rms = x.pow(2).mean(dim=-1, keepdim=True)
+        x = x * torch.rsqrt(rms + eps)
+        if ln_weight is not None:
+            x = x * ln_weight
+        if ln_bias is not None:
+            x = x + ln_bias
+
+        # Final projection using the same TE weight so parameters stay tied/updated correctly.
+        logits = F.linear(x, self.lm_head.weight, getattr(self.lm_head, "bias", None))
+        return logits
+
     def forward(self,
                 idx: torch.Tensor,
                 labels: Optional[torch.Tensor] = None,
@@ -213,19 +239,26 @@ class TeLlama3Model(nn.Module):
         for layer in self.layers:
             x = layer(x, attention_mask=attention_mask, is_first_microbatch=is_first_microbatch)
 
+        # If labels are provided, compute the head in torch so torch.compile can fuse Linear+CE.
+        # Otherwise, keep using TE's fused head for inference throughput.
+        if labels is not None:
+            if not only_last:
+                logits:torch.Tensor = self._torch_lm_head(x) # [batch, seq_len, vocab_size]
+            else:
+                logits:torch.Tensor = self._torch_lm_head(x[:, [-1], :]) # [batch, 1, vocab_size]
+
+            assert self.get_loss is not None, "Loss function is not defined"
+            loss, correct = self.get_loss(logits, labels)
+            # keeping logits around may unnecessarily consume a lot of memory  (atleast 1GB for 124M params)
+            return (logits, loss, correct) if return_logits else (None, loss, correct)
+
+        # No labels: use TE head for maximum inference perf
         if not only_last:
             logits:torch.Tensor = self.lm_head(x) # [batch, seq_len, vocab_size]
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
              # note: using list [-1] to preserve the time dim
             logits:torch.Tensor = self.lm_head(x[:, [-1], :]) # [batch, 1, vocab_size]
-
-        loss:Optional[torch.Tensor] = None
-        if labels is not None:
-            assert self.get_loss is not None, "Loss function is not defined"
-            loss, correct = self.get_loss(logits, labels)
-            # keeping logits around may unnecessarily consume a lot of memory  (atleast 1GB for 124M params)
-            return (logits, loss, correct) if return_logits else (None, loss, correct)
 
         return logits, None, None
 

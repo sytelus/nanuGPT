@@ -46,15 +46,29 @@ SUPPRESS_COMPILE_WARNINGS = True  # Set to False to see full torch.compile warni
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
+Metrics = Dict[str, float]
+ParamStats = Dict[str, Optional[int]]
+
+
+def _is_cuda_device(device: torch.device) -> bool:
+    """Return True when the target device can execute CUDA kernels."""
+    return device.type == "cuda" and torch.cuda.is_available()
+
+
+def _synchronize_cuda(device: torch.device) -> None:
+    """Synchronize CUDA work if the target device is backed by CUDA."""
+    if _is_cuda_device(device):
+        torch.cuda.synchronize(device)
+
 
 @dataclass
 class BenchmarkSummary:
     """Printable snapshot of a single config's parameters and timing results."""
     name: str
     config: LlamaConfig
-    param_stats: Dict[str, int]
-    eager_metrics: Optional[Dict[str, float]]
-    compiled_metrics: Optional[Dict[str, float]]
+    param_stats: ParamStats
+    eager_metrics: Optional[Metrics]
+    compiled_metrics: Optional[Metrics]
     batch_size: int
     eager_oom: bool = False
     compiled_oom: bool = False
@@ -109,13 +123,14 @@ def _configure_compile_environment() -> None:
 def configure_torch_runtime(device: torch.device) -> None:
     """Set global knobs (TF32, cudnn) for repeatable high-throughput runs."""
     torch.set_float32_matmul_precision("high")
-    if device.type == "cuda" and torch.cuda.is_available():
+    if _is_cuda_device(device):
         device_index = device.index if device.index is not None else 0
         torch.cuda.set_device(device_index)
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
         torch.backends.cudnn.deterministic = False
+
 
 def discover_configs(prefix: str = "TE_") -> Dict[str, LlamaConfig]:
     """Discover LlamaConfig instances in te_llama3 that match the prefix."""
@@ -131,7 +146,7 @@ def format_bytes_as_mb(num_bytes: float) -> float:
     return num_bytes / (1024 ** 2)
 
 
-def average_or_zero(values: Iterable[float]) -> float:
+def mean_or_nan(values: Iterable[float]) -> float:
     """Mean that skips None/NaN entries so missing samples do not skew results."""
     filtered = [
         value
@@ -141,14 +156,14 @@ def average_or_zero(values: Iterable[float]) -> float:
     return statistics.mean(filtered) if filtered else float("nan")
 
 
-def aggregate_metrics(records: List[Dict[str, float]]) -> Dict[str, float]:
+def aggregate_metrics(records: List[Metrics]) -> Metrics:
     """Aggregate timing and memory stats across iterations."""
     if not records:
         return {}
     keys = set().union(*(record.keys() for record in records))
-    summary: Dict[str, float] = {}
+    summary: Metrics = {}
     for key in keys:
-        summary[key] = average_or_zero(
+        summary[key] = mean_or_nan(
             record[key] for record in records if key in record
         )
     return summary
@@ -162,21 +177,22 @@ def run_inference_forward(
     was_training = model.training
     model.eval()
 
-    if device.type == "cuda":
+    is_cuda = _is_cuda_device(device)
+    if is_cuda:
         torch.cuda.reset_peak_memory_stats(device)
         mem_before = torch.cuda.memory_allocated(device)
-        torch.cuda.synchronize(device)
+        _synchronize_cuda(device)
     else:
         mem_before = 0
 
     start = time.perf_counter()
     with torch.no_grad():  # detach activations so training graph remains untouched
         model(input_ids, return_logits=True)
-    if device.type == "cuda":
-        torch.cuda.synchronize(device)
+    if is_cuda:
+        _synchronize_cuda(device)
     elapsed = time.perf_counter() - start
 
-    if device.type == "cuda":
+    if is_cuda:
         memory = torch.cuda.max_memory_allocated(device) - mem_before
     else:
         memory = float("nan")
@@ -192,24 +208,26 @@ def run_training_step(
     input_ids: torch.Tensor,
     labels: torch.Tensor,
     device: torch.device,
-) -> Dict[str, float]:
+) -> Metrics:
     """One training micro-step with full grads; returns timing/memory slices."""
     was_training = model.training
     model.train()
 
-    if device.type == "cuda":
+    is_cuda = _is_cuda_device(device)
+
+    if is_cuda:
         torch.cuda.reset_peak_memory_stats(device)
         mem_before_forward = torch.cuda.memory_allocated(device)
-        torch.cuda.synchronize(device)
+        _synchronize_cuda(device)
     else:
         mem_before_forward = 0
     start_forward = time.perf_counter()
     logits, _, _ = model(input_ids, return_logits=True)
-    if device.type == "cuda":
-        torch.cuda.synchronize(device)
+    if is_cuda:
+        _synchronize_cuda(device)
     forward_time = time.perf_counter() - start_forward
 
-    if device.type == "cuda":
+    if is_cuda:
         forward_memory = torch.cuda.max_memory_allocated(device) - mem_before_forward
         torch.cuda.reset_peak_memory_stats(device)
         mem_before_backward = torch.cuda.memory_allocated(device)
@@ -221,15 +239,15 @@ def run_training_step(
         logits.view(-1, logits.size(-1)), labels.view(-1)
     )
 
-    if device.type == "cuda":
-        torch.cuda.synchronize(device)
+    if is_cuda:
+        _synchronize_cuda(device)
     start_backward = time.perf_counter()
     loss.backward()
-    if device.type == "cuda":
-        torch.cuda.synchronize(device)
+    if is_cuda:
+        _synchronize_cuda(device)
     backward_time = time.perf_counter() - start_backward
 
-    if device.type == "cuda":
+    if is_cuda:
         backward_memory = torch.cuda.max_memory_allocated(device) - mem_before_backward
     else:
         backward_memory = float("nan")
@@ -240,24 +258,18 @@ def run_training_step(
         model.eval()
 
     training_step_time = forward_time + backward_time
-    if device.type == "cuda":
+    if is_cuda:
         training_step_memory = max(forward_memory, backward_memory)
     else:
         training_step_memory = float("nan")
 
     return {
         "training_forward_time": forward_time,
-        "training_forward_memory": float(forward_memory)
-        if device.type == "cuda"
-        else float("nan"),
+        "training_forward_memory": float(forward_memory) if is_cuda else float("nan"),
         "training_backward_time": backward_time,
-        "training_backward_memory": float(backward_memory)
-        if device.type == "cuda"
-        else float("nan"),
+        "training_backward_memory": float(backward_memory) if is_cuda else float("nan"),
         "training_step_time": training_step_time,
-        "training_step_memory": float(training_step_memory)
-        if device.type == "cuda"
-        else float("nan"),
+        "training_step_memory": float(training_step_memory) if is_cuda else float("nan"),
     }
 
 
@@ -270,35 +282,36 @@ def benchmark_config(
     warmup: int,
     steps: int,
     do_compile: bool,
-) -> Tuple[Optional[Dict[str, float]], Dict[str, int], bool]:
+) -> Tuple[Optional[Metrics], ParamStats, bool]:
     """Benchmark a configuration, optionally using torch.compile.
 
     Returns average metrics plus a params summary; the boolean indicates whether
-    any OOM short-circuited the measurement (and therefore the metrics dict will
-    be `None`).
+    benchmarking aborted early (OOM or torch.compile failure). When True, the
+    metrics dict will be `None`.
     """
+    is_cuda = _is_cuda_device(device)
     torch.manual_seed(42)
-    if device.type == "cuda" and torch.cuda.is_available():
+    if is_cuda:
         torch.cuda.manual_seed_all(42)
 
     model: Optional[TeLlama3Model] = None
-    param_stats: Dict[str, float] = {
-        "total": float("nan"),
-        "trainable": float("nan"),
-        "embedding": float("nan"),
+    param_stats: ParamStats = {
+        "total": None,
+        "trainable": None,
+        "embedding": None,
     }
     try:
         try:
             model = TeLlama3Model(config, get_loss=None)
         except torch.cuda.OutOfMemoryError:
             console.print(f"[bold red]{name}: OOM while constructing the model (compile={do_compile}).[/bold red]")
-            if device.type == "cuda" and torch.cuda.is_available():
+            if is_cuda:
                 torch.cuda.empty_cache()
             return None, param_stats, True
 
-        param_stats["total"] = float(sum(p.numel() for p in model.parameters()))
-        param_stats["trainable"] = float(sum(p.numel() for p in model.parameters() if p.requires_grad))
-        param_stats["embedding"] = float(model.tok_embeddings.weight.numel())
+        param_stats["total"] = sum(p.numel() for p in model.parameters())
+        param_stats["trainable"] = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        param_stats["embedding"] = model.tok_embeddings.weight.numel()
 
         try:
             model = model.to(device)
@@ -306,9 +319,9 @@ def benchmark_config(
             console.print(f"[bold red]{name}: OOM while moving model to {device}.[/bold red]")
             return None, param_stats, True
 
-        if device.type == "cuda" and torch.cuda.is_available():
+        if is_cuda:
             torch.cuda.reset_peak_memory_stats(device)
-            torch.cuda.synchronize(device)
+            _synchronize_cuda(device)
 
         if do_compile:
             console.print(f"[dim]{name}: compiling model with torch.compile...[/dim]")
@@ -318,16 +331,32 @@ def benchmark_config(
             except torch.cuda.OutOfMemoryError:
                 console.print(f"[bold red]{name}: OOM while compiling model.[/bold red]")
                 return None, param_stats, True
+            except Exception as exc:  # torch.compile surfaced a user error
+                console.print(
+                    f"[bold red]{name}: torch.compile failed ({exc.__class__.__name__}: {exc}).[/bold red]"
+                )
+                return None, param_stats, True
+            if is_cuda:
+                torch.cuda.reset_peak_memory_stats(device)
+                _synchronize_cuda(device)
 
         vocab_size = config.vocab_size
         context_length = min(seq_len, config.block_size)
 
         try:
             input_ids = torch.randint(
-                low=0, high=vocab_size, size=(batch_size, context_length), device=device
+                low=0,
+                high=vocab_size,
+                size=(batch_size, context_length),
+                device=device,
+                dtype=torch.long,
             )
             labels = torch.randint(
-                low=0, high=vocab_size, size=(batch_size, context_length), device=device
+                low=0,
+                high=vocab_size,
+                size=(batch_size, context_length),
+                device=device,
+                dtype=torch.long,
             )
         except torch.cuda.OutOfMemoryError:
             console.print(f"[bold red]{name}: OOM while allocating synthetic data.[/bold red]")
@@ -346,7 +375,7 @@ def benchmark_config(
                 oom = True
                 break
 
-        records: List[Dict[str, float]] = []
+        records: List[Metrics] = []
         if not oom:
             for i in range(max(steps, 0)):
                 console.print(f"[dim]{name}: measuring {i + 1}/{steps}[/dim]")
@@ -375,10 +404,10 @@ def benchmark_config(
         return metrics, param_stats, False
 
     finally:
-        if device.type == "cuda" and torch.cuda.is_available():
+        if is_cuda:
             try:
-                torch.cuda.synchronize(device)
-            except torch.cuda.Error:
+                _synchronize_cuda(device)
+            except (torch.cuda.CudaError, RuntimeError):
                 pass
             torch.cuda.reset_peak_memory_stats(device)
             torch.cuda.empty_cache()
@@ -406,9 +435,9 @@ def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -
     def fmt_params(key: str) -> Callable[[BenchmarkSummary], str]:
         def _formatter(summary: BenchmarkSummary) -> str:
             value = summary.param_stats.get(key)
-            if value is None or (isinstance(value, float) and math.isnan(value)):
+            if value is None:
                 return "n/a"
-            return f"{value / 1e6:.2f}M"
+            return f"{float(value) / 1e6:.2f}M"
 
         return _formatter
 
@@ -421,7 +450,7 @@ def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -
             if not metrics or key not in metrics:
                 return "n/a"
             value = metrics[key]
-            if value is None or math.isnan(value):
+            if value is None or (isinstance(value, float) and math.isnan(value)):
                 return "n/a"
             return f"{value * 1e3:,.2f}"
 
@@ -455,7 +484,7 @@ def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -
         add_row("Training Backward ms (compiled)", fmt_time("training_backward_time", "compiled"))
         add_row("Training Step ms (compiled)", fmt_time("training_step_time", "compiled"))
 
-    if device.type == "cuda":
+    if _is_cuda_device(device):
         def fmt_mem(key: str, metrics_type: str) -> Callable[[BenchmarkSummary], str]:
             def _formatter(summary: BenchmarkSummary) -> str:
                 metrics = summary.eager_metrics if metrics_type == "eager" else summary.compiled_metrics
@@ -465,7 +494,7 @@ def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -
                 if not metrics or key not in metrics:
                     return "n/a"
                 value = metrics[key]
-                if value is None or math.isnan(value):
+                if value is None or (isinstance(value, float) and math.isnan(value)):
                     return "n/a"
                 return f"{format_bytes_as_mb(value):,.2f}"
 
@@ -535,12 +564,25 @@ def main() -> None:
         raise RuntimeError("CUDA device requested but not available on this system.")
 
     configure_torch_runtime(device)
+    is_cuda = _is_cuda_device(device)
 
-    if device.type != "cuda":
+    if not is_cuda:
         console.print(
             "[bold yellow]CUDA device not detected. "
             "Transformer Engine layers generally require GPU support.[/bold yellow]"
         )
+
+    run_compiled = not args.no_compile
+    if run_compiled and not hasattr(torch, "compile"):
+        console.print(
+            "[bold yellow]torch.compile is unavailable in this PyTorch build; skipping compiled benchmarks.[/bold yellow]"
+        )
+        run_compiled = False
+    if run_compiled and not is_cuda:
+        console.print(
+            "[bold yellow]Skipping compiled benchmarks because Transformer Engine compilation requires a CUDA-capable device.[/bold yellow]"
+        )
+        run_compiled = False
 
     configs = discover_configs()
 
@@ -557,10 +599,10 @@ def main() -> None:
 
     for name, config in configs.items():
         # scrub allocator state so each config starts from the same baseline
-        if device.type == "cuda" and torch.cuda.is_available():
+        if is_cuda:
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats(device)
-            torch.cuda.synchronize(device)
+            _synchronize_cuda(device)
 
         console.print(f"[cyan]Running eager benchmark for {name}[/cyan]")
         eager_metrics, param_stats, eager_oom = benchmark_config(
@@ -575,7 +617,7 @@ def main() -> None:
         )
         compiled_metrics = None
         compiled_oom = False
-        if not args.no_compile:
+        if run_compiled:
             console.print(f"[cyan]Running compiled benchmark for {name}[/cyan]")
             compiled_metrics, _, compiled_oom = benchmark_config(
                 name=name,
