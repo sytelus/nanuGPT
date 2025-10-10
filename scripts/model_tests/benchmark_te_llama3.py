@@ -28,6 +28,7 @@ configuration and per-config cleanup.
 from __future__ import annotations
 
 import argparse
+import csv
 import inspect
 import math
 import statistics
@@ -37,6 +38,9 @@ from functools import lru_cache
 from dataclasses import asdict, dataclass, is_dataclass
 from types import ModuleType
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Mapping, Sequence
+from datetime import datetime
+from pathlib import Path
+import re
 import gc
 import os
 
@@ -56,6 +60,12 @@ SUPPRESS_COMPILE_WARNINGS = False  # Set to False to see full torch.compile warn
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
+_RICH_TAG_PATTERN = re.compile(r"\[/?[^\]]+\]")
+
+
+def _strip_markup(text: str) -> str:
+    return _RICH_TAG_PATTERN.sub("", str(text))
+
 MODEL_PROVIDERS: List[ModuleType] = [
     nanogpt_models,
     te_llama3,
@@ -69,6 +79,15 @@ def _provider_display_name(provider: ModuleType) -> str:
 def _provider_names(providers: Optional[Sequence[ModuleType]] = None) -> List[str]:
     providers = providers if providers is not None else MODEL_PROVIDERS
     return [_provider_display_name(provider) for provider in providers]
+
+
+def _resolve_output_directory() -> Path:
+    raw_dir = os.environ.get("OUT_DIR")
+    target_dir = raw_dir if raw_dir else "~/temp"
+    expanded = os.path.expanduser(os.path.expandvars(target_dir))
+    path = Path(expanded).resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 Metrics = Dict[str, float]
 ParamStats = Dict[str, Optional[int]]
@@ -805,11 +824,13 @@ SCENARIO_SPECS = {
 TEN_B_TOKENS = 10_000_000_000
 
 
-def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -> None:
-    """Render a Rich table with comparable stats across all requested configs."""
+def print_summary_table(
+    results: List[BenchmarkSummary], device: torch.device
+) -> Tuple[List[str], List[List[str]]]:
+    """Render a Rich table with comparable stats across all requested configs and return tabular data."""
     if not results:
         console.print("[bold red]No benchmark results to display.[/bold red]")
-        return
+        return [], []
 
     device_is_cuda = _is_cuda_device(device)
     provider_labels: List[str] = []
@@ -822,11 +843,21 @@ def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -
     for summary in results:
         table.add_column(summary.name, justify="right")
 
+    headers = ["Metric"] + [summary.name for summary in results]
+    table_rows: List[List[str]] = []
+
     def add_row(label: str, extractor: Callable[[BenchmarkSummary], str]) -> None:
-        table.add_row(label, *[extractor(summary) for summary in results])
+        values = [extractor(summary) for summary in results]
+        table.add_row(label, *values)
+        table_rows.append(
+            [_strip_markup(label)] + [_strip_markup(value) for value in values]
+        )
 
     def add_group_header(label: str, color: str) -> None:
-        table.add_row(f"[bold {color}]{label}[/bold {color}]", *["" for _ in results])
+        markup_label = f"[bold {color}]{label}[/bold {color}]"
+        blanks = ["" for _ in results]
+        table.add_row(markup_label, *blanks)
+        table_rows.append([label, *blanks])
 
     def fmt_config(attr: str) -> Callable[[BenchmarkSummary], str]:
         def _formatter(summary: BenchmarkSummary) -> str:
@@ -1069,6 +1100,20 @@ def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -
                     )
 
     console.print(table)
+    return headers, table_rows
+
+
+def write_summary_csv(headers: List[str], rows: List[List[str]]) -> Path:
+    """Persist the rendered summary table to a CSV file and return its path."""
+    output_dir = _resolve_output_directory()
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    filename = f"benchmark_summary_{timestamp}.csv"
+    output_path = (output_dir / filename).resolve()
+    with output_path.open("w", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(headers)
+        writer.writerows(rows)
+    return output_path
 
 
 def parse_args() -> argparse.Namespace:
@@ -1196,7 +1241,10 @@ def main() -> None:
             )
         )
 
-    print_summary_table(summaries, device)
+    headers, table_rows = print_summary_table(summaries, device)
+    if table_rows:
+        output_path = write_summary_csv(headers, table_rows)
+        console.print(f"[bold green]Benchmark summary CSV saved to {output_path}[/bold green]")
 
 
 if __name__ == "__main__":
