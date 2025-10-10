@@ -64,6 +64,14 @@ CONFIG_1p3B = GPTConfig(
     block_size=2048,
 )
 
+# llama 8B-like config
+CONFIG_8B = GPTConfig(
+    n_embd=4096,
+    n_layer=32,
+    n_head=32,
+    block_size=4096,
+)
+
 class LayerNorm(nn.Module):
     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
 

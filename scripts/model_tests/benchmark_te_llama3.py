@@ -35,7 +35,8 @@ import time
 import warnings
 from functools import lru_cache
 from dataclasses import asdict, dataclass, is_dataclass
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Mapping
+from types import ModuleType
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Mapping, Sequence
 import gc
 import os
 
@@ -55,14 +56,34 @@ SUPPRESS_COMPILE_WARNINGS = False  # Set to False to see full torch.compile warn
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
-MODEL_PROVIDER = nanogpt_models  # Update this to switch between te_llama3 and nanogpt_models.
+MODEL_PROVIDERS: List[ModuleType] = [
+    nanogpt_models,
+    te_llama3,
+]  # Update this list to change benchmarked providers.
+
+
+def _provider_display_name(provider: ModuleType) -> str:
+    return provider.__name__.split(".")[-1]
+
+
+def _provider_names(providers: Optional[Sequence[ModuleType]] = None) -> List[str]:
+    providers = providers if providers is not None else MODEL_PROVIDERS
+    return [_provider_display_name(provider) for provider in providers]
 
 Metrics = Dict[str, float]
 ParamStats = Dict[str, Optional[int]]
 
 
-def _provider_name() -> str:
-    return MODEL_PROVIDER.__name__
+@dataclass(frozen=True)
+class DiscoveredConfig:
+    provider: ModuleType
+    provider_display_name: str
+    attr_name: str
+    config: Any
+
+    @property
+    def qualified_name(self) -> str:
+        return f"{self.provider_display_name}.{self.attr_name}"
 
 
 def _is_cuda_device(device: torch.device) -> bool:
@@ -90,6 +111,7 @@ class ScenarioMetrics:
 class BenchmarkSummary:
     """Printable snapshot of a single config's parameters and timing results."""
     name: str
+    provider_display_name: str
     config: Any
     param_stats: ParamStats
     stages: Dict[str, ScenarioMetrics]
@@ -101,11 +123,12 @@ class BenchmarkSummary:
 def _torch_compile_model(
     model: torch.nn.Module,
     device: torch.device,
+    provider: ModuleType,
 ) -> torch.nn.Module:
     """Wrap `torch.compile` with provider-friendly defaults (no cudagraph capture)."""
     if device.type != "cuda":
         raise RuntimeError(
-            f"torch.compile() for provider {_provider_name()} requires a CUDA device."
+            f"torch.compile() for provider {_provider_display_name(provider)} requires a CUDA device."
         )
 
     if SUPPRESS_COMPILE_WARNINGS:
@@ -156,15 +179,23 @@ def configure_torch_runtime(device: torch.device) -> None:
         torch.backends.cudnn.deterministic = False
 
 
-def discover_configs(prefix: str = "CONFIG_") -> Dict[str, Any]:
-    """Discover dataclass configs in the configured model provider that match the prefix."""
-    configs: Dict[str, Any] = {}
-    for name in dir(MODEL_PROVIDER):
-        if not name.startswith(prefix):
-            continue
-        value = getattr(MODEL_PROVIDER, name)
-        if is_dataclass(value) and not isinstance(value, type):
-            configs[name] = value
+def discover_configs(prefix: str = "CONFIG_") -> Dict[str, DiscoveredConfig]:
+    """Discover dataclass configs in the configured model providers that match the prefix."""
+    configs: Dict[str, DiscoveredConfig] = {}
+    for provider in MODEL_PROVIDERS:
+        provider_display = _provider_display_name(provider)
+        for name in sorted(dir(provider)):
+            if not name.startswith(prefix):
+                continue
+            value = getattr(provider, name)
+            if is_dataclass(value) and not isinstance(value, type):
+                entry = DiscoveredConfig(
+                    provider=provider,
+                    provider_display_name=provider_display,
+                    attr_name=name,
+                    config=value,
+                )
+                configs[entry.qualified_name] = entry
     return configs
 
 
@@ -287,12 +318,13 @@ def _config_to_model_kwargs(config: Any) -> Dict[str, Any]:
 
 
 def _build_model_from_provider(
+    provider: ModuleType,
     config: Any,
     get_loss: Optional[Callable[..., Tuple[torch.Tensor, int]]],
 ) -> torch.nn.Module:
     """Instantiate a model using the configured provider's `get_model` entrypoint."""
     model_kwargs = _config_to_model_kwargs(config)
-    get_model_fn = MODEL_PROVIDER.get_model
+    get_model_fn = provider.get_model
     signature = inspect.signature(get_model_fn)
     constructed_kwargs: Dict[str, Any] = {}
 
@@ -305,7 +337,7 @@ def _build_model_from_provider(
             continue
         if param.default is inspect._empty:
             raise KeyError(
-                f"Required parameter '{name}' is missing from config {config} for provider {MODEL_PROVIDER.__name__}."
+                f"Required parameter '{name}' is missing from config {config} for provider {provider.__name__}."
             )
 
     return get_model_fn(**constructed_kwargs)
@@ -498,6 +530,7 @@ def _stage_label(stage: str) -> str:
 def _run_stage_once(
     config_name: str,
     config: Any,
+    provider: ModuleType,
     device: torch.device,
     batch_size: int,
     seq_len: int,
@@ -516,8 +549,9 @@ def _run_stage_once(
 
     try:
         model = _build_model_from_provider(
-            config,
-            _synthetic_loss if requires_labels else None,
+            provider=provider,
+            config=config,
+            get_loss=_synthetic_loss if requires_labels else None,
         )
     except torch.cuda.OutOfMemoryError:
         console.print(
@@ -545,7 +579,7 @@ def _run_stage_once(
             else:
                 model.train()
             try:
-                model = _torch_compile_model(model, device)
+                model = _torch_compile_model(model=model, device=device, provider=provider)
             except torch.cuda.OutOfMemoryError:
                 console.print(
                     f"[bold red]{config_name}: OOM compiling {stage_label} model.[/bold red]"
@@ -632,6 +666,7 @@ def _run_stage_once(
 
 def benchmark_config(
     name: str,
+    provider: ModuleType,
     config: Any,
     device: torch.device,
     seq_len: int,
@@ -644,7 +679,11 @@ def benchmark_config(
     param_stats: ParamStats = {"total": None, "trainable": None, "embedding": None}
 
     try:
-        reference_model = _build_model_from_provider(config, _synthetic_loss)
+        reference_model = _build_model_from_provider(
+            provider=provider,
+            config=config,
+            get_loss=_synthetic_loss,
+        )
         param_stats["total"] = sum(p.numel() for p in reference_model.parameters())
         param_stats["trainable"] = sum(
             p.numel() for p in reference_model.parameters() if p.requires_grad
@@ -668,6 +707,7 @@ def benchmark_config(
         eager_result = _run_stage_once(
             config_name=name,
             config=config,
+            provider=provider,
             device=device,
             batch_size=batch_size,
             seq_len=seq_len,
@@ -702,6 +742,7 @@ def benchmark_config(
             compiled_result = _run_stage_once(
                 config_name=name,
                 config=config,
+                provider=provider,
                 device=device,
                 batch_size=batch_size,
                 seq_len=seq_len,
@@ -771,7 +812,12 @@ def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -
         return
 
     device_is_cuda = _is_cuda_device(device)
-    table = Table(title=f"{_provider_name()} Benchmark Summary", expand=True, show_lines=True)
+    provider_labels: List[str] = []
+    for summary in results:
+        if summary.provider_display_name not in provider_labels:
+            provider_labels.append(summary.provider_display_name)
+    title_prefix = ", ".join(provider_labels) if provider_labels else "Model"
+    table = Table(title=f"{title_prefix} Benchmark Summary", expand=True, show_lines=True)
     table.add_column("Metric", justify="left", style="bold")
     for summary in results:
         table.add_column(summary.name, justify="right")
@@ -1027,7 +1073,7 @@ def print_summary_table(results: List[BenchmarkSummary], device: torch.device) -
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=f"Benchmark {_provider_name()} configs with timing and memory stats."
+        description=f"Benchmark {', '.join(_provider_names())} configs with timing and memory stats."
     )
     parser.add_argument("--batch-size", type=int, default=1, help="Batch size for synthetic data.")
     parser.add_argument(
@@ -1053,13 +1099,16 @@ def parse_args() -> argparse.Namespace:
         "--config",
         type=str,
         default=None,
-        help="Run a single config (name must match CONFIG_* attribute).",
+        help="Run a single config (CONFIG_* attribute or provider-qualified like te_llama3.CONFIG_124M).",
     )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    provider_names = _provider_names()
+    provider_label = ", ".join(provider_names)
+    provider_plural = "provider" if len(provider_names) == 1 else "providers"
 
     if args.device:
         device = torch.device(args.device)
@@ -1074,7 +1123,7 @@ def main() -> None:
 
     if not is_cuda:
         console.print(
-            f"[bold yellow]CUDA device not detected. {_provider_name()} generally requires GPU support for benchmarking.[/bold yellow]"
+            f"[bold yellow]CUDA device not detected. {provider_label} {provider_plural} generally require GPU support for benchmarking.[/bold yellow]"
         )
 
     run_compiled = not args.no_compile
@@ -1085,26 +1134,36 @@ def main() -> None:
         run_compiled = False
     if run_compiled and not is_cuda:
         console.print(
-            f"[bold yellow]Skipping compiled benchmarks because {_provider_name()} compilation requires a CUDA-capable device.[/bold yellow]"
+            f"[bold yellow]Skipping compiled benchmarks because {provider_label} compilation requires a CUDA-capable device.[/bold yellow]"
         )
         run_compiled = False
 
     configs = discover_configs()
+    config_items = list(configs.items())
 
     if args.config:
-        if args.config not in configs:
-            raise ValueError(f"Unknown config '{args.config}'. Available: {', '.join(sorted(configs))}")
-        configs = {args.config: configs[args.config]}
+        filtered_items = [
+            (name, entry)
+            for name, entry in config_items
+            if name == args.config or entry.attr_name == args.config
+        ]
+        if not filtered_items:
+            available_configs = ", ".join(sorted(configs))
+            raise ValueError(
+                f"Unknown config '{args.config}'. Available: {available_configs}"
+            )
+        config_items = filtered_items
 
-    if not configs:
+    if not config_items:
         console.print(
-            f"[bold red]No CONFIG_ prefixed dataclass configs found in {_provider_name()}.[/bold red]"
+            f"[bold red]No CONFIG_ prefixed dataclass configs found in providers {provider_label}.[/bold red]"
         )
         return
 
     summaries: List[BenchmarkSummary] = []
 
-    for name, config in configs.items():
+    for name, entry in config_items:
+        config = entry.config
         # scrub allocator state so each config starts from the same baseline
         if is_cuda:
             torch.cuda.empty_cache()
@@ -1114,6 +1173,7 @@ def main() -> None:
         console.print(f"[cyan]Benchmarking {name}[/cyan]")
         stages, param_stats = benchmark_config(
             name=name,
+            provider=entry.provider,
             config=config,
             device=device,
             seq_len=args.seq_length,
@@ -1125,6 +1185,7 @@ def main() -> None:
         summaries.append(
             BenchmarkSummary(
                 name=name,
+                provider_display_name=entry.provider_display_name,
                 config=config,
                 param_stats=param_stats,
                 stages=stages,
