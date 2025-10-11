@@ -20,6 +20,7 @@ import logging
 import os
 import random
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple, TypedDict, Union, cast
@@ -56,6 +57,8 @@ class RolloutData(TypedDict):
     logits_to_keep: int
     batch_size: int
     num_generations: int
+    policy_duration: float
+    reference_duration: float
 
 
 def init_torch(seed) -> Tuple[str, int]:
@@ -464,13 +467,18 @@ def generate_rollout_data(
     answers = [s["answer"] if isinstance(s, dict) else s[1] for s in batch_samples]
 
     with torch.no_grad():
+        policy_start = time.perf_counter()
         p_ids, p_mask, c_ids, c_mask = generate_completions(model, tokenizer, prompts, num_generations, max_completion_length)
         input_ids = torch.cat([p_ids, c_ids], dim=1)
         attention_mask = torch.cat([p_mask, c_mask], dim=1)  # type: ignore[arg-type]
         logits_to_keep = c_ids.size(1)
 
         old_log_probs = compute_log_probs(model, input_ids, attention_mask, logits_to_keep)
+        policy_duration = time.perf_counter() - policy_start
+
+        ref_start = time.perf_counter()
         ref_log_probs = compute_log_probs(ref_model, input_ids, attention_mask, logits_to_keep)
+        reference_duration = time.perf_counter() - ref_start
 
     # PERF: batch decode instead of per-sample loop
     decoded = tokenizer.batch_decode(c_ids, skip_special_tokens=True)
@@ -482,6 +490,7 @@ def generate_rollout_data(
         input_ids=input_ids, attention_mask=attention_mask, completion_mask=c_mask, old_log_probs=old_log_probs,
         ref_log_probs=ref_log_probs, formatted_completions=formatted_completions, repeated_prompts=repeated_prompts,
         repeated_answers=repeated_answers, logits_to_keep=logits_to_keep, batch_size=len(prompts), num_generations=num_generations,
+        policy_duration=policy_duration, reference_duration=reference_duration,
     )
 
 
@@ -545,6 +554,11 @@ def train_with_grpo(
     num_generations: int, max_completion_length: int, beta: float, learning_rate: float, mu: int, epsilon: float,
     reward_function: RewardFn,
 ) -> PreTrainedModel:
+    train_start = time.perf_counter()
+    policy_rollout_times: List[float] = []
+    reference_rollout_times: List[float] = []
+    policy_update_times: List[float] = []
+
     policy_model: PolicyModel = nn.parallel.DistributedDataParallel(
         model, device_ids=[device_id], gradient_as_bucket_view=False, #TODO: check if gradient_as_bucket_view=True works
     )  # grads are kept in reducer buckets avoiding 2x memory usage
@@ -586,19 +600,41 @@ def train_with_grpo(
                 if was_training:
                     policy_module.train()
 
+            policy_rollout_times.append(rollout_data["policy_duration"])
+            reference_rollout_times.append(rollout_data["reference_duration"])
+
             for grpo_iter in range(1, mu + 1):  # number of GRPO updates per batch
+                update_start = time.perf_counter()
                 loss, avg_reward = grpo_loss(policy_model, rollout_data, reward_function, beta, epsilon)
                 optimizer.zero_grad()  # TODO: check if this would work because gradient_as_bucket_view=True
                 loss.backward()
                 total_norm = torch.nn.utils.clip_grad_norm_(policy_model.parameters(), max_norm=0.1)
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)  # TODO: check if this would work because gradient_as_bucket_view=True
+                policy_update_times.append(time.perf_counter() - update_start)
                 logger.info(
                     "Itr %d/%d, Step %d/%d, mu %d/%d, Loss: %.1g, reward: %.1g, norm: %.1g",
                     iteration, num_iterations, step, steps_per_iteration, grpo_iter, mu, loss.item(), avg_reward, total_norm.item()
                 )
 
         logger.info("Completed iteration %d. (Placeholder: reward model update would happen here.)", iteration)
+
+    def _safe_mean(values: List[float]) -> float:
+        return float(np.mean(values)) if values else 0.0
+
+    total_policy_rollouts = float(sum(policy_rollout_times))
+    total_reference_rollouts = float(sum(reference_rollout_times))
+    total_policy_updates = float(sum(policy_update_times))
+    train_elapsed = time.perf_counter() - train_start
+
+    logger.info(
+        "Mean timings (s): policy rollouts=%.3f, reference rollouts=%.3f, policy updates=%.3f",
+        _safe_mean(policy_rollout_times), _safe_mean(reference_rollout_times), _safe_mean(policy_update_times),
+    )
+    logger.info(
+        "Total timings (s): policy rollouts=%.3f, reference rollouts=%.3f, policy updates=%.3f, end-to-end=%.3f",
+        total_policy_rollouts, total_reference_rollouts, total_policy_updates, train_elapsed,
+    )
 
     return unwrap(policy_model)
 
