@@ -552,7 +552,7 @@ def train_with_grpo(
     device_name: str, device_id: int, model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase,
     train_data: Sequence[DatasetExample], num_iterations: int, steps_per_iteration: int, batch_size: int,
     num_generations: int, max_completion_length: int, beta: float, learning_rate: float, mu: int, epsilon: float,
-    reward_function: RewardFn,
+    reward_function: RewardFn, lr_warmup_steps: int, lr_cooldown_start: float,
 ) -> PreTrainedModel:
     train_start = time.perf_counter()
     policy_rollout_times: List[float] = []
@@ -565,6 +565,24 @@ def train_with_grpo(
 
     def unwrap(module_like: PolicyModel) -> PreTrainedModel:
         return cast(PreTrainedModel, module_like.module)
+
+    total_updates = max(1, num_iterations * steps_per_iteration * max(1, mu))
+    warmup_steps = max(0, min(lr_warmup_steps, total_updates))
+    cooldown_start_frac = min(max(lr_cooldown_start, 0.0), 1.0)
+    cooldown_start_step = max(warmup_steps, int(total_updates * cooldown_start_frac))
+    cooldown_start_step = min(total_updates, cooldown_start_step)
+
+    def _lr_scale(step: int) -> float:
+        if warmup_steps > 0 and step <= warmup_steps:
+            return step / float(warmup_steps)
+        if step < cooldown_start_step or cooldown_start_step >= total_updates:
+            return 1.0
+        if total_updates == cooldown_start_step:
+            return 1.0
+        progress = (step - cooldown_start_step) / float(total_updates - cooldown_start_step)
+        return max(0.0, 1.0 - progress)
+
+    update_step = 0
 
     for iteration in range(1, num_iterations + 1): # number of times we freeze the reference model and copy from policy model
         logger.info("Starting iteration %d/%d", iteration, num_iterations)
@@ -604,6 +622,10 @@ def train_with_grpo(
             reference_rollout_times.append(rollout_data["reference_duration"])
 
             for grpo_iter in range(1, mu + 1):  # number of GRPO updates per batch
+                update_step += 1
+                lr_factor = _lr_scale(update_step)
+                for group in optimizer.param_groups:
+                    group["lr"] = learning_rate * lr_factor
                 update_start = time.perf_counter()
                 loss, avg_reward = grpo_loss(policy_model, rollout_data, reward_function, beta, epsilon)
                 optimizer.zero_grad()  # TODO: check if this would work because gradient_as_bucket_view=True
@@ -666,6 +688,7 @@ def run_grpo_training(
     eval_batch_size: int = 32, eval_max_new_tokens: int = 512, eval_temperature: float = 0.7, num_iterations: int = 1,
     steps_per_iteration: int = 500, batch_size: int = 7, num_generations: int = 12, max_completion_length: int = 400,
     beta: float = 0.04, learning_rate: float = 5e-6, mu: int = 1, epsilon: float = 0.1,
+    lr_warmup_steps: int = 256, lr_cooldown_start: float = 0.4,
     reward_function: RewardFn = combined_reward, out_dir: Optional[str] = None,
 ) -> dict:
     """Run GRPO RL fine-tuning end-to-end."""
@@ -762,7 +785,7 @@ def run_grpo_training(
         device_name, device_id, model=model, tokenizer=tokenizer, train_data=train_data, num_iterations=num_iterations,
         steps_per_iteration=steps_per_iteration, batch_size=batch_size, num_generations=num_generations,
         max_completion_length=max_completion_length, beta=beta, learning_rate=learning_rate, mu=mu, epsilon=epsilon,
-        reward_function=reward_function,
+        reward_function=reward_function, lr_warmup_steps=lr_warmup_steps, lr_cooldown_start=lr_cooldown_start,
     )
 
     logger.info("Final model evaluation after GRPO RL finetuning...")
@@ -812,6 +835,8 @@ def main() -> None:
                         help="Reward function to use during training")
     parser.add_argument("--out-dir", type=str, default=None, help="Base directory for outputs (overrides OUT_DIR environment variable)")
     parser.add_argument("--run_name", type=str, default=None, help="Name for this run (defaults to timestamp)")
+    parser.add_argument("--lr-warmup-steps", type=int, default=256, help="Number of optimizer steps to warm up the learning rate")
+    parser.add_argument("--lr-cooldown-start", type=float, default=0.4, help="Fraction of total steps when learning rate cooldown begins")
 
     args = parser.parse_args()
 
@@ -834,6 +859,7 @@ def main() -> None:
         "num_iterations": args.num_iterations, "steps_per_iteration": args.steps_per_iteration, "batch_size": args.batch_size,
         "num_generations": args.num_generations, "max_completion_length": args.max_completion_length, "beta": args.beta,
         "learning_rate": args.learning_rate, "mu": args.mu, "epsilon": args.epsilon, "out_dir": str(run_dir),
+        "lr_warmup_steps": args.lr_warmup_steps, "lr_cooldown_start": args.lr_cooldown_start,
     }
 
     config = {
