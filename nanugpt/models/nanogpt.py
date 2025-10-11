@@ -41,6 +41,7 @@ class GPTConfig:
     resid_dropout: float = 0.0
     embed_dropout: float = 0.0
     initializer_range: float = 0.02
+    tie_lm_head: bool = True  # tie token embedding and lm_head weights by default
 
 # GPT-2 124M-like config
 CONFIG_124M = GPTConfig(
@@ -241,14 +242,15 @@ class GPT(nn.Module):
         # LM head is last layer which projects the final hidden state to vocab_size
         # we keep bias False to match with embedding layer which has no bias
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        self.lm_head.LLMC_SKIP_INIT = 1 # don't init this one, we will tie weights # type: ignore
+        if config.tie_lm_head:
+            self.lm_head.LLMC_SKIP_INIT = 1 # don't init this one, we will tie weights # type: ignore
 
-        # with weight tying when using torch.compile() some warnings get generated:
-        # "UserWarning: functional_call was passed multiple values for tied weights.
-        # This behavior is deprecated and will be an error in future versions"
-        # not 100% sure what this is, so far seems to be harmless. TODO investigate
-        # https://paperswithcode.com/method/weight-tying
-        self.transformer.wte.weight = self.lm_head.weight # type: ignore
+            # with weight tying when using torch.compile() some warnings get generated:
+            # "UserWarning: functional_call was passed multiple values for tied weights.
+            # This behavior is deprecated and will be an error in future versions"
+            # not 100% sure what this is, so far seems to be harmless. TODO investigate
+            # https://paperswithcode.com/method/weight-tying
+            self.transformer.wte.weight = self.lm_head.weight # type: ignore
 
         # init all weights, use a torch rng object to be very careful
         self.init_rng = torch.Generator()
@@ -345,6 +347,7 @@ def get_model(
                 mlp_dropout=0.0, # dropout for feedforward layer
 
                 initializer_range=0.02, # defaults to 0.02, The standard deviation of the truncated_normal_initializer for initializing all weight matrices
+                tie_lm_head=True,
               ):
 
     gpt_config = GPTConfig(
@@ -361,7 +364,8 @@ def get_model(
                             attn_dropout=attn_dropout,
                             mlp_dropout=mlp_dropout,
                             resid_dropout=resid_dropout,
-                            embed_dropout=embed_dropout
+                            embed_dropout=embed_dropout,
+                            tie_lm_head=tie_lm_head,
                             )
 
     return GPT(gpt_config, get_loss)
