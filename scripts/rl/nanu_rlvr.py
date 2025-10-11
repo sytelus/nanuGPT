@@ -643,31 +643,18 @@ def train_with_grpo(
     reference_rollout_times: List[float] = []
     policy_update_times: List[float] = []
 
-    device_name = config.device_name
-    device_id = config.device_id
-    num_iterations = config.num_iterations
-    steps_per_iteration = config.steps_per_iteration
-    batch_size = config.batch_size
-    num_generations = config.num_generations
-    max_completion_length = config.max_completion_length
-    beta = config.beta
-    learning_rate = config.learning_rate
-    mu = config.mu
-    epsilon = config.epsilon
-    lr_warmup_steps = config.lr_warmup_steps
-    lr_cooldown_start = config.lr_cooldown_start
     reward_fn = REWARD_FUNCTIONS[config.reward_function]
 
     policy_model: PolicyModel = nn.parallel.DistributedDataParallel(
-        model, device_ids=[device_id], gradient_as_bucket_view=False, #TODO: check if gradient_as_bucket_view=True works
+        model, device_ids=[config.device_id], gradient_as_bucket_view=False, #TODO: check if gradient_as_bucket_view=True works
     )  # grads are kept in reducer buckets avoiding 2x memory usage
 
     def unwrap(module_like: PolicyModel) -> PreTrainedModel:
         return cast(PreTrainedModel, module_like.module)
 
-    total_updates = max(1, num_iterations * steps_per_iteration * max(1, mu))
-    warmup_steps = max(0, min(lr_warmup_steps, total_updates))
-    cooldown_start_frac = min(max(lr_cooldown_start, 0.0), 1.0)
+    total_updates = max(1, config.num_iterations * config.steps_per_iteration * max(1, config.mu))
+    warmup_steps = max(0, min(config.lr_warmup_steps, total_updates))
+    cooldown_start_frac = min(max(config.lr_cooldown_start, 0.0), 1.0)
     cooldown_start_step = max(warmup_steps, int(total_updates * cooldown_start_frac))
     cooldown_start_step = min(total_updates, cooldown_start_step)
 
@@ -683,22 +670,22 @@ def train_with_grpo(
 
     update_step = 0
 
-    for iteration in range(1, num_iterations + 1): # number of times we freeze the reference model and copy from policy model
-        logger.info("Starting iteration %d/%d", iteration, num_iterations)
+    for iteration in range(1, config.num_iterations + 1): # number of times we freeze the reference model and copy from policy model
+        logger.info("Starting iteration %d/%d", iteration, config.num_iterations)
 
         # Snapshot policy -> reference (no grads).
-        device = torch.device(device_name)
+        device = torch.device(config.device_name)
         reference_model = copy.deepcopy(unwrap(policy_model)).to(device)
         reference_model.eval()
         for p in reference_model.parameters():
             p.requires_grad = False
 
-        optimizer = torch.optim.AdamW(policy_model.parameters(), lr=learning_rate, fused=torch.cuda.is_available())  # type: ignore[arg-type]
+        optimizer = torch.optim.AdamW(policy_model.parameters(), lr=config.learning_rate, fused=torch.cuda.is_available())  # type: ignore[arg-type]
 
         policy_model.train()
 
-        for step in range(1, steps_per_iteration + 1):  # number of policy updates per iteration
-            batch_samples = random.sample(train_data, batch_size)
+        for step in range(1, config.steps_per_iteration + 1):  # number of policy updates per iteration
+            batch_samples = random.sample(train_data, config.batch_size)
 
             # Generate with current policy snapshot on the primary device.
             with torch.no_grad():
@@ -710,7 +697,9 @@ def train_with_grpo(
                 policy_module.config.use_cache = True
 
                 # TODO: would this work for distributed setup?
-                rollout_data = generate_rollout_data(policy_module, reference_model, tokenizer, batch_samples, num_generations, max_completion_length)
+                rollout_data = generate_rollout_data(
+                    policy_module, reference_model, tokenizer, batch_samples, config.num_generations, config.max_completion_length
+                )
 
                 # Restore training state.
                 policy_module.config.use_cache = prev_cache
@@ -720,13 +709,13 @@ def train_with_grpo(
             policy_rollout_times.append(rollout_data["policy_duration"])
             reference_rollout_times.append(rollout_data["reference_duration"])
 
-            for grpo_iter in range(1, mu + 1):  # number of GRPO updates per batch
+            for grpo_iter in range(1, config.mu + 1):  # number of GRPO updates per batch
                 update_step += 1
                 lr_factor = _lr_scale(update_step)
                 for group in optimizer.param_groups:
-                    group["lr"] = learning_rate * lr_factor
+                    group["lr"] = config.learning_rate * lr_factor
                 update_start = time.perf_counter()
-                loss, avg_reward = grpo_loss(policy_model, rollout_data, reward_fn, beta, epsilon)
+                loss, avg_reward = grpo_loss(policy_model, rollout_data, reward_fn, config.beta, config.epsilon)
                 optimizer.zero_grad()  # TODO: check if this would work because gradient_as_bucket_view=True
                 loss.backward()
                 total_norm = torch.nn.utils.clip_grad_norm_(policy_model.parameters(), max_norm=0.1)
@@ -735,7 +724,7 @@ def train_with_grpo(
                 policy_update_times.append(time.perf_counter() - update_start)
                 logger.info(
                     "Itr %d/%d, Step %d/%d, mu %d/%d, Loss: %.1g, reward: %.1g, norm: %.1g",
-                    iteration, num_iterations, step, steps_per_iteration, grpo_iter, mu, loss.item(), avg_reward, total_norm.item()
+                    iteration, config.num_iterations, step, config.steps_per_iteration, grpo_iter, config.mu, loss.item(), avg_reward, total_norm.item()
                 )
 
         logger.info("Completed iteration %d. (Placeholder: reward model update would happen here.)", iteration)
