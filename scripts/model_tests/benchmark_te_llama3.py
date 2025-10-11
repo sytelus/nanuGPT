@@ -69,14 +69,9 @@ _RICH_TAG_PATTERN = re.compile(r"\[/?[^\]]+\]")
 def _strip_markup(text: str) -> str:
     return _RICH_TAG_PATTERN.sub("", str(text))
 
-AVAILABLE_PROVIDER_REGISTRY: Dict[str, ModuleType] = {
-    "nanogpt": nanogpt_models,
-    "te_llama3": te_llama3,
-}
-DEFAULT_PROVIDER_ORDER: List[str] = ["te_llama3"]
-
 MODEL_PROVIDERS: List[ModuleType] = [
-    AVAILABLE_PROVIDER_REGISTRY[name] for name in DEFAULT_PROVIDER_ORDER
+    nanogpt_models,
+    te_llama3,
 ]
 
 
@@ -87,35 +82,6 @@ def _provider_display_name(provider: ModuleType) -> str:
 def _provider_names(providers: Optional[Sequence[ModuleType]] = None) -> List[str]:
     providers = providers if providers is not None else MODEL_PROVIDERS
     return [_provider_display_name(provider) for provider in providers]
-
-
-def _select_providers_from_names(names: Optional[str]) -> List[ModuleType]:
-    if not names:
-        return [AVAILABLE_PROVIDER_REGISTRY[name] for name in DEFAULT_PROVIDER_ORDER]
-
-    requested = [segment.strip().lower() for segment in names.split(",") if segment.strip()]
-    if not requested:
-        return [AVAILABLE_PROVIDER_REGISTRY[name] for name in DEFAULT_PROVIDER_ORDER]
-
-    if "all" in requested:
-        return list(AVAILABLE_PROVIDER_REGISTRY.values())
-
-    missing = [name for name in requested if name not in AVAILABLE_PROVIDER_REGISTRY]
-    if missing:
-        valid = ", ".join(sorted(AVAILABLE_PROVIDER_REGISTRY))
-        raise ValueError(
-            f"Unknown provider name(s): {', '.join(missing)}. Valid options: {valid}, all"
-        )
-
-    # Preserve requested order while dropping duplicates
-    seen: set[str] = set()
-    selected: List[ModuleType] = []
-    for name in requested:
-        if name in seen:
-            continue
-        seen.add(name)
-        selected.append(AVAILABLE_PROVIDER_REGISTRY[name])
-    return selected
 
 
 def _device_to_spec(device: torch.device) -> str:
@@ -1318,23 +1284,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Run a single config (CONFIG_* attribute or provider-qualified like te_llama3.CONFIG_124M).",
     )
-    parser.add_argument(
-        "--providers",
-        type=str,
-        default=None,
-        help=(
-            "Comma-separated provider names to benchmark (choices: "
-            f"{', '.join(sorted(AVAILABLE_PROVIDER_REGISTRY))}, all)."
-            " Defaults to te_llama3."
-        ),
-    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    global MODEL_PROVIDERS
-    MODEL_PROVIDERS = _select_providers_from_names(args.providers)
     provider_names = _provider_names()
     provider_label = ", ".join(provider_names)
     provider_plural = "provider" if len(provider_names) == 1 else "providers"
