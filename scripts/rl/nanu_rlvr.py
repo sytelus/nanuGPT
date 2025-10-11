@@ -13,7 +13,7 @@ across replicas using DDP. After each iteration, the policy model is copied to
 the reference model and the process is repeated.
 """
 
-import argparse
+from argparse import ArgumentParser, BooleanOptionalAction
 import copy
 import json
 import logging
@@ -21,9 +21,10 @@ import os
 import random
 import re
 import time
+from dataclasses import MISSING, asdict, dataclass, field, fields as dataclass_fields, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple, TypedDict, Union, cast
+from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple, TypedDict, Union, cast, get_args, get_origin
 
 import numpy as np
 import torch
@@ -380,6 +381,92 @@ KNOWN_DATASETS: Dict[str, Dict[str, str]] = {
     "gsm8k": {"path": "openai/gsm8k", "subset": "main", "train_split": "train", "test_split": "test"},
 }
 
+
+@dataclass(frozen=True)
+class Config:
+    """Configuration for GRPO training with XML-formatted answers."""
+    seed: int = 42
+    model_mode: str = field(default="completion", metadata={"choices": ("completion", "chat")})
+    greedy_eval: bool = False
+    model_name: str = "Qwen/Qwen2.5-1.5B-Instruct"
+    dataset: str = field(default="gsm8k", metadata={"choices": tuple(KNOWN_DATASETS.keys())})
+    num_eval_examples: int = 30
+    eval_batch_size: int = 32
+    eval_max_new_tokens: int = 512
+    eval_temperature: float = 0.7
+    num_iterations: int = 1
+    steps_per_iteration: int = 500
+    batch_size: int = 7
+    num_generations: int = 12
+    max_completion_length: int = 400
+    beta: float = 0.04
+    learning_rate: float = 5e-6
+    mu: int = 1
+    epsilon: float = 0.1
+    reward_function: str = field(default="combined", metadata={"choices": tuple(REWARD_FUNCTIONS.keys())})
+    out_dir: Optional[str] = None
+    run_name: Optional[str] = None
+    lr_warmup_steps: int = 256
+    lr_cooldown_start: float = 0.4
+    device_name: str = field(default="cpu", metadata={"cli": False})
+    device_id: int = field(default=-1, metadata={"cli": False})
+    run_dir: str = field(default="", metadata={"cli": False})
+
+
+def _resolve_cli_type(field_type):
+    origin = get_origin(field_type)
+    if origin is Union:
+        args = [arg for arg in get_args(field_type) if arg is not type(None)]
+        if len(args) == 1:
+            return args[0], True
+    return field_type, False
+
+
+def parse_dc(cls):
+    parser = ArgumentParser(prog=cls.__name__, description=cls.__doc__)
+    for f in dataclass_fields(cls):
+        if not f.init or f.metadata.get("cli", True) is False:
+            continue
+
+        option = "--" + f.name.replace("_", "-")
+        has_default = not (f.default is MISSING and f.default_factory is MISSING)
+        default_value = None
+        if f.default is not MISSING:
+            default_value = f.default
+        elif f.default_factory is not MISSING:  # type: ignore[misc]
+            default_value = f.default_factory()  # type: ignore[call-arg]
+
+        required = not has_default
+        arg_type, _ = _resolve_cli_type(f.type)
+
+        if arg_type is bool:
+            parser.add_argument(
+                option,
+                dest=f.name,
+                action=BooleanOptionalAction,
+                required=required,
+                default=(None if required else default_value),
+            )
+            continue
+
+        kwargs: Dict[str, object] = {"dest": f.name, "required": required}
+        if arg_type is not None:
+            kwargs["type"] = arg_type  # type: ignore[assignment]
+        if not required:
+            kwargs["default"] = default_value
+        choices = f.metadata.get("choices")
+        if choices:
+            kwargs["choices"] = choices
+        help_text = f.metadata.get("help")
+        if help_text:
+            kwargs["help"] = help_text
+
+        parser.add_argument(option, **kwargs)  # type: ignore[arg-type]
+
+    parsed = vars(parser.parse_args())
+    return cls(**parsed)
+
+
 def selective_log_softmax(logits: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
     """
     Return log P(token_t) for each position t in `input_ids`, using logits.
@@ -549,15 +636,27 @@ def grpo_loss(model: PolicyModel, rollout_data: RolloutData, reward_function: Re
 # Training loop
 # -------------------------
 def train_with_grpo(
-    device_name: str, device_id: int, model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase,
-    train_data: Sequence[DatasetExample], num_iterations: int, steps_per_iteration: int, batch_size: int,
-    num_generations: int, max_completion_length: int, beta: float, learning_rate: float, mu: int, epsilon: float,
-    reward_function: RewardFn, lr_warmup_steps: int, lr_cooldown_start: float,
+    model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, train_data: Sequence[DatasetExample], config: Config,
 ) -> PreTrainedModel:
     train_start = time.perf_counter()
     policy_rollout_times: List[float] = []
     reference_rollout_times: List[float] = []
     policy_update_times: List[float] = []
+
+    device_name = config.device_name
+    device_id = config.device_id
+    num_iterations = config.num_iterations
+    steps_per_iteration = config.steps_per_iteration
+    batch_size = config.batch_size
+    num_generations = config.num_generations
+    max_completion_length = config.max_completion_length
+    beta = config.beta
+    learning_rate = config.learning_rate
+    mu = config.mu
+    epsilon = config.epsilon
+    lr_warmup_steps = config.lr_warmup_steps
+    lr_cooldown_start = config.lr_cooldown_start
+    reward_fn = REWARD_FUNCTIONS[config.reward_function]
 
     policy_model: PolicyModel = nn.parallel.DistributedDataParallel(
         model, device_ids=[device_id], gradient_as_bucket_view=False, #TODO: check if gradient_as_bucket_view=True works
@@ -627,7 +726,7 @@ def train_with_grpo(
                 for group in optimizer.param_groups:
                     group["lr"] = learning_rate * lr_factor
                 update_start = time.perf_counter()
-                loss, avg_reward = grpo_loss(policy_model, rollout_data, reward_function, beta, epsilon)
+                loss, avg_reward = grpo_loss(policy_model, rollout_data, reward_fn, beta, epsilon)
                 optimizer.zero_grad()  # TODO: check if this would work because gradient_as_bucket_view=True
                 loss.backward()
                 total_norm = torch.nn.utils.clip_grad_norm_(policy_model.parameters(), max_norm=0.1)
@@ -682,28 +781,21 @@ def enable_activation_checkpointing(model: PreTrainedModel) -> PreTrainedModel:
 
     return model
 
-def run_grpo_training(
-    device_name: str, device_id: str, model_mode: str = "completion", greedy_eval: bool = False,
-    model_name: str = "Qwen/Qwen2.5-1.5B-Instruct", dataset: str = "gsm8k", num_eval_examples: int = 30,
-    eval_batch_size: int = 32, eval_max_new_tokens: int = 512, eval_temperature: float = 0.7, num_iterations: int = 1,
-    steps_per_iteration: int = 500, batch_size: int = 7, num_generations: int = 12, max_completion_length: int = 400,
-    beta: float = 0.04, learning_rate: float = 5e-6, mu: int = 1, epsilon: float = 0.1,
-    lr_warmup_steps: int = 256, lr_cooldown_start: float = 0.4,
-    reward_function: RewardFn = combined_reward, out_dir: Optional[str] = None,
-) -> dict:
+def run_grpo_training(config: Config) -> dict:
     """Run GRPO RL fine-tuning end-to-end."""
 
-    device = torch.device(device_name)
+    device = torch.device(config.device_name)
+    run_dir = Path(config.run_dir)
     logger.info("Initial CUDA memory allocated: %.1g GB", torch.cuda.max_memory_allocated(device) / 1e9)
 
-    logger.info("Downloading model %s...", model_name)
+    logger.info("Downloading model %s...", config.model_name)
     model = AutoModelForCausalLM.from_pretrained(
-        model_name, dtype="auto", device_map={"": device_id} if torch.cuda.is_available() else None, trust_remote_code=True,
+        config.model_name, dtype="auto", device_map={"": config.device_id} if torch.cuda.is_available() else None, trust_remote_code=True,
     )
     logger.info("Model download complete. dtype is %s", str(next(model.parameters()).dtype))
     logger.info("CUDA memory allocated after model download: %.1g GB", torch.cuda.max_memory_allocated(device) / 1e9)
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(config.model_name)
 
     # validate and fix tokenizer
     if tokenizer.eos_token is None:
@@ -727,25 +819,25 @@ def run_grpo_training(
         logger.warning("Setting `tokenizer.pad_token` to `tokenizer.eos_token` (%s).", repr(tokenizer.eos_token))
     tokenizer.padding_side = "left"  # centralized padding side
 
-    if dataset not in KNOWN_DATASETS:
-        raise ValueError(f"Unknown dataset '{dataset}'. Known datasets: {', '.join(sorted(KNOWN_DATASETS))}")
-    dataset_cfg = KNOWN_DATASETS[dataset]
+    if config.dataset not in KNOWN_DATASETS:
+        raise ValueError(f"Unknown dataset '{config.dataset}'. Known datasets: {', '.join(sorted(KNOWN_DATASETS))}")
+    dataset_cfg = KNOWN_DATASETS[config.dataset]
 
-    system_prompt = build_system_prompt(model_mode)
+    system_prompt = build_system_prompt(config.model_mode)
     logger.info("System prompt:\n%s", system_prompt)
 
-    train_data = prepare_dataset(tokenizer, model_mode, system_prompt, dataset_cfg, dataset_cfg["train_split"])
+    train_data = prepare_dataset(tokenizer, config.model_mode, system_prompt, dataset_cfg, dataset_cfg["train_split"])
     random.shuffle(train_data)
     eval_split_name = dataset_cfg.get("test_split")
     if eval_split_name:
-        eval_data = prepare_dataset(tokenizer, model_mode, system_prompt, dataset_cfg, eval_split_name)
+        eval_data = prepare_dataset(tokenizer, config.model_mode, system_prompt, dataset_cfg, eval_split_name)
         total_eval_examples = len(eval_data)
-        if num_eval_examples >= 0:
-            effective_eval_examples = min(num_eval_examples, total_eval_examples)
-            if effective_eval_examples < num_eval_examples:
+        if config.num_eval_examples >= 0:
+            effective_eval_examples = min(config.num_eval_examples, total_eval_examples)
+            if effective_eval_examples < config.num_eval_examples:
                 logger.warning(
                     "Requested %d eval examples but only %d available; using %d instead.",
-                    num_eval_examples, total_eval_examples, effective_eval_examples,
+                    config.num_eval_examples, total_eval_examples, effective_eval_examples,
                 )
         else:
             effective_eval_examples = total_eval_examples
@@ -753,11 +845,11 @@ def run_grpo_training(
         eval_label = eval_split_name if effective_eval_examples == total_eval_examples else f"{eval_split_name}[:{effective_eval_examples}]"
     else:
         total_examples = len(train_data)
-        effective_eval_examples = min(num_eval_examples if num_eval_examples >= 0 else total_examples, total_examples)
-        if effective_eval_examples < (num_eval_examples if num_eval_examples >= 0 else total_examples):
+        effective_eval_examples = min(config.num_eval_examples if config.num_eval_examples >= 0 else total_examples, total_examples)
+        if effective_eval_examples < (config.num_eval_examples if config.num_eval_examples >= 0 else total_examples):
             logger.warning(
                 "Requested %d eval examples but only %d available; using %d instead.",
-                num_eval_examples, total_examples, effective_eval_examples,
+                config.num_eval_examples, total_examples, effective_eval_examples,
             )
         eval_data = train_data[:effective_eval_examples]
         train_data = train_data[effective_eval_examples:]
@@ -765,12 +857,12 @@ def run_grpo_training(
 
     logger.info(
         "Dataset '%s': train=%d (split=%s) eval=%d (split=%s)",
-        dataset, len(train_data), dataset_cfg["train_split"], len(eval_data), eval_label,
+        config.dataset, len(train_data), dataset_cfg["train_split"], len(eval_data), eval_label,
     )
 
     pre_grpo_accuracy = evaluate_model(
-        model=model, tokenizer=tokenizer, eval_examples=eval_data, batch_size=eval_batch_size, greedy_eval=greedy_eval,
-        max_new_tokens=eval_max_new_tokens, sampling_temperature=None if greedy_eval else eval_temperature,
+        model=model, tokenizer=tokenizer, eval_examples=eval_data, batch_size=config.eval_batch_size, greedy_eval=config.greedy_eval,
+        max_new_tokens=config.eval_max_new_tokens, sampling_temperature=None if config.greedy_eval else config.eval_temperature,
     )
     logger.info("Pre-GRPO accuracy: %.2f%%", pre_grpo_accuracy)
 
@@ -781,17 +873,12 @@ def run_grpo_training(
         model = enable_activation_checkpointing(model)
 
     logger.info("Starting RL finetuning using GRPO...")
-    model = train_with_grpo(
-        device_name, device_id, model=model, tokenizer=tokenizer, train_data=train_data, num_iterations=num_iterations,
-        steps_per_iteration=steps_per_iteration, batch_size=batch_size, num_generations=num_generations,
-        max_completion_length=max_completion_length, beta=beta, learning_rate=learning_rate, mu=mu, epsilon=epsilon,
-        reward_function=reward_function, lr_warmup_steps=lr_warmup_steps, lr_cooldown_start=lr_cooldown_start,
-    )
+    model = train_with_grpo(model=model, tokenizer=tokenizer, train_data=train_data, config=config)
 
     logger.info("Final model evaluation after GRPO RL finetuning...")
     post_grpo_accuracy = evaluate_model(
-        model=model, tokenizer=tokenizer, eval_examples=eval_data, batch_size=eval_batch_size, greedy_eval=greedy_eval,
-        max_new_tokens=eval_max_new_tokens, sampling_temperature=None if greedy_eval else eval_temperature,
+        model=model, tokenizer=tokenizer, eval_examples=eval_data, batch_size=config.eval_batch_size, greedy_eval=config.greedy_eval,
+        max_new_tokens=config.eval_max_new_tokens, sampling_temperature=None if config.greedy_eval else config.eval_temperature,
     )
     improvement = post_grpo_accuracy - pre_grpo_accuracy
     logger.info("Post-GRPO accuracy: %.2f%%", post_grpo_accuracy)
@@ -812,70 +899,38 @@ def run_grpo_training(
     return metrics
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="GRPO training with XML-formatted answers")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed for all libraries")
-    parser.add_argument("--model-mode", type=str, default="completion", choices=("completion", "chat"), help="Tokenizer prompt formatting mode")
-    parser.add_argument("--greedy-eval", action="store_true", help="Use greedy decoding for evaluation")
-    parser.add_argument("--model-name", type=str, default="Qwen/Qwen2.5-1.5B-Instruct", help="HF model id")
-    parser.add_argument("--dataset", type=str, default="gsm8k", choices=tuple(KNOWN_DATASETS.keys()), help="Dataset to use")
-    parser.add_argument("--num-eval-examples", type=int, default=30, help="Number of examples reserved for evaluation")
-    parser.add_argument("--eval-batch-size", type=int, default=32, help="Batch size for evaluation")
-    parser.add_argument("--eval-max-new-tokens", type=int, default=512, help="Max tokens generated during evaluation")
-    parser.add_argument("--eval-temperature", type=float, default=0.7, help="Sampling temperature for evaluation when not greedy")
-    parser.add_argument("--num-iterations", type=int, default=1, help="Number of GRPO outer iterations")
-    parser.add_argument("--steps-per-iteration", type=int, default=500, help="Policy update steps per iteration")
-    parser.add_argument("--batch-size", type=int, default=7, help="Training batch size (number of prompts)")
-    parser.add_argument("--num-generations", type=int, default=12, help="Number of rollouts per prompt")
-    parser.add_argument("--max-completion-length", type=int, default=400, help="Maximum tokens generated per completion during rollouts")
-    parser.add_argument("--beta", type=float, default=0.04, help="Reverse-KL penalty coefficient")
-    parser.add_argument("--learning-rate", type=float, default=5e-6, help="Optimizer learning rate")
-    parser.add_argument("--mu", type=int, default=1, help="Number of GRPO updates per rollout batch")
-    parser.add_argument("--epsilon", type=float, default=0.1, help="Clipping threshold for PPO objective")
-    parser.add_argument("--reward-function", type=str, default="combined", choices=tuple(REWARD_FUNCTIONS.keys()),
-                        help="Reward function to use during training")
-    parser.add_argument("--out-dir", type=str, default=None, help="Base directory for outputs (overrides OUT_DIR environment variable)")
-    parser.add_argument("--run_name", type=str, default=None, help="Name for this run (defaults to timestamp)")
-    parser.add_argument("--lr-warmup-steps", type=int, default=256, help="Number of optimizer steps to warm up the learning rate")
-    parser.add_argument("--lr-cooldown-start", type=float, default=0.4, help="Fraction of total steps when learning rate cooldown begins")
+    config = parse_dc(Config)
 
-    args = parser.parse_args()
-
-    reward_function = REWARD_FUNCTIONS[args.reward_function]
-
-    # output dir
-    base_dir = Path(args.out_dir or os.environ.get("OUT_DIR") or "~/out_dir").expanduser().resolve()
-    run_name = args.run_name or datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    run_dir = base_dir / "nano_rlvr" / run_name
+    base_dir = Path(config.out_dir or os.environ.get("OUT_DIR") or "~/out_dir").expanduser().resolve()
+    run_name = config.run_name or datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    run_dir = (base_dir / "nano_rlvr" / run_name).resolve()
     run_dir.mkdir(parents=True, exist_ok=False)
 
     configure_logging(run_dir)
 
-    device_name, device_id = init_torch(seed=args.seed)
+    device_name, device_id = init_torch(seed=config.seed)
+    resolved_config = replace(
+        config,
+        device_name=device_name,
+        device_id=device_id,
+        out_dir=str(base_dir),
+        run_name=run_name,
+        run_dir=str(run_dir),
+    )
 
-    train_params = {
-        "device_name": device_name, "device_id": device_id, "model_mode": args.model_mode, "greedy_eval": args.greedy_eval,
-        "model_name": args.model_name, "dataset": args.dataset, "num_eval_examples": args.num_eval_examples,
-        "eval_batch_size": args.eval_batch_size, "eval_max_new_tokens": args.eval_max_new_tokens, "eval_temperature": args.eval_temperature,
-        "num_iterations": args.num_iterations, "steps_per_iteration": args.steps_per_iteration, "batch_size": args.batch_size,
-        "num_generations": args.num_generations, "max_completion_length": args.max_completion_length, "beta": args.beta,
-        "learning_rate": args.learning_rate, "mu": args.mu, "epsilon": args.epsilon, "out_dir": str(run_dir),
-        "lr_warmup_steps": args.lr_warmup_steps, "lr_cooldown_start": args.lr_cooldown_start,
-    }
-
-    config = {
-        "seed": args.seed, "world_size": dist.get_world_size(),
+    config_payload = asdict(resolved_config)
+    config_payload.update({
+        "world_size": dist.get_world_size(),
         "timestamp": datetime.now().isoformat(timespec="seconds"),
-    }
-    config.update(train_params)
+    })
 
-    # save configuration
     if dist.get_rank() == 0:
-        config_path = run_dir / f"config.json"
+        config_path = run_dir / "config.json"
         with config_path.open("w", encoding="utf-8") as config_file:
-            json.dump(config, config_file, indent=2)
+            json.dump(config_payload, config_file, indent=2)
         logger.info("Configuration saved to %s", config_path)
 
-    metrics = run_grpo_training(**train_params, reward_function=reward_function)
+    metrics = run_grpo_training(resolved_config)
 
     if dist.get_rank() == 0:
         metrics_path = run_dir / "metrics.json"
@@ -887,6 +942,7 @@ def main() -> None:
     if dist.is_available() and dist.is_initialized():
         dist.barrier()
         dist.destroy_process_group()
+
 
 if __name__ == "__main__":
     main()
