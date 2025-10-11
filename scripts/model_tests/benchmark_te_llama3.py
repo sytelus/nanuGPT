@@ -168,7 +168,7 @@ def _torch_compile_model(
         if hasattr(dynamo.config, "use_cudagraphs"):
             previous_cudagraphs = dynamo.config.use_cudagraphs
             dynamo.config.use_cudagraphs = False  # compiled inference prefers raw streams
-        return torch.compile(model, mode="reduce-overhead", dynamic=True)
+        return torch.compile(model, mode="max-autotune", dynamic=True)
     finally:
         if previous_cudagraphs is not None:
             try:
@@ -1265,8 +1265,8 @@ def parse_args() -> argparse.Namespace:
         default=512,
         help="Sequence length for synthetic data (capped at config block_size).",
     )
-    parser.add_argument("--warmup", type=int, default=2, help="Number of warmup iterations.")
-    parser.add_argument("--steps", type=int, default=1, help="Number of timed iterations.")
+    parser.add_argument("--warmup", type=int, default=5, help="Number of warmup iterations.")
+    parser.add_argument("--steps", type=int, default=5, help="Number of timed iterations.")
     parser.add_argument(
         "--no-compile",
         action="store_true",
