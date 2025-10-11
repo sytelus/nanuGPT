@@ -520,7 +520,7 @@ def compute_log_probs(model: PolicyModel, input_ids: torch.Tensor, attention_mas
     """
     Per-token log-probs for the `logits_to_keep` tokens at the end of the sequence.
     """
-    # `torch.autocast` in the policy forward reduces cast overhead in updates
+    # Enable bf16 autocast on CUDA to reduce casting overhead during policy updates.
     with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
         logits = model(input_ids=input_ids, attention_mask=attention_mask).logits  # (B, T, V)
     logits = logits[:, :-1, :]                            # align next-token targets
@@ -759,7 +759,8 @@ def train_with_grpo(
                 for group in optimizer.param_groups:
                     group["lr"] = current_lr
                 update_start = time.perf_counter()
-                loss, avg_reward = grpo_loss(policy_model, rollout_data, reward_fn, config.beta, config.epsilon)
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                    loss, avg_reward = grpo_loss(policy_model, rollout_data, reward_fn, config.beta, config.epsilon)
                 optimizer.zero_grad()  # TODO: check if this would work because gradient_as_bucket_view=True
                 loss.backward()
                 total_norm = torch.nn.utils.clip_grad_norm_(policy_model.parameters(), max_norm=0.1)
