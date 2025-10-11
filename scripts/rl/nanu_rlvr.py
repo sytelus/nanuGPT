@@ -221,6 +221,8 @@ def evaluate_model(
 
     device = next(model.parameters()).device
     num_return_sequences = 1  # Keep one completion per prompt for accuracy alignment.
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
 
     pad_token_id = tokenizer.pad_token_id
     eos_token_id = tokenizer.eos_token_id
@@ -230,17 +232,18 @@ def evaluate_model(
     was_training = model.training
     model.eval()
     correct = 0
-    total = len(eval_examples)
-    logger.info("Evaluating model on %d examples...", total)
-    if total == 0:
-        logger.warning("No evaluation examples provided; skipping evaluation.")
-        return 0.0
+    total_examples = len(eval_examples)
+    logger.info("Evaluating model on %d examples across %d ranks...", total_examples, world_size)
 
-    effective_batch_size = min(batch_size, total)
+    shard_indices = list(range(rank, total_examples, world_size))
+    local_examples: List[DatasetExample] = [eval_examples[idx] for idx in shard_indices]
+    local_total = len(local_examples)
+
+    effective_batch_size = min(batch_size, local_total) if local_total > 0 else batch_size
 
     try:
-        for start in range(0, total, effective_batch_size):
-            batch_examples = eval_examples[start : start + effective_batch_size]
+        for start in range(0, local_total, effective_batch_size):
+            batch_examples = local_examples[start : start + effective_batch_size]
             prompts = [ex["prompt"] for ex in batch_examples]
             expected_answers = [ex.get("answer") for ex in batch_examples]
 
@@ -297,8 +300,14 @@ def evaluate_model(
         if was_training:
             model.train()
 
-    accuracy = (correct / total) * 100 if total > 0 else 0.0
-    logger.info("Accuracy: %.2f%% (%d/%d)", accuracy, correct, total)
+
+    stats = torch.tensor([correct, local_total], dtype=torch.long, device=device)
+    torch.distributed.all_reduce(stats, op=torch.distributed.ReduceOp.SUM)
+    global_correct = int(stats[0].item())
+    global_total = int(stats[1].item())
+
+    accuracy = (global_correct / global_total) * 100 if global_total > 0 else 0.0
+    logger.info("Accuracy: %.2f%% (%d/%d)", accuracy, global_correct, global_total)
 
     # complete eval on all ranks before returning
     torch.distributed.barrier()

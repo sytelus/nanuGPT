@@ -116,6 +116,7 @@ CONFIG_2B = LlamaConfig(
     n_head=16,
     swiglu_multiple_of=256,
     ffn_dim_multiplier=1.3,
+    vocab_size= 50304, # using GPT vocab size for perf comparison
 )
 
 CONFIG_3p6B = LlamaConfig(
@@ -124,6 +125,7 @@ CONFIG_3p6B = LlamaConfig(
     n_head=24,
     swiglu_multiple_of=256,
     ffn_dim_multiplier=1,
+    vocab_size= 50304, # using GPT vocab size for perf comparison
 )
 
 CONFIG_8B = LlamaConfig(
@@ -132,6 +134,7 @@ CONFIG_8B = LlamaConfig(
     n_head=32,
     swiglu_multiple_of=1024,
     ffn_dim_multiplier=1.3,
+    vocab_size= 50304, # using GPT vocab size for perf comparison
 )
 
 class TeLlama3DecoderLayer(te.TransformerLayer):
