@@ -241,6 +241,7 @@ def evaluate_model(
 
     effective_batch_size = min(batch_size, local_total) if local_total > 0 else batch_size
 
+    completion_lengths: List[int] = []
     try:
         for start in range(0, local_total, effective_batch_size):
             batch_examples = local_examples[start : start + effective_batch_size]
@@ -272,6 +273,7 @@ def evaluate_model(
             responses = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
 
             for example, expected, response in zip(batch_examples, expected_answers, responses):
+                completion_lengths.append(len(response.split()))
                 try:
                     predicted = extract_answer_from_model_output(response)
                     is_correct = False
@@ -307,7 +309,8 @@ def evaluate_model(
     global_total = int(stats[1].item())
 
     accuracy = (global_correct / global_total) * 100 if global_total > 0 else 0.0
-    logger.info("Accuracy: %.2f%% (%d/%d)", accuracy, global_correct, global_total)
+    avg_completion_len = float(np.mean(completion_lengths)) if completion_lengths else 0.0
+    logger.info("Accuracy: %.2f%% (%d/%d); avg completion length: %.1f", accuracy, global_correct, global_total, avg_completion_len)
 
     # complete eval on all ranks before returning
     torch.distributed.barrier()
