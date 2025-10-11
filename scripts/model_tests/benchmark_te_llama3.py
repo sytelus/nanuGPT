@@ -66,10 +66,15 @@ _RICH_TAG_PATTERN = re.compile(r"\[/?[^\]]+\]")
 def _strip_markup(text: str) -> str:
     return _RICH_TAG_PATTERN.sub("", str(text))
 
+AVAILABLE_PROVIDER_REGISTRY: Dict[str, ModuleType] = {
+    "nanogpt": nanogpt_models,
+    "te_llama3": te_llama3,
+}
+DEFAULT_PROVIDER_ORDER: List[str] = ["te_llama3"]
+
 MODEL_PROVIDERS: List[ModuleType] = [
-    nanogpt_models,
-    te_llama3,
-]  # Update this list to change benchmarked providers.
+    AVAILABLE_PROVIDER_REGISTRY[name] for name in DEFAULT_PROVIDER_ORDER
+]
 
 
 def _provider_display_name(provider: ModuleType) -> str:
@@ -79,6 +84,35 @@ def _provider_display_name(provider: ModuleType) -> str:
 def _provider_names(providers: Optional[Sequence[ModuleType]] = None) -> List[str]:
     providers = providers if providers is not None else MODEL_PROVIDERS
     return [_provider_display_name(provider) for provider in providers]
+
+
+def _select_providers_from_names(names: Optional[str]) -> List[ModuleType]:
+    if not names:
+        return [AVAILABLE_PROVIDER_REGISTRY[name] for name in DEFAULT_PROVIDER_ORDER]
+
+    requested = [segment.strip().lower() for segment in names.split(",") if segment.strip()]
+    if not requested:
+        return [AVAILABLE_PROVIDER_REGISTRY[name] for name in DEFAULT_PROVIDER_ORDER]
+
+    if "all" in requested:
+        return list(AVAILABLE_PROVIDER_REGISTRY.values())
+
+    missing = [name for name in requested if name not in AVAILABLE_PROVIDER_REGISTRY]
+    if missing:
+        valid = ", ".join(sorted(AVAILABLE_PROVIDER_REGISTRY))
+        raise ValueError(
+            f"Unknown provider name(s): {', '.join(missing)}. Valid options: {valid}, all"
+        )
+
+    # Preserve requested order while dropping duplicates
+    seen: set[str] = set()
+    selected: List[ModuleType] = []
+    for name in requested:
+        if name in seen:
+            continue
+        seen.add(name)
+        selected.append(AVAILABLE_PROVIDER_REGISTRY[name])
+    return selected
 
 
 def _resolve_output_directory() -> Path:
@@ -1146,11 +1180,23 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Run a single config (CONFIG_* attribute or provider-qualified like te_llama3.CONFIG_124M).",
     )
+    parser.add_argument(
+        "--providers",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated provider names to benchmark (choices: "
+            f"{', '.join(sorted(AVAILABLE_PROVIDER_REGISTRY))}, all)."
+            " Defaults to te_llama3."
+        ),
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    global MODEL_PROVIDERS
+    MODEL_PROVIDERS = _select_providers_from_names(args.providers)
     provider_names = _provider_names()
     provider_label = ", ".join(provider_names)
     provider_plural = "provider" if len(provider_names) == 1 else "providers"
@@ -1187,18 +1233,26 @@ def main() -> None:
     config_items = list(configs.items())
 
     if args.config:
-        filtered_items = [
-            (name, entry)
-            for name, entry in config_items
-            if name == args.config or entry.attr_name == args.config
-        ]
-        if not filtered_items:
-            available_configs = ", ".join(sorted(configs))
-            raise ValueError(
-                f"Unknown config '{args.config}'. Available: {available_configs}"
-            )
-        config_items = filtered_items
-
+        if args.config in configs:
+            config_items = [(args.config, configs[args.config])]
+        else:
+            attr_matches = [
+                (name, entry)
+                for name, entry in config_items
+                if entry.attr_name == args.config
+            ]
+            if not attr_matches:
+                available_configs = ", ".join(sorted(configs))
+                raise ValueError(
+                    f"Unknown config '{args.config}'. Available: {available_configs}"
+                )
+            if len(attr_matches) > 1:
+                disambiguation = ", ".join(name for name, _ in attr_matches)
+                raise ValueError(
+                    f"Config name '{args.config}' is ambiguous across providers. "
+                    f"Select one of: {disambiguation}"
+                )
+            config_items = attr_matches
     if not config_items:
         console.print(
             f"[bold red]No CONFIG_ prefixed dataclass configs found in providers {provider_label}.[/bold red]"
