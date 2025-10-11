@@ -48,6 +48,7 @@ CONFIG_124M = GPTConfig(
     n_embd=768,
     n_layer=12,
     n_head=12,
+    tie_lm_head=False, # for comparing with llama
 )
 
 # GPT-2 355M-like config
@@ -55,6 +56,7 @@ CONFIG_345M = GPTConfig(
     n_embd=1024,
     n_layer=24,
     n_head=16,
+    tie_lm_head=False, # for comparing with llama
 )
 
 # GPT-3 1.3B-like config
@@ -63,6 +65,7 @@ CONFIG_1p3B = GPTConfig(
     n_layer=24,
     n_head=16,
     block_size=2048,
+    tie_lm_head=False, # for comparing with llama
 )
 
 # llama 8B-like config
@@ -71,6 +74,7 @@ CONFIG_8B = GPTConfig(
     n_layer=32,
     n_head=32,
     block_size=4096,
+    tie_lm_head=False, # for comparing with llama
 )
 
 class LayerNorm(nn.Module):
