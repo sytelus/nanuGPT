@@ -153,28 +153,11 @@ def _torch_compile_model(
     device: torch.device,
     provider: ModuleType,
 ) -> torch.nn.Module:
-    """Wrap `torch.compile` with provider-friendly defaults (no cudagraph capture)."""
-    if device.type != "cuda":
-        raise RuntimeError(
-            f"torch.compile() for provider {_provider_display_name(provider)} requires a CUDA device."
-        )
-
     if SUPPRESS_COMPILE_WARNINGS:
         _configure_compile_environment()
-    previous_cudagraphs = None
-    try:
-        import torch._dynamo as dynamo  # type: ignore[attr-defined]
 
-        if hasattr(dynamo.config, "use_cudagraphs"):
-            previous_cudagraphs = dynamo.config.use_cudagraphs
-            dynamo.config.use_cudagraphs = False  # compiled inference prefers raw streams
-        return torch.compile(model, mode="max-autotune", dynamic=True)
-    finally:
-        if previous_cudagraphs is not None:
-            try:
-                dynamo.config.use_cudagraphs = previous_cudagraphs  # type: ignore[name-defined]
-            except Exception:
-                pass
+    return torch.compile(model, mode="max-autotune", dynamic=True)
+
 
 @lru_cache(maxsize=1)
 def _configure_compile_environment() -> None:
