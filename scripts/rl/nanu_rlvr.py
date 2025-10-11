@@ -38,6 +38,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, P
 
 logger = logging.getLogger("nano_rlvr")
 
+WANDB_ENABLED = bool(os.environ.get("WANDB_API_KEY") and os.environ.get("WANDB_HOST"))
+WANDB = None
+WANDB_RUN = None
 
 CompletionMessage = Dict[str, str]
 CompletionList = List[CompletionMessage]
@@ -314,7 +317,15 @@ def evaluate_model(
 
     accuracy = (global_correct / global_total) * 100 if global_total > 0 else 0.0
     avg_completion_len = float(np.mean(completion_lengths)) if completion_lengths else 0.0
-    logger.info("Accuracy: %.2f%% (%d/%d); avg completion length: %.1f", accuracy, global_correct, global_total, avg_completion_len)
+    log_info(
+        "Accuracy: %.2f%% (%d/%d); avg completion length: %.1f" % (accuracy, global_correct, global_total, avg_completion_len),
+        metrics={
+            "eval/accuracy": float(accuracy),
+            "eval/correct": float(global_correct),
+            "eval/total": float(global_total),
+            "eval/avg_completion_len": avg_completion_len,
+        },
+    )
 
     # complete eval on all ranks before returning
     torch.distributed.barrier()
@@ -465,6 +476,28 @@ def parse_dc(cls):
 
     parsed = vars(parser.parse_args())
     return cls(**parsed)
+
+
+def log_info(message: str, metrics: Optional[Dict[str, float]] = None, step: Optional[int] = None) -> None:
+    logger.info(message)
+    if WANDB_RUN and metrics:
+        if not dist.is_available() or not dist.is_initialized() or dist.get_rank() == 0:
+            WANDB.log({k: float(v) for k, v in metrics.items()}, step=step)
+
+
+def maybe_init_wandb(config_payload: Mapping[str, object]) -> None:
+    global WANDB, WANDB_RUN
+    if not WANDB_ENABLED or WANDB_RUN:
+        return
+    import wandb as _wandb
+    WANDB = _wandb
+    WANDB_RUN = WANDB.init(
+        project=os.environ.get("WANDB_PROJECT", "nano-rlvr"),
+        name=config_payload.get("run_name"),
+        config=dict(config_payload),
+        dir=str(config_payload.get("run_dir", "")) or None,
+        reinit=True,
+    )
 
 
 def selective_log_softmax(logits: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
@@ -706,14 +739,16 @@ def train_with_grpo(
                 if was_training:
                     policy_module.train()
 
+            avg_completion_tokens = float(rollout_data["completion_mask"].sum(dim=1).float().mean().item())
             policy_rollout_times.append(rollout_data["policy_duration"])
             reference_rollout_times.append(rollout_data["reference_duration"])
 
             for grpo_iter in range(1, config.mu + 1):  # number of GRPO updates per batch
                 update_step += 1
                 lr_factor = _lr_scale(update_step)
+                current_lr = config.learning_rate * lr_factor
                 for group in optimizer.param_groups:
-                    group["lr"] = config.learning_rate * lr_factor
+                    group["lr"] = current_lr
                 update_start = time.perf_counter()
                 loss, avg_reward = grpo_loss(policy_model, rollout_data, reward_fn, config.beta, config.epsilon)
                 optimizer.zero_grad()  # TODO: check if this would work because gradient_as_bucket_view=True
@@ -722,9 +757,25 @@ def train_with_grpo(
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)  # TODO: check if this would work because gradient_as_bucket_view=True
                 policy_update_times.append(time.perf_counter() - update_start)
-                logger.info(
-                    "Itr %d/%d, Step %d/%d, mu %d/%d, Loss: %.1g, reward: %.1g, norm: %.1g",
-                    iteration, config.num_iterations, step, config.steps_per_iteration, grpo_iter, config.mu, loss.item(), avg_reward, total_norm.item()
+                step_metrics: Dict[str, float] = {
+                    "train/loss": float(loss.item()),
+                    "train/reward": float(avg_reward),
+                    "train/grad_norm": float(total_norm.item()),
+                    "train/lr": float(current_lr),
+                    "train/update_step": float(update_step),
+                    "train/avg_completion_tokens": avg_completion_tokens,
+                }
+                if grpo_iter == 1:
+                    step_metrics.update({
+                        "perf/policy_rollout_s": float(rollout_data["policy_duration"]),
+                        "perf/reference_rollout_s": float(rollout_data["reference_duration"]),
+                    })
+                log_info(
+                    "Itr %d/%d, Step %d/%d, mu %d/%d, Loss: %.1g, reward: %.1g, norm: %.1g" % (
+                        iteration, config.num_iterations, step, config.steps_per_iteration, grpo_iter, config.mu, loss.item(), avg_reward, total_norm.item()
+                    ),
+                    metrics=step_metrics,
+                    step=update_step,
                 )
 
         logger.info("Completed iteration %d. (Placeholder: reward model update would happen here.)", iteration)
@@ -737,14 +788,36 @@ def train_with_grpo(
     total_policy_updates = float(sum(policy_update_times))
     train_elapsed = time.perf_counter() - train_start
 
-    logger.info(
-        "Mean timings (s): policy rollouts=%.3f, reference rollouts=%.3f, policy updates=%.3f",
-        _safe_mean(policy_rollout_times), _safe_mean(reference_rollout_times), _safe_mean(policy_update_times),
+    mean_metrics = {
+        "perf/policy_rollout_mean_s": _safe_mean(policy_rollout_times),
+        "perf/reference_rollout_mean_s": _safe_mean(reference_rollout_times),
+        "perf/policy_update_mean_s": _safe_mean(policy_update_times),
+    }
+    total_metrics = {
+        "perf/policy_rollout_total_s": total_policy_rollouts,
+        "perf/reference_rollout_total_s": total_reference_rollouts,
+        "perf/policy_update_total_s": total_policy_updates,
+        "perf/train_elapsed_s": train_elapsed,
+    }
+    log_info(
+        "Mean timings (s): policy rollouts=%.3f, reference rollouts=%.3f, policy updates=%.3f" % (
+            mean_metrics["perf/policy_rollout_mean_s"],
+            mean_metrics["perf/reference_rollout_mean_s"],
+            mean_metrics["perf/policy_update_mean_s"],
+        ),
+        metrics=mean_metrics,
     )
-    logger.info(
-        "Total timings (s): policy rollouts=%.3f, reference rollouts=%.3f, policy updates=%.3f, end-to-end=%.3f",
-        total_policy_rollouts, total_reference_rollouts, total_policy_updates, train_elapsed,
+    log_info(
+        "Total timings (s): policy rollouts=%.3f, reference rollouts=%.3f, policy updates=%.3f, end-to-end=%.3f" % (
+            total_metrics["perf/policy_rollout_total_s"],
+            total_metrics["perf/reference_rollout_total_s"],
+            total_metrics["perf/policy_update_total_s"],
+            total_metrics["perf/train_elapsed_s"],
+        ),
+        metrics=total_metrics,
     )
+    if WANDB_RUN and (not dist.is_available() or dist.get_rank() == 0):
+        WANDB.summary.update({**mean_metrics, **total_metrics})
 
     return unwrap(policy_model)
 
@@ -853,7 +926,10 @@ def run_grpo_training(config: Config) -> dict:
         model=model, tokenizer=tokenizer, eval_examples=eval_data, batch_size=config.eval_batch_size, greedy_eval=config.greedy_eval,
         max_new_tokens=config.eval_max_new_tokens, sampling_temperature=None if config.greedy_eval else config.eval_temperature,
     )
-    logger.info("Pre-GRPO accuracy: %.2f%%", pre_grpo_accuracy)
+    log_info(
+        "Pre-GRPO accuracy: %.2f%%" % pre_grpo_accuracy,
+        metrics={"eval/pre_accuracy": float(pre_grpo_accuracy)},
+    )
 
     params = sum(p.numel() for p in model.parameters())
     logger.info("Model has %d parameters.", params)
@@ -870,8 +946,14 @@ def run_grpo_training(config: Config) -> dict:
         max_new_tokens=config.eval_max_new_tokens, sampling_temperature=None if config.greedy_eval else config.eval_temperature,
     )
     improvement = post_grpo_accuracy - pre_grpo_accuracy
-    logger.info("Post-GRPO accuracy: %.2f%%", post_grpo_accuracy)
-    logger.info("Total improvement: %.2f%%", improvement)
+    log_info(
+        "Post-GRPO accuracy: %.2f%%" % post_grpo_accuracy,
+        metrics={"eval/post_accuracy": float(post_grpo_accuracy)},
+    )
+    log_info(
+        "Total improvement: %.2f%%" % improvement,
+        metrics={"eval/improvement": float(improvement)},
+    )
 
     artifact_dir = run_dir / "grpo_finetuned_model"
     model.save_pretrained(artifact_dir)
@@ -914,6 +996,7 @@ def main() -> None:
     })
 
     if dist.get_rank() == 0:
+        maybe_init_wandb(config_payload)
         config_path = run_dir / "config.json"
         with config_path.open("w", encoding="utf-8") as config_file:
             json.dump(config_payload, config_file, indent=2)
@@ -926,6 +1009,15 @@ def main() -> None:
         with metrics_path.open("w", encoding="utf-8") as metrics_file:
             json.dump(metrics, metrics_file, indent=2)
         logger.info("Metrics saved to %s", metrics_path)
+        if WANDB_RUN:
+            WANDB.summary.update({
+                "eval/pre_accuracy": float(metrics["pre_grpo_accuracy"]),
+                "eval/post_accuracy": float(metrics["post_grpo_accuracy"]),
+                "eval/improvement": float(metrics["total_improvement"]),
+                "data/eval_examples": float(metrics["eval_examples"]),
+                "data/train_examples": float(metrics["train_examples"]),
+            })
+            WANDB_RUN.finish()
     logger.info("Run complete.")
 
     if dist.is_available() and dist.is_initialized():
