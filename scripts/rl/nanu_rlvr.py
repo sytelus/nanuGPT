@@ -38,9 +38,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, P
 
 logger = logging.getLogger("nano_rlvr")
 
-WANDB_ENABLED = bool(os.environ.get("WANDB_API_KEY") and os.environ.get("WANDB_HOST"))
-WANDB = None
-WANDB_RUN = None
+_wandb_run = None
 
 CompletionMessage = Dict[str, str]
 CompletionList = List[CompletionMessage]
@@ -480,18 +478,28 @@ def parse_dc(cls):
 
 def log_info(message: str, metrics: Optional[Dict[str, float]] = None, step: Optional[int] = None) -> None:
     logger.info(message)
-    if WANDB_RUN and metrics:
-        if not dist.is_available() or not dist.is_initialized() or dist.get_rank() == 0:
-            WANDB.log({k: float(v) for k, v in metrics.items()}, step=step)
+    if _wandb_run and metrics and (not dist.is_available() or not dist.is_initialized() or dist.get_rank() == 0):
+        import wandb
+        wandb.log({k: float(v) for k, v in metrics.items()}, step=step)
+
+
+def log_summary(values: Mapping[str, float]) -> None:
+    if _wandb_run and (not dist.is_available() or dist.get_rank() == 0):
+        try:
+            _wandb_run.summary.update({k: float(v) for k, v in values.items()})
+        except Exception as exc:  # pragma: no cover
+            logger.debug("wandb summary update failed: %s", exc)
 
 
 def maybe_init_wandb(config_payload: Mapping[str, object]) -> None:
-    global WANDB, WANDB_RUN
-    if not WANDB_ENABLED or WANDB_RUN:
+    global _wandb_run
+    if _wandb_run or not (os.environ.get("WANDB_API_KEY") and os.environ.get("WANDB_HOST")):
         return
-    import wandb as _wandb
-    WANDB = _wandb
-    WANDB_RUN = WANDB.init(
+    try:
+        import wandb
+    except ModuleNotFoundError:
+        return
+    _wandb_run = wandb.init(
         project=os.environ.get("WANDB_PROJECT", "nano-rlvr"),
         name=config_payload.get("run_name"),
         config=dict(config_payload),
@@ -675,6 +683,7 @@ def train_with_grpo(
     policy_rollout_times: List[float] = []
     reference_rollout_times: List[float] = []
     policy_update_times: List[float] = []
+    total_tokens = 0.0
 
     reward_fn = REWARD_FUNCTIONS[config.reward_function]
 
@@ -756,7 +765,11 @@ def train_with_grpo(
                 total_norm = torch.nn.utils.clip_grad_norm_(policy_model.parameters(), max_norm=0.1)
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)  # TODO: check if this would work because gradient_as_bucket_view=True
-                policy_update_times.append(time.perf_counter() - update_start)
+                update_duration = time.perf_counter() - update_start
+                policy_update_times.append(update_duration)
+                tokens_this_step = float(rollout_data["completion_mask"].sum().item())
+                total_tokens += tokens_this_step
+                denom = max(1, rollout_data["batch_size"] * rollout_data["num_generations"])
                 step_metrics: Dict[str, float] = {
                     "train/loss": float(loss.item()),
                     "train/reward": float(avg_reward),
@@ -764,6 +777,9 @@ def train_with_grpo(
                     "train/lr": float(current_lr),
                     "train/update_step": float(update_step),
                     "train/avg_completion_tokens": avg_completion_tokens,
+                    "train/tokens": tokens_this_step,
+                    "train/tokens_per_prompt": tokens_this_step / denom,
+                    "train/tokens_throughput": tokens_this_step / max(update_duration, 1e-9),
                 }
                 if grpo_iter == 1:
                     step_metrics.update({
@@ -771,8 +787,9 @@ def train_with_grpo(
                         "perf/reference_rollout_s": float(rollout_data["reference_duration"]),
                     })
                 log_info(
-                    "Itr %d/%d, Step %d/%d, mu %d/%d, Loss: %.1g, reward: %.1g, norm: %.1g" % (
-                        iteration, config.num_iterations, step, config.steps_per_iteration, grpo_iter, config.mu, loss.item(), avg_reward, total_norm.item()
+                    "Itr %d/%d, Step %d/%d, mu %d/%d, Loss: %.1g, reward: %.1g, norm: %.1g, tokens: %.0f, tok/s: %.1f" % (
+                        iteration, config.num_iterations, step, config.steps_per_iteration, grpo_iter, config.mu,
+                        loss.item(), avg_reward, total_norm.item(), tokens_this_step, tokens_this_step / max(update_duration, 1e-9)
                     ),
                     metrics=step_metrics,
                     step=update_step,
@@ -798,6 +815,8 @@ def train_with_grpo(
         "perf/reference_rollout_total_s": total_reference_rollouts,
         "perf/policy_update_total_s": total_policy_updates,
         "perf/train_elapsed_s": train_elapsed,
+        "perf/total_tokens": total_tokens,
+        "perf/token_throughput": total_tokens / max(train_elapsed, 1e-9),
     }
     log_info(
         "Mean timings (s): policy rollouts=%.3f, reference rollouts=%.3f, policy updates=%.3f" % (
@@ -808,16 +827,17 @@ def train_with_grpo(
         metrics=mean_metrics,
     )
     log_info(
-        "Total timings (s): policy rollouts=%.3f, reference rollouts=%.3f, policy updates=%.3f, end-to-end=%.3f" % (
+        "Total timings (s): policy rollouts=%.3f, reference rollouts=%.3f, policy updates=%.3f, end-to-end=%.3f, total tokens=%.0f, throughput=%.1f tok/s" % (
             total_metrics["perf/policy_rollout_total_s"],
             total_metrics["perf/reference_rollout_total_s"],
             total_metrics["perf/policy_update_total_s"],
             total_metrics["perf/train_elapsed_s"],
+            total_metrics["perf/total_tokens"],
+            total_metrics["perf/token_throughput"],
         ),
         metrics=total_metrics,
     )
-    if WANDB_RUN and (not dist.is_available() or dist.get_rank() == 0):
-        WANDB.summary.update({**mean_metrics, **total_metrics})
+    log_summary({**mean_metrics, **total_metrics})
 
     return unwrap(policy_model)
 
@@ -1009,15 +1029,20 @@ def main() -> None:
         with metrics_path.open("w", encoding="utf-8") as metrics_file:
             json.dump(metrics, metrics_file, indent=2)
         logger.info("Metrics saved to %s", metrics_path)
-        if WANDB_RUN:
-            WANDB.summary.update({
-                "eval/pre_accuracy": float(metrics["pre_grpo_accuracy"]),
-                "eval/post_accuracy": float(metrics["post_grpo_accuracy"]),
-                "eval/improvement": float(metrics["total_improvement"]),
-                "data/eval_examples": float(metrics["eval_examples"]),
-                "data/train_examples": float(metrics["train_examples"]),
-            })
-            WANDB_RUN.finish()
+        log_summary({
+            "eval/pre_accuracy": float(metrics["pre_grpo_accuracy"]),
+            "eval/post_accuracy": float(metrics["post_grpo_accuracy"]),
+            "eval/improvement": float(metrics["total_improvement"]),
+            "data/eval_examples": float(metrics["eval_examples"]),
+            "data/train_examples": float(metrics["train_examples"]),
+        })
+        global _wandb_run
+        if _wandb_run:
+            try:
+                _wandb_run.finish()
+                _wandb_run = None
+            except Exception as exc:  # pragma: no cover
+                logger.debug("wandb finish failed: %s", exc)
     logger.info("Run complete.")
 
     if dist.is_available() and dist.is_initialized():
