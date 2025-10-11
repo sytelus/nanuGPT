@@ -156,7 +156,8 @@ def _torch_compile_model(
     if SUPPRESS_COMPILE_WARNINGS:
         _configure_compile_environment()
 
-    return torch.compile(model, mode="max-autotune", dynamic=True)
+    # cuda graphs are not compatible with TE kernels
+    return torch.compile(model, mode="max-autotune-no-cudagraphs", dynamic=True)
 
 
 @lru_cache(maxsize=1)
