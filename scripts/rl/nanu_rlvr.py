@@ -775,6 +775,7 @@ def main() -> None:
     parser.add_argument("--reward-function", type=str, default="combined", choices=tuple(REWARD_FUNCTIONS.keys()),
                         help="Reward function to use during training")
     parser.add_argument("--out-dir", type=str, default=None, help="Base directory for outputs (overrides OUT_DIR environment variable)")
+    parser.add_argument("--run_name", type=str, default=None, help="Name for this run (defaults to timestamp)")
 
     args = parser.parse_args()
 
@@ -782,7 +783,8 @@ def main() -> None:
 
     # output dir
     base_dir = Path(args.out_dir or os.environ.get("OUT_DIR") or "~/out_dir").expanduser().resolve()
-    run_dir = base_dir / "nano_rlvr" / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    run_name = args.run_name or datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    run_dir = base_dir / "nano_rlvr" / run_name
     run_dir.mkdir(parents=True, exist_ok=False)
 
     configure_logging(run_dir)
