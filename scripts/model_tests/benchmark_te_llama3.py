@@ -29,10 +29,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import importlib
 import inspect
 import math
+import multiprocessing as mp
 import statistics
 import time
+import traceback
 import warnings
 from functools import lru_cache
 from dataclasses import asdict, dataclass, is_dataclass
@@ -113,6 +116,12 @@ def _select_providers_from_names(names: Optional[str]) -> List[ModuleType]:
         seen.add(name)
         selected.append(AVAILABLE_PROVIDER_REGISTRY[name])
     return selected
+
+
+def _device_to_spec(device: torch.device) -> str:
+    if device.index is None:
+        return device.type
+    return f"{device.type}:{device.index}"
 
 
 def _resolve_output_directory() -> Path:
@@ -816,6 +825,135 @@ def benchmark_config(
     return stages, param_stats
 
 
+def _benchmark_config_worker(
+    conn,
+    name: str,
+    provider_module_name: str,
+    provider_display_name: str,
+    config: Any,
+    device_spec: str,
+    seq_len: int,
+    batch_size: int,
+    warmup: int,
+    steps: int,
+    run_compiled: bool,
+) -> None:
+    device: Optional[torch.device] = None
+    try:
+        provider = importlib.import_module(provider_module_name)
+        device = torch.device(device_spec)
+        configure_torch_runtime(device)
+        is_cuda = _is_cuda_device(device)
+        if is_cuda:
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats(device)
+            _synchronize_cuda(device)
+
+        stages, param_stats = benchmark_config(
+            name=name,
+            provider=provider,
+            config=config,
+            device=device,
+            seq_len=seq_len,
+            batch_size=batch_size,
+            warmup=warmup,
+            steps=steps,
+            run_compiled=run_compiled,
+        )
+
+        context_length = min(seq_len, getattr(config, "block_size", seq_len))
+        summary = BenchmarkSummary(
+            name=name,
+            provider_display_name=provider_display_name,
+            config=config,
+            param_stats=param_stats,
+            stages=stages,
+            batch_size=batch_size,
+            context_length=context_length,
+            tokens_per_step=batch_size * context_length,
+        )
+
+        conn.send(("ok", summary))
+    except Exception as exc:
+        conn.send(
+            (
+                "error",
+                {
+                    "message": str(exc),
+                    "traceback": traceback.format_exc(),
+                    "config_name": name,
+                },
+            )
+        )
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        if device is not None and device.type == "cuda" and torch.cuda.is_available():
+            try:
+                _cleanup_device_state(device)
+            except Exception:
+                pass
+        gc.collect()
+
+
+def _run_config_in_subprocess(
+    name: str,
+    entry: DiscoveredConfig,
+    device_spec: str,
+    seq_len: int,
+    batch_size: int,
+    warmup: int,
+    steps: int,
+    run_compiled: bool,
+) -> BenchmarkSummary:
+    ctx = mp.get_context("spawn")
+    parent_conn, child_conn = ctx.Pipe(duplex=False)
+    process = ctx.Process(
+        target=_benchmark_config_worker,
+        args=(
+            child_conn,
+            name,
+            entry.provider.__name__,
+            entry.provider_display_name,
+            entry.config,
+            device_spec,
+            seq_len,
+            batch_size,
+            warmup,
+            steps,
+            run_compiled,
+        ),
+    )
+    process.start()
+    child_conn.close()
+    try:
+        status, payload = parent_conn.recv()
+    except EOFError as exc:
+        process.join()
+        parent_conn.close()
+        raise RuntimeError(
+            f"Benchmark subprocess for {name} terminated without reporting results."
+        ) from exc
+    process.join()
+    parent_conn.close()
+
+    if status == "error":
+        message = payload.get("message", "unknown error") if isinstance(payload, dict) else str(payload)
+        traceback_text = payload.get("traceback") if isinstance(payload, dict) else None
+        details = f"{message}\n{traceback_text}" if traceback_text else message
+        raise RuntimeError(f"Benchmark subprocess for {name} failed: {details}")
+
+    if process.exitcode not in (0, None):
+        raise RuntimeError(
+            f"Benchmark subprocess for {name} exited with code {process.exitcode}."
+        )
+
+    summary: BenchmarkSummary = payload
+    return summary
+
+
 SCENARIO_SPECS = {
     INFERENCE_STAGE: {
         "label": "Inference",
@@ -1260,40 +1398,21 @@ def main() -> None:
         return
 
     summaries: List[BenchmarkSummary] = []
+    device_spec = _device_to_spec(device)
 
     for name, entry in config_items:
-        config = entry.config
-        # scrub allocator state so each config starts from the same baseline
-        if is_cuda:
-            torch.cuda.empty_cache()
-            torch.cuda.reset_peak_memory_stats(device)
-            _synchronize_cuda(device)
-
         console.print(f"[cyan]Benchmarking {name}[/cyan]")
-        stages, param_stats = benchmark_config(
+        summary = _run_config_in_subprocess(
             name=name,
-            provider=entry.provider,
-            config=config,
-            device=device,
+            entry=entry,
+            device_spec=device_spec,
             seq_len=args.seq_length,
             batch_size=args.batch_size,
             warmup=args.warmup,
             steps=args.steps,
             run_compiled=run_compiled,
         )
-        summaries.append(
-            BenchmarkSummary(
-                name=name,
-                provider_display_name=entry.provider_display_name,
-                config=config,
-                param_stats=param_stats,
-                stages=stages,
-                batch_size=args.batch_size,
-                context_length=min(args.seq_length, getattr(config, "block_size", args.seq_length)),
-                tokens_per_step=args.batch_size
-                * min(args.seq_length, getattr(config, "block_size", args.seq_length)),
-            )
-        )
+        summaries.append(summary)
 
     headers, table_rows = print_summary_table(summaries, device)
     if table_rows:
