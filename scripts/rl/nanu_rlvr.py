@@ -1,19 +1,17 @@
 """
-GRPO (Group Relative Policy Optimization) training script
-========================================================
+RL with Verifiable Rewards on datasets like GSM8K and pre-trained
+language models like Qwen2.5-1.5B-Instruct using GRPO or Dr GRPO.
 
-Perform RL using verifiable rewards on datasets like GSM8K and pre-trained
-language models like Qwen2.5-1.5B-Instruct.
-
-The script can work on single GPU or multiple GPUs, however, currently only data
-parallelism is supported. Each rank holds policy model and reference model. We generate rollouts
-and compare with reference on that rank to get reward per rank and generate loss
-for that replica to generate gradients for that replica. Gradients are averaged
-across replicas using DDP. After each iteration, the policy model is copied to
-the reference model and the process is repeated.
+Script can work with single 80GB GPU with defaults or multi-GPU with data
+parallelism. Each rank holds policy model and reference model. Policy rollouts
+are generated and compared with reference on same rank to get reward and loss
+for that rank. Gradients are averaged across ranks using DDP. After each
+iteration, the policy model is copied as the ref model.
 """
 
+from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple, TypedDict, Union, Any, cast, get_args, get_origin
 from argparse import ArgumentParser, BooleanOptionalAction
+from dataclasses import MISSING, asdict, dataclass, field, fields as dataclass_fields, replace
 import copy
 import json
 import logging
@@ -21,31 +19,28 @@ import os
 import random
 import re
 import time
-from dataclasses import MISSING, asdict, dataclass, field, fields as dataclass_fields, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple, TypedDict, Union, cast, get_args, get_origin
 
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.distributed as dist
 
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 
-
 logger = logging.getLogger("nano_rlvr")
 
-_wandb_run = None
+_wandb_run = None # init later if wandb is available and env vars are set
 
+# some type aliases
 CompletionMessage = Dict[str, str]
 CompletionList = List[CompletionMessage]
-DatasetExample = Dict[str, str]
+DatasetExample = dict  # {"prompt": str, "answer": Optional[str]}
 BatchSample = Union[DatasetExample, Tuple[str, str]]
+# prompts, completions, answers -> reward
 RewardFn = Callable[[Sequence[str], Sequence[CompletionList], Sequence[Optional[str]]], Sequence[float]]
-PolicyModel = Union[PreTrainedModel, nn.parallel.DistributedDataParallel]
+PolicyModel = Union[PreTrainedModel, torch.nn.parallel.DistributedDataParallel]
 
 class RolloutData(TypedDict):
     input_ids: torch.Tensor
@@ -58,55 +53,135 @@ class RolloutData(TypedDict):
     repeated_answers: List[Optional[str]]
     logits_to_keep: int
     batch_size: int
-    num_generations: int
+    n_generations: int
     policy_duration: float
     reference_duration: float
 
+def correctness_reward(prompts: Sequence[str], completions: Sequence[CompletionList], answer: Sequence[Optional[str]]) -> List[float]:
+    """2.0 for exact match; 1.5 for numeric-equivalent; else 0.0."""
+    responses = [completion[0]["content"] for completion in completions]
+    extracted = [extract_answer_from_model_output(r) for r in responses]
+    rewards: List[float] = []
+    for r, a in zip(extracted, answer):
+        if r == a:  # Exact match case
+            rewards.append(2.0)
+        else:
+            # Try numeric equivalence
+            r_num = _extract_single_number(str(r))
+            a_num = _extract_single_number(str(a))
+            if r_num is not None and a_num is not None and r_num == a_num:
+                rewards.append(1.5)
+            else:
+                rewards.append(0.0)
+    # TODO: log completion lengths
+    completion_lengths = [len(response.split()) for response in responses]
+    return rewards
 
-def init_torch(seed) -> Tuple[str, int]:
-    device_name, device_id = 'cpu', -1
+def format_reward(completions: Sequence[CompletionList]) -> List[float]:
+    """Up to 0.8 for using required XML tags."""
+    responses = [completion[0]["content"] for completion in completions]
+    rewards = []
+    for response in responses:
+        score = 0.0
+        if "<reasoning>" in response:
+            score += 0.2
+        if "</reasoning>" in response:
+            score += 0.2
+        if "<answer>" in response:
+            score += 0.2
+        if "</answer>" in response:
+            score += 0.2
+        rewards.append(score)
+    return rewards
 
-    if not ("RANK" in os.environ and "WORLD_SIZE" in os.environ and "LOCAL_RANK" in os.environ):
-        logger.warning("Not all distributed environment variables detected; defaulting to single-process.")
-        os.environ.update(RANK="0", WORLD_SIZE="1", LOCAL_RANK="0", LOCAL_WORLD_SIZE="1", MASTER_ADDR="localhost", MASTER_PORT="12355")
-    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+def combined_reward(prompts: Sequence[str],
+                    completions: Sequence[CompletionList],
+                    answer: Sequence[Optional[str]]) -> List[float]:
+    """Correctness (0..2.0) + format (0..0.8)."""
+    correctness_scores = correctness_reward(prompts=prompts, completions=completions, answer=answer)
+    format_scores = format_reward(completions=completions)
+    return [c + f for c, f in zip(correctness_scores, format_scores)]
 
-    if torch.cuda.is_available():
-        gpu_count = torch.cuda.device_count()
-        if gpu_count > 1:
-            assert gpu_count-1 >= local_rank, f'LOCAL_RANK={local_rank} is greater than available GPUs={gpu_count}'
-            torch.cuda.set_device(local_rank)
-            device_name, device_id = f'cuda:{local_rank}', local_rank
-        elif gpu_count == 1:
-            torch.cuda.set_device(0)
-            device_name,device_id = 'cuda:0', 0
-        # for deterministic training, reset GPU after setting the device
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats()
+def gsm8k_prompt(model_mode: str) -> str:
+    if model_mode == "chat":
+        return (
+            "A conversation between User and Assistant. The user asks a question, and the Assistant solves it. "
+            "The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. "
+            "The reasoning process and answer are enclosed within <reasoning> </reasoning> and <answer> </answer> tags, "
+            "respectively, i.e., <reasoning> reasoning process here </reasoning> <answer> answer here </answer>."
+        )
+    return (
+        "First, think about the reasoning process in the mind and then provide the answer. "
+        "The reasoning process and answer are enclosed within <reasoning> </reasoning> and <answer> </answer> tags, "
+        "respectively, i.e., <reasoning> reasoning process here </reasoning> <answer> answer here </answer>."
+    )
 
-        # let other values be controlled by env vars
-        torch.backends.cudnn.enabled = True
-        torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
-        torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
-        torch.set_float32_matmul_precision('high')
+dataset_configs: Dict[str, Dict[str, Any]] = {
+    "gsm8k": {"path": "openai/gsm8k", "subset": "main",
+              "train_split": "train", "test_split": "test",
+              "prompt_builder": gsm8k_prompt,
+              "reward_fn": combined_reward,
+            },
+}
+@dataclass(frozen=True)
+class Config:
+    seed: int = 42
+    model_mode: str = field(default="completion", metadata={"choices": ("completion", "chat")})
+    greedy_eval: bool = False
+    model_name: str = "Qwen/Qwen2.5-1.5B-Instruct"
+    dataset: str = field(default="gsm8k", metadata={"choices": tuple(dataset_configs.keys())})
+    n_eval: int = 30
+    eval_batch_size: int = 32
+    max_new_tokens: int = 512
+    eval_temperature: float = 0.7
+    num_iterations: int = 1
+    steps_per_iteration: int = 500
+    batch_size: int = 7
+    n_generations: int = 12
+    max_completion_length: int = 400
+    beta: float = 0.04
+    learning_rate: float = 5e-6
+    mu: int = 1
+    epsilon: float = 0.1
+    grpo_variant: str = field(default="grpo", metadata={"choices": ("grpo", "dr_grpo")})
+    out_dir: Optional[str] = None
+    run_name: Optional[str] = None
+    lr_warmup_steps: int = 256
+    lr_cooldown_frac: float = 0.4
+    device_name: str = field(default="cpu", metadata={"cli": False})
+    device_id: int = field(default=-1, metadata={"cli": False})
+    run_dir: str = field(default="", metadata={"cli": False})
 
-    dist.init_process_group(backend="nccl" if torch.cuda.is_available() else "gloo", init_method="env://",
-                            device_id=torch.device(device_name))  # type: ignore[arg-type]
-    logger.info("Distributed: rank=%d world_size=%d local_rank=%d", dist.get_rank(), dist.get_world_size(), int(os.environ["LOCAL_RANK"]))
+def log_message(message: str, level: int=logging.INFO) -> None:
+    logger.log(level, message)
+    if _wandb_run and (not dist.is_available() or not dist.is_initialized() or dist.get_rank() == 0):
+        import wandb
+        wandb.log({'level': logging.getLevelName(level), 'message': message})
 
-    random.seed(seed+dist.get_rank())
-    np.random.seed(seed+dist.get_rank())
-    torch.manual_seed(seed+dist.get_rank())
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed+dist.get_rank())
+def log_metrics(values: Dict[str, float]) -> None:
+    if _wandb_run and (not dist.is_available() or dist.get_rank() == 0):
+        import wandb
+        wandb.log(values)
+    logger.info(", ".join(f"{k}={v}" for k, v in values.items()))
 
-    torch.distributed.barrier()
+def log_summary(values: Dict[str, Any]) -> None:
+    if _wandb_run and (not dist.is_available() or dist.get_rank() == 0):
+        _wandb_run.summary.update(values)
+    logger.info(", ".join(f"{k}={v}" for k, v in values.items()))
 
-    return device_name, device_id
+def maybe_init_wandb(config: Mapping[str, object]) -> None:
+    global _wandb_run
+    if _wandb_run or not (os.environ.get("WANDB_API_KEY") and os.environ.get("WANDB_HOST")):
+        return
+    try:
+        import wandb
+    except ModuleNotFoundError:
+        return
+    _wandb_run = wandb.init("nano-rlvr", name=config["run_name"], config=dict(config), # type: ignore[arg-type]
+        dir=str(config.get("run_dir", "")) or None, reinit=True,)
 
 def configure_logging(run_dir: Path) -> None:
     rank = dist.get_rank() if dist.is_available() and dist.is_initialized() else 0
-
     class _Formatter(logging.Formatter):
         def __init__(self) -> None:
             super().__init__("%(asctime)s [rank=%(rank)s] %(levelname)s %(message)s", "%H:%M:%S")
@@ -131,22 +206,40 @@ def configure_logging(run_dir: Path) -> None:
         handler.setLevel(level)
         logger.addHandler(handler)
 
-    logger.info("Run directory: %s", run_dir)
+    logger.info(f"Run directory: {run_dir}")
 
-def build_system_prompt(model_mode: str) -> str:
-    if model_mode == "chat":
-        return (
-            "A conversation between User and Assistant. The user asks a question, and the Assistant solves it. "
-            "The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. "
-            "The reasoning process and answer are enclosed within <reasoning> </reasoning> and <answer> </answer> tags, "
-            "respectively, i.e., <reasoning> reasoning process here </reasoning> <answer> answer here </answer>."
-        )
-    return (
-        "First, think about the reasoning process in the mind and then provide the answer. "
-        "The reasoning process and answer are enclosed within <reasoning> </reasoning> and <answer> </answer> tags, "
-        "respectively, i.e., <reasoning> reasoning process here </reasoning> <answer> answer here </answer>."
-    )
+def init_torch(seed) -> Tuple[str, int]:
+    device_name, device_id = 'cpu', -1
 
+    # if env vars for distributed setup are not set, assume single-process
+    if not ("RANK" in os.environ and "WORLD_SIZE" in os.environ and "LOCAL_RANK" in os.environ):
+        log_message("distributed environment variables not set; defaulting to single-process.", level=logging.WARNING)
+        os.environ.update(RANK="0", WORLD_SIZE="1", LOCAL_RANK="0", LOCAL_WORLD_SIZE="1", MASTER_ADDR="localhost", MASTER_PORT="12355")
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+
+    if torch.cuda.is_available():
+        torch.cuda.set_device(local_rank)
+        device_name, device_id = f'cuda:{local_rank}', local_rank
+        # for deterministic training, reset GPU after setting the device
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+        torch.backends.cudnn.enabled = True
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.set_float32_matmul_precision('high')
+
+    dist.init_process_group(backend="nccl" if torch.cuda.is_available() else "gloo", init_method="env://",
+                            device_id=torch.device(device_name))  # type: ignore[arg-type]
+    log_summary({"distributed/rank": float(dist.get_rank()), "distributed/world_size": float(dist.get_world_size()),"distributed/local_rank": float(int(os.environ["LOCAL_RANK"]))})
+
+    random.seed(seed+dist.get_rank())
+    np.random.seed(seed+dist.get_rank())
+    torch.manual_seed(seed+dist.get_rank())
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed+dist.get_rank())
+    torch.distributed.barrier()
+
+    return device_name, device_id
 
 def extract_answer_from_model_output(text: str) -> Optional[str]:
     parts = text.split("<answer>")
@@ -167,11 +260,10 @@ def build_prompt(messages: Sequence[CompletionMessage], tokenizer: PreTrainedTok
     if model_mode == "chat":
         # Use the model's chat template to serialize the conversation.
         return tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=False
-        )
+            messages, tokenize=False, add_generation_prompt=False  #type: ignore[call-arg]
+        ) # type: ignore[call-arg]
     # For "completion" mode, we concatenate message contents.
     return "\n".join(msg["content"].strip() for msg in messages)
-
 
 def _extract_last_number(text: str) -> Optional[float]:
     """Extract the trailing numeric token if present.
@@ -181,7 +273,6 @@ def _extract_last_number(text: str) -> Optional[float]:
     match = re.search(r"(?:^|\s|=)\s*(-?\d*\.?\d+)\s*$", text)
     return float(match.group(1)) if match else None
 
-
 def _extract_single_number(text: str) -> Optional[float]:
     """Return the numeric value if the text contains exactly one number.
        'answer: -3.2' -> -3.2
@@ -190,7 +281,7 @@ def _extract_single_number(text: str) -> Optional[float]:
     return float(numbers[0]) if len(numbers) == 1 else None
 
 def prepare_dataset(
-    tokenizer: PreTrainedTokenizerBase, model_mode: str, system_prompt: str, dataset_cfg: Mapping[str, str], split: str,
+    tokenizer: PreTrainedTokenizerBase, model_mode: str, dataset_cfg: Mapping[str, str], split: str,
 ) -> List[DatasetExample]:
     args: List[str] = [dataset_cfg["path"]]
     subset = dataset_cfg.get("subset")
@@ -198,6 +289,7 @@ def prepare_dataset(
         args.append(subset)
     data = load_dataset(*args, split=split)
     formatted_data: List[DatasetExample] = []
+    system_prompt = dataset_cfg["prompt_builder"](model_mode) # type: ignore[arg-type]
 
     for raw in data:
         example: DatasetExample = cast(DatasetExample, raw)
@@ -219,10 +311,10 @@ def prepare_dataset(
 
 def evaluate_model(
     model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, eval_examples: Sequence[DatasetExample],
-    batch_size: int, greedy_eval: bool, max_new_tokens: int, sampling_temperature: Optional[float],
-) -> float:
-    if not greedy_eval and sampling_temperature is None:
-        raise ValueError("sampling_temperature must be provided when greedy_eval is False")
+    config: Config,
+) -> Dict[str, float]:
+    if not config.greedy_eval and config.eval_temperature is None:
+        raise ValueError("eval_temperature must be provided when greedy_eval is False")
 
     device = next(model.parameters()).device
     num_return_sequences = 1  # Keep one completion per prompt for accuracy alignment.
@@ -238,13 +330,12 @@ def evaluate_model(
     model.eval()
     correct = 0
     total_examples = len(eval_examples)
-    logger.info("Evaluating model on %d examples across %d ranks...", total_examples, world_size)
 
     shard_indices = list(range(rank, total_examples, world_size))
     local_examples: List[DatasetExample] = [eval_examples[idx] for idx in shard_indices]
     local_total = len(local_examples)
 
-    effective_batch_size = min(batch_size, local_total) if local_total > 0 else batch_size
+    effective_batch_size = min(config.batch_size, local_total) if local_total > 0 else config.batch_size
 
     completion_lengths: List[int] = []
     try:
@@ -254,23 +345,23 @@ def evaluate_model(
             expected_answers = [ex.get("answer") for ex in batch_examples]
 
             inputs = tokenizer(prompts, return_tensors="pt", padding=True, truncation=False)
-            input_ids = inputs["input_ids"].to(device, non_blocking=True)
-            attention_mask = inputs["attention_mask"].to(device, non_blocking=True)
+            input_ids = inputs["input_ids"].to(device, non_blocking=True) # type: ignore[arg-type]
+            attention_mask = inputs["attention_mask"].to(device, non_blocking=True) # type: ignore[arg-type]
 
             with torch.no_grad():
-                if greedy_eval:
+                if config.greedy_eval:
                     generated = model.generate(  # type: ignore
-                        input_ids=input_ids, attention_mask=attention_mask, max_new_tokens=max_new_tokens, pad_token_id=pad_token_id,
+                        input_ids=input_ids, attention_mask=attention_mask, max_new_tokens=config.max_new_tokens, pad_token_id=pad_token_id,
                         eos_token_id=eos_token_id, forced_eos_token_id=eos_token_id, early_stopping=False, do_sample=False,
                         num_return_sequences=num_return_sequences,
                     )
                 else:
-                    if sampling_temperature is None:
-                        raise AssertionError("sampling_temperature must be set when using sampled evaluation")
+                    if config.eval_temperature is None:
+                        raise AssertionError("eval_temperature must be set when using sampled evaluation")
                     generated = model.generate(  # type: ignore
-                        input_ids=input_ids, attention_mask=attention_mask, max_new_tokens=max_new_tokens, pad_token_id=pad_token_id,
+                        input_ids=input_ids, attention_mask=attention_mask, max_new_tokens=config.max_new_tokens, pad_token_id=pad_token_id,
                         eos_token_id=eos_token_id, forced_eos_token_id=eos_token_id, early_stopping=False, do_sample=True,
-                        temperature=float(sampling_temperature), num_return_sequences=num_return_sequences,
+                        temperature=float(config.eval_temperature), num_return_sequences=num_return_sequences,
                     )
 
             # Decode only the *new* tokens (avoid the prompt leaking into parsing).
@@ -315,112 +406,11 @@ def evaluate_model(
 
     accuracy = (global_correct / global_total) * 100 if global_total > 0 else 0.0
     avg_completion_len = float(np.mean(completion_lengths)) if completion_lengths else 0.0
-    log_info(
-        "Accuracy: %.2f%% (%d/%d); avg completion length: %.1f" % (accuracy, global_correct, global_total, avg_completion_len),
-        metrics={
-            "eval/accuracy": float(accuracy),
-            "eval/correct": float(global_correct),
-            "eval/total": float(global_total),
-            "eval/avg_completion_len": avg_completion_len,
-        },
-    )
 
     # complete eval on all ranks before returning
     torch.distributed.barrier()
 
-    return accuracy
-
-
-# -------------------------
-# Reward functions
-# -------------------------
-def correctness_reward(prompts: Sequence[str], completions: Sequence[CompletionList], answer: Sequence[Optional[str]]) -> List[float]:
-    """2.0 for exact match; 1.5 for numeric-equivalent; else 0.0."""
-    responses = [completion[0]["content"] for completion in completions]
-    extracted = [extract_answer_from_model_output(r) for r in responses]
-    rewards: List[float] = []
-    for r, a in zip(extracted, answer):
-        if r == a:  # Exact match case
-            rewards.append(2.0)
-        else:
-            # Try numeric equivalence
-            r_num = _extract_single_number(str(r))
-            a_num = _extract_single_number(str(a))
-            if r_num is not None and a_num is not None and r_num == a_num:
-                rewards.append(1.5)
-            else:
-                rewards.append(0.0)
-    # TODO: log completion lengths
-    completion_lengths = [len(response.split()) for response in responses]
-    return rewards
-
-
-def format_reward(completions: Sequence[CompletionList]) -> List[float]:
-    """Up to 0.8 for using required XML tags."""
-    responses = [completion[0]["content"] for completion in completions]
-    rewards = []
-    for response in responses:
-        score = 0.0
-        if "<reasoning>" in response:
-            score += 0.2
-        if "</reasoning>" in response:
-            score += 0.2
-        if "<answer>" in response:
-            score += 0.2
-        if "</answer>" in response:
-            score += 0.2
-        rewards.append(score)
-    return rewards
-
-
-def combined_reward(prompts: Sequence[str], completions: Sequence[CompletionList], answer: Sequence[Optional[str]]) -> List[float]:
-    """Correctness (0..2.0) + format (0..0.8)."""
-    correctness_scores = correctness_reward(prompts=prompts, completions=completions, answer=answer)
-    format_scores = format_reward(completions=completions)
-    return [c + f for c, f in zip(correctness_scores, format_scores)]
-
-
-REWARD_FUNCTIONS: Dict[str, RewardFn] = {
-    "combined": combined_reward,
-    "correctness": correctness_reward,
-    "format": format_reward,
-}
-
-KNOWN_DATASETS: Dict[str, Dict[str, str]] = {
-    "gsm8k": {"path": "openai/gsm8k", "subset": "main", "train_split": "train", "test_split": "test"},
-}
-
-
-@dataclass(frozen=True)
-class Config:
-    """Configuration for GRPO training with XML-formatted answers."""
-    seed: int = 42
-    model_mode: str = field(default="completion", metadata={"choices": ("completion", "chat")})
-    greedy_eval: bool = False
-    model_name: str = "Qwen/Qwen2.5-1.5B-Instruct"
-    dataset: str = field(default="gsm8k", metadata={"choices": tuple(KNOWN_DATASETS.keys())})
-    num_eval_examples: int = 30
-    eval_batch_size: int = 32
-    eval_max_new_tokens: int = 512
-    eval_temperature: float = 0.7
-    num_iterations: int = 1
-    steps_per_iteration: int = 500
-    batch_size: int = 7
-    num_generations: int = 12
-    max_completion_length: int = 400
-    beta: float = 0.04
-    learning_rate: float = 5e-6
-    mu: int = 1
-    epsilon: float = 0.1
-    reward_function: str = field(default="combined", metadata={"choices": tuple(REWARD_FUNCTIONS.keys())})
-    out_dir: Optional[str] = None
-    run_name: Optional[str] = None
-    lr_warmup_steps: int = 256
-    lr_cooldown_start: float = 0.4
-    device_name: str = field(default="cpu", metadata={"cli": False})
-    device_id: int = field(default=-1, metadata={"cli": False})
-    run_dir: str = field(default="", metadata={"cli": False})
-
+    return {"accuracy": accuracy, "avg_completion_length": avg_completion_len, "correct": global_correct, "total": global_total}
 
 def _resolve_cli_type(field_type):
     origin = get_origin(field_type)
@@ -429,7 +419,6 @@ def _resolve_cli_type(field_type):
         if len(args) == 1:
             return args[0], True
     return field_type, False
-
 
 def parse_dc(cls):
     parser = ArgumentParser(prog=cls.__name__, description=cls.__doc__)
@@ -475,44 +464,11 @@ def parse_dc(cls):
     parsed = vars(parser.parse_args())
     return cls(**parsed)
 
-
-def log_info(message: str, metrics: Optional[Dict[str, float]] = None, step: Optional[int] = None) -> None:
-    logger.info(message)
-    if _wandb_run and metrics and (not dist.is_available() or not dist.is_initialized() or dist.get_rank() == 0):
-        import wandb
-        wandb.log({k: float(v) for k, v in metrics.items()}, step=step)
-
-
-def log_summary(values: Mapping[str, float]) -> None:
-    if _wandb_run and (not dist.is_available() or dist.get_rank() == 0):
-        try:
-            _wandb_run.summary.update({k: float(v) for k, v in values.items()})
-        except Exception as exc:  # pragma: no cover
-            logger.debug("wandb summary update failed: %s", exc)
-
-
-def maybe_init_wandb(config_payload: Mapping[str, object]) -> None:
-    global _wandb_run
-    if _wandb_run or not (os.environ.get("WANDB_API_KEY") and os.environ.get("WANDB_HOST")):
-        return
-    try:
-        import wandb
-    except ModuleNotFoundError:
-        return
-    _wandb_run = wandb.init(
-        project=os.environ.get("WANDB_PROJECT", "nano-rlvr"),
-        name=config_payload.get("run_name"),
-        config=dict(config_payload),
-        dir=str(config_payload.get("run_dir", "")) or None,
-        reinit=True,
-    )
-
-
 def selective_log_softmax(logits: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
     """
     Return log P(token_t) for each position t in `input_ids`, using logits.
     """
-    log_probs = F.log_softmax(logits, dim=-1)  # (B, T, V)
+    log_probs = torch.nn.functional.log_softmax(logits, dim=-1)  # (B, T, V)
     return log_probs.gather(dim=-1, index=input_ids.unsqueeze(-1)).squeeze(-1)
 
 
@@ -528,11 +484,9 @@ def compute_log_probs(model: PolicyModel, input_ids: torch.Tensor, attention_mas
     logits = logits[:, -logits_to_keep:, :]               # (B, K, V)
     return selective_log_softmax(logits, toks)
 
-
 def create_completion_mask(completion_ids: torch.Tensor, eos_token_id: int) -> torch.Tensor:
     """
-    Mask = 1 for tokens up to and including the first EOS; 0 after.
-    Returned dtype is int to remain compatible with HF attention_mask.
+    Mask = 1 for tokens up to and including the first EOS; 0 after. Returned dtype is int to remain compatible with HF attention_mask.
     """
     is_eos = completion_ids == eos_token_id                      # (B, Tc)
     eos_idx = torch.full((is_eos.size(0),), is_eos.size(1), dtype=torch.long, device=completion_ids.device)
@@ -541,26 +495,22 @@ def create_completion_mask(completion_ids: torch.Tensor, eos_token_id: int) -> t
     seq_idx = torch.arange(is_eos.size(1), device=completion_ids.device).expand(is_eos.size(0), -1)
     return (seq_idx <= eos_idx.unsqueeze(1)).int()
 
-def generate_completions(
-    model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, prompts: Sequence[str], num_generations: int = 4,
-    max_completion_length: int = 32,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Generate `num_generations` completions per prompt (sampling).
-    Returns: prompt_ids, prompt_mask, completion_ids, completion_mask
-    with shapes (B*G, ...).
-    """
+def gen_completions(
+    model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, prompts: Sequence[str],
+    n_generations: int, max_completion_length: int,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]: # prompt_ids, prompt_mask, completion_ids, completion_mask
+
     device = next(model.parameters()).device
 
     # Left padding keeps the "new tokens" aligned to the right for easy slicing.
-    inputs = tokenizer(prompts, return_tensors="pt", padding=True)
-    prompt_ids = inputs["input_ids"].to(device, non_blocking=True)
-    prompt_mask = inputs["attention_mask"].to(device, non_blocking=True)
+    inputs = tokenizer(prompts, return_tensors="pt", padding=True) # type: ignore[arg-type]
+    prompt_ids = inputs["input_ids"].to(device, non_blocking=True) # type: ignore[arg-type]
+    prompt_mask = inputs["attention_mask"].to(device, non_blocking=True) # type: ignore[arg-type]
     prompt_seq_len = prompt_ids.size(1)
 
     # Repeat each prompt `G` times for G completions.
-    prompt_ids = prompt_ids.repeat_interleave(num_generations, dim=0)
-    prompt_mask = prompt_mask.repeat_interleave(num_generations, dim=0)
+    prompt_ids = prompt_ids.repeat_interleave(n_generations, dim=0)
+    prompt_mask = prompt_mask.repeat_interleave(n_generations, dim=0)
 
     pad_token_id = tokenizer.pad_token_id
     eos_token_id = tokenizer.eos_token_id
@@ -579,24 +529,20 @@ def generate_completions(
         "Model.generate() did not return input prefix as-is; cannot slice completions safely."
 
     completion_ids = outputs[:, prompt_seq_len:]
-    completion_mask = create_completion_mask(completion_ids, eos_token_id)
+    completion_mask = create_completion_mask(completion_ids, int(eos_token_id)) # type: ignore[arg-type]
     return prompt_ids, prompt_mask, completion_ids, completion_mask
 
-def generate_rollout_data(
-    model: PreTrainedModel, ref_model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, batch_samples: Sequence[BatchSample],
-    num_generations: int, max_completion_length: int,
+def gen_rollouts(
+    model: PreTrainedModel, ref_model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase,
+    batch: Sequence[BatchSample], config: Config,
 ) -> RolloutData:
-    """
-    Generate completions and cache log-probs from:
-      - the current model snapshot ("old policy" during sampling), and
-      - the frozen reference model.
-    """
-    prompts = [s["prompt"] if isinstance(s, dict) else s[0] for s in batch_samples]
-    answers = [s["answer"] if isinstance(s, dict) else s[1] for s in batch_samples]
+
+    prompts = [s["prompt"] if isinstance(s, dict) else s[0] for s in batch]
+    answers = [s["answer"] if isinstance(s, dict) else s[1] for s in batch]
 
     with torch.no_grad():
         policy_start = time.perf_counter()
-        p_ids, p_mask, c_ids, c_mask = generate_completions(model, tokenizer, prompts, num_generations, max_completion_length)
+        p_ids, p_mask, c_ids, c_mask = gen_completions(model, tokenizer, prompts, config.n_generations, config.max_completion_length)
         input_ids = torch.cat([p_ids, c_ids], dim=1)
         attention_mask = torch.cat([p_mask, c_mask], dim=1)  # type: ignore[arg-type]
         logits_to_keep = c_ids.size(1)
@@ -611,48 +557,40 @@ def generate_rollout_data(
     # PERF: batch decode instead of per-sample loop
     decoded = tokenizer.batch_decode(c_ids, skip_special_tokens=True)
     formatted_completions: List[CompletionList] = [[{"content": s}] for s in decoded]
-    repeated_prompts: List[str] = [p for p in prompts for _ in range(num_generations)]
-    repeated_answers: List[Optional[str]] = [a for a in answers for _ in range(num_generations)]
+    repeated_prompts: List[str] = [p for p in prompts for _ in range(config.n_generations)]
+    repeated_answers: List[Optional[str]] = [a for a in answers for _ in range(config.n_generations)]
 
     return RolloutData(
         input_ids=input_ids, attention_mask=attention_mask, completion_mask=c_mask, old_log_probs=old_log_probs,
         ref_log_probs=ref_log_probs, formatted_completions=formatted_completions, repeated_prompts=repeated_prompts,
-        repeated_answers=repeated_answers, logits_to_keep=logits_to_keep, batch_size=len(prompts), num_generations=num_generations,
+        repeated_answers=repeated_answers, logits_to_keep=logits_to_keep, batch_size=len(prompts), n_generations=config.n_generations,
         policy_duration=policy_duration, reference_duration=reference_duration,
     )
 
+def grpo_loss(
+    model: PolicyModel, rollouts: RolloutData, reward_function: RewardFn,
+    beta: float, epsilon: float, algo_name: str,max_completion_length: int,
+) -> Tuple[torch.Tensor, float]:
 
-def grpo_loss(model: PolicyModel, rollout_data: RolloutData, reward_function: RewardFn, beta: float, epsilon: float) -> Tuple[torch.Tensor, float]:
-    """
-    GRPO objective with PPO-style clipping and reverse-KL penalty.
-    """
-    input_ids = rollout_data["input_ids"]
-    attention_mask = rollout_data["attention_mask"]
-    completion_mask = rollout_data["completion_mask"]
-    old_log_probs = rollout_data["old_log_probs"]
-    ref_log_probs = rollout_data["ref_log_probs"]
-    logits_to_keep = rollout_data["logits_to_keep"]
-    batch_size = int(rollout_data["batch_size"])
-    num_generations = int(rollout_data["num_generations"])
-
-    current_log_probs = compute_log_probs(model, input_ids, attention_mask, logits_to_keep)
-    ratio = torch.exp(current_log_probs - old_log_probs)
+    current_log_probs = compute_log_probs(model,
+                                          input_ids=rollouts["input_ids"],
+                                          attention_mask=rollouts["attention_mask"],
+                                          logits_to_keep=rollouts["logits_to_keep"])
+    ratio = torch.exp(current_log_probs - rollouts["old_log_probs"])
 
     rewards = torch.tensor(
-        reward_function(
-            prompts=rollout_data["repeated_prompts"], completions=rollout_data["formatted_completions"],
-            answer=rollout_data["repeated_answers"],
-        ),
+        reward_function(rollouts["repeated_prompts"],
+                        rollouts["formatted_completions"],
+                        rollouts["repeated_answers"]),
         dtype=torch.float32,
         device=current_log_probs.device,
     )
 
-    rewards_matrix = rewards.view(batch_size, num_generations)
+    rewards_matrix = rewards.view(rollouts["batch_size"], rollouts["n_generations"])
     avg_reward = rewards_matrix.mean().item()
-    logger.debug("Average reward (pre-normalization): %.4f", avg_reward)
 
-    mean_rewards = rewards_matrix.mean(dim=1).repeat_interleave(num_generations)
-    std_rewards = rewards_matrix.std(dim=1).repeat_interleave(num_generations)
+    mean_rewards = rewards_matrix.mean(dim=1).repeat_interleave(rollouts["n_generations"])
+    std_rewards = rewards_matrix.std(dim=1).repeat_interleave(rollouts["n_generations"])
     advantages = ((rewards_matrix.view(-1) - mean_rewards) / (std_rewards + 1e-4)).unsqueeze(1)
 
     surr1 = ratio * advantages
@@ -660,66 +598,58 @@ def grpo_loss(model: PolicyModel, rollout_data: RolloutData, reward_function: Re
     surrogate = torch.min(surr1, surr2)
 
     # Reverse-KL approximation (stable around 0): exp(Δ) - Δ - 1, where Δ = ref - current.
-    delta = ref_log_probs - current_log_probs
+    delta = rollouts["ref_log_probs"] - current_log_probs
     kl = torch.exp(delta) - delta - 1.0
 
     per_token = surrogate - beta * kl
 
-    # Convert mask to float once; avoid divide-by-zero on empty completions.
-    cmask = completion_mask.to(per_token.dtype)
-    token_counts = cmask.sum(dim=1).clamp_min(1)  # FIX: guard against division by zero
-    loss = -((per_token * cmask).sum(dim=1) / token_counts).mean()
+    cmask = rollouts["completion_mask"].to(per_token.dtype)
+
+    if algo_name == "grpo":
+        token_counts = cmask.sum(dim=1).clamp_min(1)
+        loss = -((per_token * cmask).sum(dim=1) / token_counts).mean()
+    elif algo_name == "dr_grpo":
+        denom = per_token.size(0) * max(1, max_completion_length)
+        denom_tensor = per_token.new_tensor(float(denom))
+        loss = -(per_token * cmask).sum() / denom_tensor
+    else:
+        raise ValueError(f"Unknown algo_name '{algo_name}' (expected 'grpo' or 'dr_grpo').")
 
     return loss, avg_reward
 
+def unwrap(module_like: PolicyModel) -> PreTrainedModel:
+    return cast(PreTrainedModel, module_like.module)
 
-# -------------------------
-# Training loop
-# -------------------------
-def train_with_grpo(
+def get_lr(step: int, config: Config) -> float:
+    total_updates = config.num_iterations * config.steps_per_iteration * config.mu
+    warmup_steps = config.lr_warmup_steps
+    cooldown_start_step = int(total_updates * config.lr_cooldown_frac)
+
+    if warmup_steps > 0 and step <= warmup_steps:
+        return (step / float(warmup_steps)) * config.learning_rate
+    if step < cooldown_start_step or cooldown_start_step >= total_updates:
+        return config.learning_rate
+    progress = (step - cooldown_start_step) / float(total_updates - cooldown_start_step)
+    return (1.0 - progress) * config.learning_rate
+
+def train_iterations(
     model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, train_data: Sequence[DatasetExample], config: Config,
 ) -> PreTrainedModel:
-    train_start = time.perf_counter()
-    policy_rollout_times: List[float] = []
-    reference_rollout_times: List[float] = []
-    policy_update_times: List[float] = []
-    total_tokens = 0.0
+    train_start, total_tokens = time.perf_counter(), 0
+    policy_rollout_time_total, reference_rollout_time_total, policy_update_time_total = 0, 0, 0
 
-    reward_fn = REWARD_FUNCTIONS[config.reward_function]
-
-    policy_model: PolicyModel = nn.parallel.DistributedDataParallel(
+    reward_fn = dataset_configs[config.dataset]["reward_fn"]
+    policy_model: PolicyModel = torch.nn.parallel.DistributedDataParallel(
         model, device_ids=[config.device_id], gradient_as_bucket_view=False, #TODO: check if gradient_as_bucket_view=True works
     )  # grads are kept in reducer buckets avoiding 2x memory usage
 
-    def unwrap(module_like: PolicyModel) -> PreTrainedModel:
-        return cast(PreTrainedModel, module_like.module)
-
-    total_updates = max(1, config.num_iterations * config.steps_per_iteration * max(1, config.mu))
-    warmup_steps = max(0, min(config.lr_warmup_steps, total_updates))
-    cooldown_start_frac = min(max(config.lr_cooldown_start, 0.0), 1.0)
-    cooldown_start_step = max(warmup_steps, int(total_updates * cooldown_start_frac))
-    cooldown_start_step = min(total_updates, cooldown_start_step)
-
-    def _lr_scale(step: int) -> float:
-        if warmup_steps > 0 and step <= warmup_steps:
-            return step / float(warmup_steps)
-        if step < cooldown_start_step or cooldown_start_step >= total_updates:
-            return 1.0
-        if total_updates == cooldown_start_step:
-            return 1.0
-        progress = (step - cooldown_start_step) / float(total_updates - cooldown_start_step)
-        return max(0.0, 1.0 - progress)
-
-    update_step = 0
+    update_count = 0
 
     for iteration in range(1, config.num_iterations + 1): # number of times we freeze the reference model and copy from policy model
-        logger.info("Starting iteration %d/%d", iteration, config.num_iterations)
-
         # Snapshot policy -> reference (no grads).
-        device = torch.device(config.device_name)
-        reference_model = copy.deepcopy(unwrap(policy_model)).to(device)
-        reference_model.eval()
-        for p in reference_model.parameters():
+        ref = copy.deepcopy(unwrap(policy_model)).to(torch.device(config.device_name)) # type: ignore[arg-type]
+        ref.eval()
+        for p in ref.parameters():
             p.requires_grad = False
 
         optimizer = torch.optim.AdamW(policy_model.parameters(), lr=config.learning_rate, fused=torch.cuda.is_available())  # type: ignore[arg-type]
@@ -727,135 +657,82 @@ def train_with_grpo(
         policy_model.train()
 
         for step in range(1, config.steps_per_iteration + 1):  # number of policy updates per iteration
-            batch_samples = random.sample(train_data, config.batch_size)
-
-            # Generate with current policy snapshot on the primary device.
+            batch = random.sample(train_data, config.batch_size)
+            # rollout with policy
             with torch.no_grad():
-                policy_module = unwrap(policy_model)
-                # Temporarily switch to eval + enable KV cache for faster decoding.
-                was_training = policy_module.training
-                prev_cache = getattr(policy_module.config, "use_cache", False)
-                policy_module.eval()
-                policy_module.config.use_cache = True
+                policy = unwrap(policy_model)
 
-                # TODO: would this work for distributed setup?
-                rollout_data = generate_rollout_data(
-                    policy_module, reference_model, tokenizer, batch_samples, config.num_generations, config.max_completion_length
-                )
+                # Temporarily switch to eval + enable KV cache for faster decoding.
+                was_training = policy.training
+                prev_cache = getattr(policy.config, "use_cache", False)
+                policy.eval()
+                policy.config.use_cache = True
+
+                rollouts = gen_rollouts(policy, ref, tokenizer, batch, config)
 
                 # Restore training state.
-                policy_module.config.use_cache = prev_cache
+                policy.config.use_cache = prev_cache
                 if was_training:
-                    policy_module.train()
+                    policy.train()
 
-            avg_completion_tokens = float(rollout_data["completion_mask"].sum(dim=1).float().mean().item())
-            policy_rollout_times.append(rollout_data["policy_duration"])
-            reference_rollout_times.append(rollout_data["reference_duration"])
-
-            for grpo_iter in range(1, config.mu + 1):  # number of GRPO updates per batch
-                update_step += 1
-                lr_factor = _lr_scale(update_step)
-                current_lr = config.learning_rate * lr_factor
+            for update_i in range(1, config.mu + 1):  # number of GRPO updates per batch
+                update_count += 1
+                lr = get_lr(update_count, config=config)
                 for group in optimizer.param_groups:
-                    group["lr"] = current_lr
+                    group["lr"] = lr
                 update_start = time.perf_counter()
                 with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                    loss, avg_reward = grpo_loss(policy_model, rollout_data, reward_fn, config.beta, config.epsilon)
+                    loss, avg_reward = grpo_loss(
+                        policy_model, rollouts, reward_fn, config.beta, config.epsilon, config.grpo_variant,
+                        config.max_completion_length,
+                    )
                 optimizer.zero_grad()  # TODO: check if this would work because gradient_as_bucket_view=True
                 loss.backward()
                 total_norm = torch.nn.utils.clip_grad_norm_(policy_model.parameters(), max_norm=0.1)
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)  # TODO: check if this would work because gradient_as_bucket_view=True
                 update_duration = time.perf_counter() - update_start
-                policy_update_times.append(update_duration)
-                tokens_this_step = float(rollout_data["completion_mask"].sum().item())
-                total_tokens += tokens_this_step
-                denom = max(1, rollout_data["batch_size"] * rollout_data["num_generations"])
-                step_metrics: Dict[str, float] = {
-                    "train/loss": float(loss.item()),
-                    "train/reward": float(avg_reward),
-                    "train/grad_norm": float(total_norm.item()),
-                    "train/lr": float(current_lr),
-                    "train/update_step": float(update_step),
-                    "train/avg_completion_tokens": avg_completion_tokens,
-                    "train/tokens": tokens_this_step,
-                    "train/tokens_per_prompt": tokens_this_step / denom,
-                    "train/tokens_throughput": tokens_this_step / max(update_duration, 1e-9),
-                }
-                if grpo_iter == 1:
-                    step_metrics.update({
-                        "perf/policy_rollout_s": float(rollout_data["policy_duration"]),
-                        "perf/reference_rollout_s": float(rollout_data["reference_duration"]),
-                    })
-                log_info(
-                    "Itr %d/%d, Step %d/%d, mu %d/%d, Loss: %.1g, reward: %.1g, norm: %.1g, tokens: %.0f, tok/s: %.1f" % (
-                        iteration, config.num_iterations, step, config.steps_per_iteration, grpo_iter, config.mu,
-                        loss.item(), avg_reward, total_norm.item(), tokens_this_step, tokens_this_step / max(update_duration, 1e-9)
-                    ),
-                    metrics=step_metrics,
-                    step=update_step,
-                )
 
-        logger.info("Completed iteration %d. (Placeholder: reward model update would happen here.)", iteration)
+                update_tokens = rollouts["completion_mask"].sum().item()
+                total_tokens += update_tokens
+                policy_update_time_total += update_duration
+                policy_rollout_time_total += rollouts["policy_duration"]
+                reference_rollout_time_total += rollouts["reference_duration"]
+                train_elapsed = time.perf_counter() - train_start
 
-    def _safe_mean(values: List[float]) -> float:
-        return float(np.mean(values)) if values else 0.0
-
-    total_policy_rollouts = float(sum(policy_rollout_times))
-    total_reference_rollouts = float(sum(reference_rollout_times))
-    total_policy_updates = float(sum(policy_update_times))
-    train_elapsed = time.perf_counter() - train_start
-
-    mean_metrics = {
-        "perf/policy_rollout_mean_s": _safe_mean(policy_rollout_times),
-        "perf/reference_rollout_mean_s": _safe_mean(reference_rollout_times),
-        "perf/policy_update_mean_s": _safe_mean(policy_update_times),
-    }
-    total_metrics = {
-        "perf/policy_rollout_total_s": total_policy_rollouts,
-        "perf/reference_rollout_total_s": total_reference_rollouts,
-        "perf/policy_update_total_s": total_policy_updates,
-        "perf/train_elapsed_s": train_elapsed,
-        "perf/total_tokens": total_tokens,
-        "perf/token_throughput": total_tokens / max(train_elapsed, 1e-9),
-    }
-    log_info(
-        "Mean timings (s): policy rollouts=%.3f, reference rollouts=%.3f, policy updates=%.3f" % (
-            mean_metrics["perf/policy_rollout_mean_s"],
-            mean_metrics["perf/reference_rollout_mean_s"],
-            mean_metrics["perf/policy_update_mean_s"],
-        ),
-        metrics=mean_metrics,
-    )
-    log_info(
-        "Total timings (s): policy rollouts=%.3f, reference rollouts=%.3f, policy updates=%.3f, end-to-end=%.3f, total tokens=%.0f, throughput=%.1f tok/s" % (
-            total_metrics["perf/policy_rollout_total_s"],
-            total_metrics["perf/reference_rollout_total_s"],
-            total_metrics["perf/policy_update_total_s"],
-            total_metrics["perf/train_elapsed_s"],
-            total_metrics["perf/total_tokens"],
-            total_metrics["perf/token_throughput"],
-        ),
-        metrics=total_metrics,
-    )
-    log_summary({**mean_metrics, **total_metrics})
+                log_metrics({
+                    "train/iteration": iteration,
+                    "train/step": step,
+                    "train/update": update_count,
+                    "train/update_i ": update_i,
+                    "train/batch_size": rollouts["batch_size"],
+                    "train/n_generations": rollouts["n_generations"],
+                    "train/avg_completion_tokens": rollouts["completion_mask"].sum(dim=1).float().mean().item(),
+                    "train/loss": loss.item(),
+                    "train/reward": avg_reward,
+                    "train/grad_norm": total_norm.item(),
+                    "train/lr": lr,
+                    "train/update_count": update_count,
+                    "train/update_tokens": update_tokens,
+                    "train/tokens_throughput": update_tokens / max(update_duration, 1e-9),
+                    "train/policy_rollout_time_s": rollouts["policy_duration"],
+                    "train/reference_rollout_time_s": rollouts["reference_duration"],
+                    "train/policy_update_time_s": update_duration,
+                    "train/train_elapsed_s": train_elapsed,
+                    "train/total_tokens": total_tokens,
+                    "train/policy_rollout_time_total_s": policy_rollout_time_total,
+                    "train/reference_rollout_time_total_s": reference_rollout_time_total,
+                    "train/policy_update_time_total_s": policy_update_time_total,
+                })
 
     return unwrap(policy_model)
 
-
-# -------------------------
-# Model init utilities
-# -------------------------
 def enable_activation_checkpointing(model: PreTrainedModel) -> PreTrainedModel:
-    """
-    Prepare model for training with gradient checkpointing and disabled KV cache.
-    """
     model.train()
     model.config.use_cache = False
     model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
 
-    # Some HF models expose a helper; if not, attach a small hook.
-    if hasattr(model, "enable_input_require_grads"):
+    if hasattr(model, "enable_input_require_grads"): # Some HF models expose a helper; if not, attach a small hook
         model.enable_input_require_grads()
     else:
         def make_inputs_require_grad(module, inp, out):
@@ -864,131 +741,44 @@ def enable_activation_checkpointing(model: PreTrainedModel) -> PreTrainedModel:
 
     return model
 
-def run_grpo_training(config: Config) -> dict:
-    """Run GRPO RL fine-tuning end-to-end."""
-
-    device = torch.device(config.device_name)
-    run_dir = Path(config.run_dir)
-    logger.info("Initial CUDA memory allocated: %.1g GB", torch.cuda.max_memory_allocated(device) / 1e9)
-
-    logger.info("Downloading model %s...", config.model_name)
+def train(config: Config) -> None:
+    log_message(f"Downloading model {config.model_name}...")
     model = AutoModelForCausalLM.from_pretrained(
-        config.model_name, dtype="auto", device_map={"": config.device_id} if torch.cuda.is_available() else None, trust_remote_code=True,
+        config.model_name, dtype="auto", device_map={"": config.device_id}, trust_remote_code=True,
     )
-    logger.info("Model download complete. dtype is %s", str(next(model.parameters()).dtype))
-    logger.info("CUDA memory allocated after model download: %.1g GB", torch.cuda.max_memory_allocated(device) / 1e9)
-
     tokenizer = AutoTokenizer.from_pretrained(config.model_name)
+    model = enable_activation_checkpointing(model) # needed for > 1.5B models on 80GB GPUs
+    log_message(f"Model download complete. dtype is {str(next(model.parameters()).dtype)}")
 
     # validate and fix tokenizer
     if tokenizer.eos_token is None:
         raise ValueError("`tokenizer.eos_token` must be provided, but got None.")
-
-    logger.info("Model max length: %s", str(getattr(model.config, "n_positions", None)))
-    logger.info("Tokenizer max length: %s", str(tokenizer.model_max_length))
-    if tokenizer.model_max_length != getattr(model.config, "n_positions", None):
-        logger.warning(
-            "Tokenizer max length (%s) != model max length (%s); using tokenizer's value.",
-            str(tokenizer.model_max_length), str(getattr(model.config, "n_positions", None)),
-        )
-    # tokenizer.model_max_length = getattr(model.config, "n_positions", tokenizer.model_max_length) # TODO: check if needed
-    # tokenizer.truncation_side = "left" # TODO: check if left truncation is needed
-    logger.info("Tokenizer vocab size: %d", tokenizer.vocab_size)
-    logger.info("Tokenizer pad token: %s (id=%s)", repr(tokenizer.pad_token), tokenizer.pad_token_id)
-    logger.info("Tokenizer eos token: %s (id=%s)", repr(tokenizer.eos_token), tokenizer.eos_token_id)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
         tokenizer.pad_token = tokenizer.eos_token
-        logger.warning("Setting `tokenizer.pad_token` to `tokenizer.eos_token` (%s).", repr(tokenizer.eos_token))
+        log_message(f"Forcing tokenizer.pad_token=tokenizer.eos_token", level=logging.WARNING)
     tokenizer.padding_side = "left"  # centralized padding side
 
-    if config.dataset not in KNOWN_DATASETS:
-        raise ValueError(f"Unknown dataset '{config.dataset}'. Known datasets: {', '.join(sorted(KNOWN_DATASETS))}")
-    dataset_cfg = KNOWN_DATASETS[config.dataset]
-
-    system_prompt = build_system_prompt(config.model_mode)
-    logger.info("System prompt:\n%s", system_prompt)
-
-    train_data = prepare_dataset(tokenizer, config.model_mode, system_prompt, dataset_cfg, dataset_cfg["train_split"])
+    # prepare datasets
+    dataset_cfg = dataset_configs[config.dataset]
+    train_data = prepare_dataset(tokenizer, config.model_mode, dataset_cfg, dataset_cfg["train_split"])
     random.shuffle(train_data)
-    eval_split_name = dataset_cfg.get("test_split")
-    if eval_split_name:
-        eval_data = prepare_dataset(tokenizer, config.model_mode, system_prompt, dataset_cfg, eval_split_name)
-        total_eval_examples = len(eval_data)
-        if config.num_eval_examples >= 0:
-            effective_eval_examples = min(config.num_eval_examples, total_eval_examples)
-            if effective_eval_examples < config.num_eval_examples:
-                logger.warning(
-                    "Requested %d eval examples but only %d available; using %d instead.",
-                    config.num_eval_examples, total_eval_examples, effective_eval_examples,
-                )
-        else:
-            effective_eval_examples = total_eval_examples
-        eval_data = eval_data[:effective_eval_examples]
-        eval_label = eval_split_name if effective_eval_examples == total_eval_examples else f"{eval_split_name}[:{effective_eval_examples}]"
-    else:
-        total_examples = len(train_data)
-        effective_eval_examples = min(config.num_eval_examples if config.num_eval_examples >= 0 else total_examples, total_examples)
-        if effective_eval_examples < (config.num_eval_examples if config.num_eval_examples >= 0 else total_examples):
-            logger.warning(
-                "Requested %d eval examples but only %d available; using %d instead.",
-                config.num_eval_examples, total_examples, effective_eval_examples,
-            )
-        eval_data = train_data[:effective_eval_examples]
-        train_data = train_data[effective_eval_examples:]
-        eval_label = f"{dataset_cfg['train_split']}[:{effective_eval_examples}]"
+    eval_data = prepare_dataset(tokenizer, config.model_mode, dataset_cfg, dataset_cfg["test_split"])
+    eval_data = eval_data[:config.n_eval] if config.n_eval > 0 else eval_data
+    log_summary({"dataset/train_examples": len(train_data), "dataset/eval_examples": len(eval_data)})
 
-    logger.info(
-        "Dataset '%s': train=%d (split=%s) eval=%d (split=%s)",
-        config.dataset, len(train_data), dataset_cfg["train_split"], len(eval_data), eval_label,
-    )
+    pre_rl_metrics = evaluate_model(model=model, tokenizer=tokenizer, eval_examples=eval_data, config=config)
+    log_summary({'pre_rl/'+k: v for k, v in pre_rl_metrics.items()})
 
-    pre_grpo_accuracy = evaluate_model(
-        model=model, tokenizer=tokenizer, eval_examples=eval_data, batch_size=config.eval_batch_size, greedy_eval=config.greedy_eval,
-        max_new_tokens=config.eval_max_new_tokens, sampling_temperature=None if config.greedy_eval else config.eval_temperature,
-    )
-    log_info(
-        "Pre-GRPO accuracy: %.2f%%" % pre_grpo_accuracy,
-        metrics={"eval/pre_accuracy": float(pre_grpo_accuracy)},
-    )
+    model = train_iterations(model=model, tokenizer=tokenizer, train_data=train_data, config=config)
 
-    params = sum(p.numel() for p in model.parameters())
-    logger.info("Model has %d parameters.", params)
-    if params > 1e9 and torch.cuda.is_available():
-        logger.info("Enabling activation checkpointing for memory efficiency...")
-        model = enable_activation_checkpointing(model)
+    post_rl_metrics = evaluate_model(model=model, tokenizer=tokenizer, eval_examples=eval_data, config=config)
+    log_summary({'post_rl/'+k: v for k, v in post_rl_metrics.items()})
 
-    logger.info("Starting RL finetuning using GRPO...")
-    model = train_with_grpo(model=model, tokenizer=tokenizer, train_data=train_data, config=config)
-
-    logger.info("Final model evaluation after GRPO RL finetuning...")
-    post_grpo_accuracy = evaluate_model(
-        model=model, tokenizer=tokenizer, eval_examples=eval_data, batch_size=config.eval_batch_size, greedy_eval=config.greedy_eval,
-        max_new_tokens=config.eval_max_new_tokens, sampling_temperature=None if config.greedy_eval else config.eval_temperature,
-    )
-    improvement = post_grpo_accuracy - pre_grpo_accuracy
-    log_info(
-        "Post-GRPO accuracy: %.2f%%" % post_grpo_accuracy,
-        metrics={"eval/post_accuracy": float(post_grpo_accuracy)},
-    )
-    log_info(
-        "Total improvement: %.2f%%" % improvement,
-        metrics={"eval/improvement": float(improvement)},
-    )
-
-    artifact_dir = run_dir / "grpo_finetuned_model"
+    artifact_dir = Path(config.run_dir) / "finetuned_model"
     model.save_pretrained(artifact_dir)
     tokenizer.save_pretrained(artifact_dir)
-    logger.info("Saved GRPO fine-tuned model artifacts to %s", artifact_dir)
-
-    metrics = {
-        "pre_grpo_accuracy": pre_grpo_accuracy,
-        "post_grpo_accuracy": post_grpo_accuracy,
-        "total_improvement": improvement,
-        "eval_examples": len(eval_data),
-        "train_examples": len(train_data),
-    }
-    return metrics
+    log_message(f"Saved fine-tuned model to {artifact_dir}")
 
 def main() -> None:
     config = parse_dc(Config)
@@ -997,59 +787,34 @@ def main() -> None:
     run_name = config.run_name or datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     run_dir = (base_dir / "nano_rlvr" / run_name).resolve()
     run_dir.mkdir(parents=True, exist_ok=False)
+    config.update({"out_dir": str(base_dir),"run_name": run_name, "run_dir": str(run_dir),})
 
     configure_logging(run_dir)
+    maybe_init_wandb(config)
 
     device_name, device_id = init_torch(seed=config.seed)
-    resolved_config = replace(
-        config,
-        device_name=device_name,
-        device_id=device_id,
-        out_dir=str(base_dir),
-        run_name=run_name,
-        run_dir=str(run_dir),
-    )
-
-    config_payload = asdict(resolved_config)
-    config_payload.update({
-        "world_size": dist.get_world_size(),
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-    })
+    config.update({"device_name": device_name, "device_id": device_id})
 
     if dist.get_rank() == 0:
-        maybe_init_wandb(config_payload)
         config_path = run_dir / "config.json"
         with config_path.open("w", encoding="utf-8") as config_file:
-            json.dump(config_payload, config_file, indent=2)
-        logger.info("Configuration saved to %s", config_path)
+            json.dump(config, config_file, indent=2)
+        log_message(f"Configuration saved to {config_path}")
 
-    metrics = run_grpo_training(resolved_config)
+    train(config)
 
-    if dist.get_rank() == 0:
-        metrics_path = run_dir / "metrics.json"
-        with metrics_path.open("w", encoding="utf-8") as metrics_file:
-            json.dump(metrics, metrics_file, indent=2)
-        logger.info("Metrics saved to %s", metrics_path)
-        log_summary({
-            "eval/pre_accuracy": float(metrics["pre_grpo_accuracy"]),
-            "eval/post_accuracy": float(metrics["post_grpo_accuracy"]),
-            "eval/improvement": float(metrics["total_improvement"]),
-            "data/eval_examples": float(metrics["eval_examples"]),
-            "data/train_examples": float(metrics["train_examples"]),
-        })
-        global _wandb_run
-        if _wandb_run:
-            try:
-                _wandb_run.finish()
-                _wandb_run = None
-            except Exception as exc:  # pragma: no cover
-                logger.debug("wandb finish failed: %s", exc)
-    logger.info("Run complete.")
+    global _wandb_run
+    if _wandb_run:
+        try:
+            _wandb_run.finish()
+            _wandb_run = None
+        except Exception as exc:  # pragma: no cover
+            logger.debug("wandb finish failed: %s", exc)
+    log_message("Run complete.")
 
     if dist.is_available() and dist.is_initialized():
         dist.barrier()
         dist.destroy_process_group()
-
 
 if __name__ == "__main__":
     main()
