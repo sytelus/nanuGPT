@@ -6,11 +6,6 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-try:
-    from openai import AzureOpenAI
-except Exception:
-    AzureOpenAI = None  # We detect and error at runtime.
-
 
 @dataclass
 class ChatResult:
@@ -180,10 +175,3 @@ class AOAIClient:
                 time.sleep(min(60.0, sleep_s))
 
 
-__all__ = [
-    "AOAIClient",
-    "AzureConfig",
-    "ChatResult",
-    "extract_response_text",
-    "messages_to_responses_input",
-]
