@@ -154,7 +154,6 @@ def _run_executor(
     console: Console,
 ) -> List[PromptResult]:
     results_holder: Dict[str, List[PromptResult]] = {}
-    error_holder: Dict[str, BaseException] = {}
     done_event = threading.Event()
 
     def _format_status(prefix: str, metadata: Dict[str, object], extra: Optional[str] = None) -> str:
@@ -192,20 +191,16 @@ def _run_executor(
             state.worker_status[worker] = _format_status("Retry", request.metadata, f"#{attempt}")
 
     def target() -> None:
-        try:
-            results = executor.run_prompts(
-                list(requests),
-                concurrency=workers,
-                on_start=on_start,
-                on_complete=on_complete,
-                on_error=on_error,
-                on_retry=on_retry,
-            )
-            results_holder["results"] = results
-        except BaseException as exc:
-            error_holder["error"] = exc
-        finally:
-            done_event.set()
+        results = executor.run_prompts(
+            list(requests),
+            concurrency=workers,
+            on_start=on_start,
+            on_complete=on_complete,
+            on_error=on_error,
+            on_retry=on_retry,
+        )
+        results_holder["results"] = results
+        done_event.set()
 
     thread = threading.Thread(target=target, name="PromptExecutorSupervisor", daemon=True)
     thread.start()
@@ -217,9 +212,6 @@ def _run_executor(
         live.update(_build_dashboard(state.snapshot()))
 
     thread.join()
-
-    if "error" in error_holder:
-        raise error_holder["error"]
 
     return results_holder.get("results", [])
 

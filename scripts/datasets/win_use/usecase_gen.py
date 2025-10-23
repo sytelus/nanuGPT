@@ -38,12 +38,7 @@ def main() -> None:
     rng = random.Random(args.seed)
     console = Console()
 
-    try:
-        azure_cfg = AzureConfig.from_env()
-    except RuntimeError as exc:
-        console.print(f"[red]Azure configuration error:[/] {exc}")
-        raise SystemExit(1)
-
+    azure_cfg = AzureConfig.from_env()
     client = AOAIClient(azure_cfg)
     executor = PromptExecutor(client, max_concurrency=args.workers)
 
