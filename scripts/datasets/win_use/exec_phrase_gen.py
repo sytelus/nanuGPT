@@ -10,10 +10,6 @@ from nanugpt.api_client.prompt_exec import PromptRequest
 from nanugpt.api_client.runner import run as run_prompt_executor
 
 
-def random_abbreviation(rng: random.Random) -> str:
-    letters = 'abcdefghijklmnopqrstuvwxyz'
-    return ''.join(rng.choices(letters, k=3))
-
 def build_requests(total: int, rng: random.Random) -> List[PromptRequest]:
     numbers = list(range(1, total + 1))
     rng.shuffle(numbers)
@@ -21,7 +17,7 @@ def build_requests(total: int, rng: random.Random) -> List[PromptRequest]:
     for idx, rnd in enumerate(numbers, start=1):
         prompt = PromptRequest(
             system_prompt="",
-            user_prompt=f"""Imagine you know a lots of useful prompts that non-technical users on Windows will provide to a computer use agent that the agent can solve by generating and executing code in either PowerShell, Python, C#, C++ or Rust assuming the dependencies you need are already installed. All of these prompts are very different from each other. None of them contains any specific data or any technical terms that a typical Windows user might not know. These prompts are simple, not too long and are fairly general to be directly usable by all of the users. Each of these prompts are uniquely represented by exactly 3 letters that is derived from prompt's content in some manner. Give me the prompt corresponding to jqe. Follow this up with a complete and working code in appropriate language in ``` block. Do not mention jqe in your output, only generate plain text and do not output anything else.""",
+            user_prompt=f"""Imagine you know 10000 executive phrases that normal people or high performing executives like Elon Musk or Jeff Bezos won’t use but stereotype MBA executives will tend to use a lot. These phrases ironically indicates their broken orgs, lack of vision and mismanagement but on surface they sound sophisticated, eloquant and elite. All of these 10000 phrases that you know are completely different from each other, short (not full sentences) and they make a very diverse collection. Examples of these phrases are "better to ask forgiveness", "a bias towards action", "align with stakeholders" etc. Give me phrase {rnd}. You should not use this number in your phrase content and only output  plain text without any emojies.""",
             metadata={"id": idx, "rnd": rnd},
         )
         requests.append(prompt)
@@ -46,7 +42,7 @@ def main() -> None:
         requests,
         workers=args.workers,
         console=console,
-        output_subdir="prompt_entropy_win_usecases",
+        output_subdir="prompt_entropy_exec_phrases",
     )
 
 

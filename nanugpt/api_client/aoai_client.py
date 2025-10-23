@@ -127,7 +127,7 @@ class AOAIClient:
         temperature: Optional[float] = None,
         max_completion_tokens: Optional[int] = None,
         on_retry: Optional[Callable[[int, Exception], None]] = None,
-        reasoning_effort: Optional[str] = None,
+        reasoning_effort: Optional[str] = "high",
     ) -> ChatResult:
         attempt = 0
         while True:

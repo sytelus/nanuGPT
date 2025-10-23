@@ -32,7 +32,7 @@ class PromptRequest:
     user_prompt: str
     temperature: Optional[float] = None
     max_completion_tokens: Optional[int] = None
-    reasoning_effort: Optional[str] = None
+    reasoning_effort: Optional[str] = field(default="high")
     extra_kwargs: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
