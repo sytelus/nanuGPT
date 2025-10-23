@@ -109,7 +109,7 @@ class PromptExecutor:
         if not prompts:
             return []
 
-        max_concurrency = concurrency or self.max_concurrency
+        max_concurrency = self.max_concurrency if concurrency is None else concurrency
         if max_concurrency < 1:
             raise ValueError("concurrency must be >= 1")
 

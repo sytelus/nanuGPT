@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from openai import AzureOpenAI
 
 @dataclass
 class ChatResult:
@@ -108,10 +109,6 @@ class AOAIClient:
         backoff_base: float = 2.0,
         backoff_jitter: Tuple[float, float] = (0.2, 0.6),
     ) -> None:
-        if AzureOpenAI is None:
-            raise RuntimeError(
-                "The `openai` package (v1) is required but not installed. Install with: pip install openai==1.*"
-            )
         self.client = AzureOpenAI(
             azure_endpoint=cfg.endpoint,
             api_key=cfg.api_key,
