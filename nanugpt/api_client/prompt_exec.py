@@ -11,7 +11,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .aoai_client import AOAIClient, ChatResult
 
@@ -22,38 +22,36 @@ CompleteHook = Callable[[int, "PromptRequest", ChatResult, "PromptResult"], Any]
 ErrorHook = Callable[[int, "PromptRequest", BaseException, "PromptResult"], Any]
 RetryHook = Callable[[int, "PromptRequest", int, Exception], Any]
 
-PromptTuple = Tuple[
-    str,
-    str,
-    Optional[float],
-    Optional[int],
-    Optional[str],
-]
-PromptInput = Union["PromptRequest", PromptTuple]
-
-
 @dataclass
 class PromptRequest:
+    """Prompt configuration plus extra settings for `AOAIClient.chat`.
+
+    `extra_kwargs` passes options straight to the client (e.g. `tools`, `seed`, `on_retry`).
+    `metadata` is caller bookkeeping available via `PromptResult.request.metadata`.
+    """
     system_prompt: str
     user_prompt: str
     temperature: Optional[float] = None
     max_completion_tokens: Optional[int] = None
     reasoning_effort: Optional[str] = None
-    messages: Optional[Sequence[Dict[str, Any]]] = None
     extra_kwargs: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_messages(self) -> List[Dict[str, Any]]:
-        if self.messages is not None:
-            return [dict(msg) for msg in self.messages]
-        return [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": self.user_prompt},
-        ]
+        """Create chat messages, omitting whichever role prompt is blank."""
+        messages: List[Dict[str, Any]] = []
+        if self.system_prompt and self.system_prompt.strip():
+            messages.append({"role": "system", "content": self.system_prompt})
+        if self.user_prompt and self.user_prompt.strip():
+            messages.append({"role": "user", "content": self.user_prompt})
+        if messages:
+            return messages
+        raise ValueError("PromptRequest requires a non-empty system_prompt or user_prompt")
 
 
 @dataclass
 class PromptResult:
+    """Stores execution details for a prompt; caller metadata lives on `request.metadata`."""
     index: int
     request: PromptRequest
     chat_result: Optional[ChatResult] = None
@@ -74,9 +72,7 @@ class PromptResult:
 
 
 class PromptExecutor:
-    """
-    Orchestrates batched prompt execution against AOAIClient with bounded parallelism.
-    """
+    """Runs prompts in parallel batches using AOAIClient."""
 
     def __init__(
         self,
@@ -94,21 +90,22 @@ class PromptExecutor:
         self.client = client
         self.max_concurrency = max_concurrency
         self._loop = loop
-        self._on_start = on_start
-        self._on_complete = on_complete
-        self._on_error = on_error
-        self._on_retry = on_retry
+        self._on_start = on_start      # Fired right before dispatching a prompt.
+        self._on_complete = on_complete  # Fired after a prompt succeeds.
+        self._on_error = on_error      # Fired after a prompt fails without recovery.
+        self._on_retry = on_retry      # Fired before retrying a prompt after an error.
 
     async def run_prompts(
         self,
-        prompts: Sequence[PromptInput],
-        *,
+        prompts: Sequence[PromptRequest],
+        *,  # Keyword-only from here so callers name the optional overrides.
         concurrency: Optional[int] = None,
         on_start: Optional[StartHook] = None,
         on_complete: Optional[CompleteHook] = None,
         on_error: Optional[ErrorHook] = None,
         on_retry: Optional[RetryHook] = None,
     ) -> List[PromptResult]:
+        """Run `PromptRequest` objects with the chosen concurrency."""
         if not prompts:
             return []
 
@@ -119,7 +116,11 @@ class PromptExecutor:
         if max_concurrency < 1:
             raise ValueError("concurrency must be >= 1")
 
-        normalized: List[PromptRequest] = [self._normalize_prompt(p) for p in prompts]
+        normalized: List[PromptRequest] = []
+        for i, prompt in enumerate(prompts):
+            if not isinstance(prompt, PromptRequest):
+                raise TypeError(f"Prompt at index {i} must be a PromptRequest, got {type(prompt)!r}")
+            normalized.append(prompt)
         semaphore = asyncio.Semaphore(max_concurrency)
 
         tasks = [
@@ -142,29 +143,6 @@ class PromptExecutor:
         results = await asyncio.gather(*tasks)
         return results
 
-    def _normalize_prompt(self, value: PromptInput) -> PromptRequest:
-        if isinstance(value, PromptRequest):
-            return value
-        if not isinstance(value, tuple):
-            raise TypeError(f"Unsupported prompt spec type: {type(value)!r}")
-        if not (2 <= len(value) <= 5):
-            raise ValueError(
-                "Prompt tuple must have between 2 and 5 elements: "
-                "(system_prompt, user_prompt, [temperature], [max_completion_tokens], [reasoning_effort])"
-            )
-        system_prompt = value[0]
-        user_prompt = value[1]
-        temperature = value[2] if len(value) > 2 else None
-        max_completion_tokens = value[3] if len(value) > 3 else None
-        reasoning_effort = value[4] if len(value) > 4 else None
-        return PromptRequest(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            temperature=temperature,
-            max_completion_tokens=max_completion_tokens,
-            reasoning_effort=reasoning_effort,
-        )
-
     async def _run_single(
         self,
         *,
@@ -178,10 +156,12 @@ class PromptExecutor:
             Optional[RetryHook],
         ],
     ) -> PromptResult:
+        """Coordinate one prompt execution, invoking hooks and collecting timing."""
         start_hook, complete_hook, error_hook, retry_hook = hooks
         async with semaphore:
             started_at = time.perf_counter()
             result = PromptResult(index=index, request=request, started_at=started_at)
+            # Invoke on_start before the prompt leaves the executor.
             self._schedule_hook(start_hook, index, request, result)
             # Run the synchronous AOAIClient call in a background thread
             result = await asyncio.to_thread(
@@ -193,9 +173,11 @@ class PromptExecutor:
             )
             result.ended_at = time.perf_counter()
             if result.error is not None:
+                # Invoke on_error once the final attempt fails.
                 self._schedule_hook(error_hook, index, request, result.error, result)
             else:
                 assert result.chat_result is not None
+                # Invoke on_complete after a successful response.
                 self._schedule_hook(complete_hook, index, request, result.chat_result, result)
             return result
 
@@ -206,11 +188,18 @@ class PromptExecutor:
         result: PromptResult,
         retry_hook: Optional[RetryHook],
     ) -> PromptResult:
+        """
+        Run the synchronous AOAI client call on a worker thread.
+
+        Any retry callable in `extra_kwargs["on_retry"]` is wrapped so executor hooks
+        still fire while honoring user-provided behavior.
+        """
         retry_calls = 0
 
         def _handle_retry(attempt: int, exc: Exception) -> None:
             nonlocal retry_calls
             retry_calls += 1
+            # Invoke on_retry right before we try the prompt again.
             self._schedule_hook(retry_hook, index, request, attempt, exc)
             if user_retry is not None:
                 try:
@@ -218,6 +207,7 @@ class PromptExecutor:
                 except Exception:
                     logger.exception("User-provided on_retry hook failed")
 
+        # Shallow copy extra_kwargs so the caller can reuse the same PromptRequest safely.
         kwargs: Dict[str, Any] = dict(request.extra_kwargs) if request.extra_kwargs else {}
         if request.temperature is not None:
             kwargs.setdefault("temperature", request.temperature)
@@ -241,6 +231,7 @@ class PromptExecutor:
         return result
 
     def _schedule_hook(self, hook: Optional[Callable[..., Any]], *args: Any) -> None:
+        """Run hook callables safely on the event loop, tolerating sync or async returns."""
         if hook is None:
             return
 
@@ -261,4 +252,3 @@ class PromptExecutor:
             loop.call_soon_threadsafe(runner)
         else:
             runner()
-
