@@ -114,7 +114,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from dag_sampler import build_graph_instructions, DAGIsomorphismSampler
-from nanugpt.aoai_client import AOAIClient, AzureConfig
+from nanugpt.api_client.aoai_client import AOAIClient, AzureConfig
 
 # Third-party
 

@@ -4,6 +4,8 @@ from typing import Iterator, Tuple, Iterable
 
 import torch
 
+# This module allows to supply streaming iterator of tensors and computes per dimension entropy
+
 def stream_dim_bits_upper(
     tensors: Iterable["torch.Tensor"],
     rounding: str = "ceil",
