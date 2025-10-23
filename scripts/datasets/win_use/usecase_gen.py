@@ -15,14 +15,13 @@ def random_abbreviation(rng: random.Random) -> str:
     return ''.join(rng.choices(letters, k=3))
 
 def build_requests(total: int, rng: random.Random) -> List[PromptRequest]:
-    numbers = list(range(1, total + 1))
-    rng.shuffle(numbers)
     requests: List[PromptRequest] = []
-    for idx, rnd in enumerate(numbers, start=1):
+    for idx in range(1, total + 1):
+        abbr = random_abbreviation(rng)
         prompt = PromptRequest(
             system_prompt="",
-            user_prompt=f"""Imagine you know a lots of useful prompts that non-technical users on Windows will provide to a computer use agent that the agent can solve by generating and executing code in either PowerShell, Python, C#, C++ or Rust assuming the dependencies you need are already installed. All of these prompts are very different from each other. None of them contains any specific data or any technical terms that a typical Windows user might not know. These prompts are simple, not too long and are fairly general to be directly usable by all of the users. Each of these prompts are uniquely represented by exactly 3 letters that is derived from prompt's content in some manner. Give me the prompt corresponding to jqe. Follow this up with a complete and working code in appropriate language in ``` block. Do not mention jqe in your output, only generate plain text and do not output anything else.""",
-            metadata={"id": idx, "rnd": rnd},
+            user_prompt=f"""Imagine you know a lots of useful prompts that non-technical users on Windows will provide to a computer use agent and that the agent can solve by generating and executing code in either PowerShell, Python, C#, C++ or Rust assuming the dependencies you need are already installed. All of these prompts are very different from each other. None of them contains any specific data or any technical terms that a typical Windows user might not know. These prompts are simple, not too long and are fairly general to be directly usable by all of the users. Each of these prompts are uniquely represented by exactly 3 letters that is derived from prompt's content in some manner. Give me the prompt corresponding to {abbr}. Follow this up with a complete and working code in appropriate language inside ``` block. Do not mention {abbr} in your output, only generate plain text and do not output anything else.""",
+            metadata={"id": idx, "abbr": abbr},
         )
         requests.append(prompt)
     return requests
@@ -31,7 +30,7 @@ def build_requests(total: int, rng: random.Random) -> List[PromptRequest]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate win_use prompts via Azure OpenAI.")
     parser.add_argument("--total", type=int, default=1000, help="Total number of prompts to run.")
-    parser.add_argument("--workers", type=int, default=8, help="Maximum worker threads.")
+    parser.add_argument("--workers", type=int, default=16, help="Maximum worker threads.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for shuffling prompts.")
     return parser.parse_args()
 
@@ -46,7 +45,7 @@ def main() -> None:
         requests,
         workers=args.workers,
         console=console,
-        output_subdir="prompt_entropy_win_usecases",
+        output_subdir="prompt_entropy_win_usecases2",
     )
 
 
