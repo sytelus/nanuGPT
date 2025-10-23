@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import threading
 import time
 from dataclasses import dataclass, field
@@ -87,32 +88,28 @@ def _ensure_output_dir(
 ) -> Path:
     out_env = os.environ.get("OUT_DIR")
     base = base_output_dir or (Path(out_env) if out_env else Path.cwd())
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    target = base / subdir / timestamp
+    target = base / subdir
     target.mkdir(parents=True, exist_ok=True)
     return target
 
 
-def _write_jsonl(path: Path, results: Sequence[PromptResult]) -> None:
-    with path.open("w", encoding="utf-8") as f:
-        for res in results:
-            metadata = res.request.metadata
-            record = {
-                "id": metadata.get("id"),
-                "metadata": metadata,
-                "status": "succeeded" if res.succeeded else "failed",
-                "response": res.chat_result.content if res.chat_result else None,
-                "error": str(res.error) if res.error else None,
-                "api_duration": res.api_duration,
-                "retry_duration": res.retry_duration,
-                "total_calls": res.total_calls,
-                "input_tokens": res.input_tokens,
-                "output_tokens": res.output_tokens,
-                "total_tokens": res.total_tokens,
-                "started_at": res.started_at,
-                "ended_at": res.ended_at,
-            }
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+def _result_to_record(result: PromptResult) -> Dict[str, Any]:
+    metadata = result.request.metadata
+    return {
+        "id": metadata.get("id"),
+        "metadata": metadata,
+        "status": "succeeded" if result.succeeded else "failed",
+        "response": result.chat_result.content if result.chat_result else None,
+        "error": str(result.error) if result.error else None,
+        "api_duration": result.api_duration,
+        "retry_duration": result.retry_duration,
+        "total_calls": result.total_calls,
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+        "total_tokens": result.total_tokens,
+        "started_at": result.started_at,
+        "ended_at": result.ended_at,
+    }
 
 
 def _write_stats(
@@ -154,7 +151,9 @@ def _run_executor(
     workers: int,
     state: DashboardState,
     console: Console,
-) -> List[PromptResult]:
+    worker_output_dir: Path,
+) -> tuple[List[PromptResult], Dict[str, Path]]:
+    worker_files: Dict[str, Path] = {}
 
     def _format_status(prefix: str, metadata: Dict[str, object], extra: Optional[str] = None) -> str:
         parts = [prefix]
@@ -165,6 +164,17 @@ def _run_executor(
         if extra:
             parts.append(extra)
         return " ".join(parts)
+
+    def _append_record(worker: str, result: PromptResult) -> None:
+        sanitized = worker.replace("/", "_").replace("\\", "_").replace(" ", "_")
+        path = worker_files.get(worker)
+        if path is None:
+            path = worker_output_dir / f"{sanitized}.jsonl"
+            worker_files[worker] = path
+        record = _result_to_record(result)
+        record["worker"] = worker
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def on_start(index: int, request: PromptRequest, _result: PromptResult) -> None:
         worker = threading.current_thread().name
@@ -177,12 +187,14 @@ def _run_executor(
         with state.lock:
             state.completed += 1
             state.worker_status[worker] = _format_status("Done", request.metadata)
+            _append_record(worker, result)
 
     def on_error(index: int, request: PromptRequest, exc: BaseException, result: PromptResult) -> None:
         worker = threading.current_thread().name
         with state.lock:
             state.failed += 1
             state.worker_status[worker] = _format_status("Error", request.metadata, str(exc))
+            _append_record(worker, result)
 
     def on_retry(index: int, request: PromptRequest, attempt: int, exc: Exception) -> None:
         worker = threading.current_thread().name
@@ -208,7 +220,7 @@ def _run_executor(
             results = future.result()
             live.update(_build_dashboard(state.snapshot()))
 
-    return results
+    return results, worker_files
 
 
 def run(
@@ -239,9 +251,18 @@ def run(
     executor = PromptExecutor(client, max_concurrency=workers, **executor_kwargs)
 
     state = DashboardState(total=len(requests))
+    worker_output_dir = output_dir / "worker_outputs"
+    worker_output_dir.mkdir(parents=True, exist_ok=True)
 
     run_start = time.time()
-    results = _run_executor(executor, requests, workers, state, console)
+    results, worker_files = _run_executor(
+        executor,
+        requests,
+        workers,
+        state,
+        console,
+        worker_output_dir,
+    )
     run_end = time.time()
 
     if not results:
@@ -249,7 +270,15 @@ def run(
 
     responses_path = output_dir / "responses.jsonl"
     stats_path = output_dir / "stats.yaml"
-    _write_jsonl(responses_path, results)
+    with responses_path.open("w", encoding="utf-8") as out:
+        for worker_name, path in sorted(worker_files.items()):
+            if not path.exists():
+                continue
+            with path.open("r", encoding="utf-8") as src:
+                shutil.copyfileobj(src, out)
+            path.unlink()
+    if not any(worker_output_dir.iterdir()):
+        worker_output_dir.rmdir()
     _write_stats(stats_path, results, run_started_at=run_start, run_ended_at=run_end)
 
     successes = sum(1 for r in results if r.succeeded)
