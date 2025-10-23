@@ -8,7 +8,6 @@ return a coroutine it will be executed inline via asyncio.run.
 """
 
 import asyncio
-import logging
 import queue
 import threading
 import time
@@ -16,8 +15,6 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, cast
 
 from .aoai_client import AOAIClient, ChatResult
-
-logger = logging.getLogger(__name__)
 
 StartHook = Callable[[int, "PromptRequest", "PromptResult"], Any]
 CompleteHook = Callable[[int, "PromptRequest", ChatResult, "PromptResult"], Any]
@@ -61,6 +58,12 @@ class PromptResult:
     attempts: int = 0
     started_at: float = 0.0
     ended_at: float = 0.0
+    api_duration: float = 0.0
+    retry_duration: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    total_calls: int = 0
 
     @property
     def duration(self) -> float:
@@ -153,7 +156,6 @@ class PromptExecutor:
                             hooks=hooks,
                         )
                     except Exception as exc:  # pragma: no cover - defensive guard
-                        logger.exception("PromptExecutor worker crashed; recording failure result.")
                         now = time.perf_counter()
                         result = PromptResult(
                             index=idx,
@@ -230,17 +232,19 @@ class PromptExecutor:
         still fire while honoring user-provided behavior.
         """
         retry_calls = 0
+        call_started = time.perf_counter()
+        first_retry_elapsed: Optional[float] = None
 
         def _handle_retry(attempt: int, exc: Exception) -> None:
             nonlocal retry_calls
+            nonlocal first_retry_elapsed
             retry_calls += 1
             # Invoke on_retry right before we try the prompt again.
             self._run_hook(retry_hook, index, request, attempt, exc)
             if user_retry is not None:
-                try:
-                    user_retry(attempt, exc)
-                except Exception:
-                    logger.exception("User-provided on_retry hook failed")
+                user_retry(attempt, exc)
+            if first_retry_elapsed is None:
+                first_retry_elapsed = time.perf_counter() - call_started
 
         # Shallow copy extra_kwargs so the caller can reuse the same PromptRequest safely.
         kwargs: Dict[str, Any] = dict(request.extra_kwargs) if request.extra_kwargs else {}
@@ -259,10 +263,23 @@ class PromptExecutor:
             result.chat_result = chat_res
             attempts = retry_calls + 1
             result.attempts = attempts
+            result.total_calls = attempts
+            result.input_tokens = chat_res.input_tokens
+            result.output_tokens = chat_res.output_tokens
+            result.total_tokens = chat_res.total_tokens
         except Exception as exc:
             result.error = exc
-            attempts = retry_calls or 1
+            attempts = retry_calls + 1
             result.attempts = attempts
+            result.total_calls = attempts
+        finally:
+            call_elapsed = time.perf_counter() - call_started
+            result.api_duration = call_elapsed
+            if first_retry_elapsed is None:
+                result.retry_duration = 0.0
+            else:
+                retry_elapsed = call_elapsed - first_retry_elapsed
+                result.retry_duration = retry_elapsed if retry_elapsed > 0 else 0.0
         return result
 
     def _run_hook(self, hook: Optional[Callable[..., Any]], *args: Any) -> None:
@@ -270,12 +287,6 @@ class PromptExecutor:
         if hook is None:
             return
 
-        def runner() -> None:
-            try:
-                outcome = hook(*args)
-                if asyncio.iscoroutine(outcome):
-                    asyncio.run(outcome)
-            except Exception:
-                logger.exception("PromptExecutor hook failed")
-
-        runner()
+        outcome = hook(*args)
+        if asyncio.iscoroutine(outcome):
+            asyncio.run(outcome)

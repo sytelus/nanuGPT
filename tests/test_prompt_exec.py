@@ -53,7 +53,7 @@ class ConcurrencyTrackingClient:
         try:
             time.sleep(self.delay)
             self.calls.append(messages)
-            return ChatResult(content="ok")
+            return ChatResult(content="ok", input_tokens=1, output_tokens=2, total_tokens=3)
         finally:
             with self._lock:
                 self._current -= 1
@@ -72,6 +72,13 @@ def test_run_prompts_respects_concurrency_and_order():
     assert all(res.succeeded for res in results)
     assert client.max_inflight == 2
     assert len(client.calls) == 4
+    for res in results:
+        assert res.total_calls == 1
+        assert res.api_duration >= client.delay
+        assert res.retry_duration == 0
+        assert res.input_tokens == 1
+        assert res.output_tokens == 2
+        assert res.total_tokens == 3
 
 
 class RetryRecordingClient:
@@ -124,6 +131,12 @@ def test_run_prompts_invokes_hooks_and_user_retry():
     result = results[0]
     assert result.succeeded
     assert result.attempts == 2
+    assert result.total_calls == 2
+    assert result.api_duration >= 0
+    assert result.retry_duration >= 0
+    assert result.input_tokens == 0
+    assert result.output_tokens == 0
+    assert result.total_tokens == 0
     assert start_calls == [0]
     assert complete_calls == [(0, "response-1")]
     assert retry_calls == [(0, 1, "transient error")]
@@ -172,3 +185,5 @@ def test_prompt_executor_end_to_end_real_api():
     for res in results:
         assert res.chat_result is not None
         assert res.chat_result.content
+        assert res.total_calls >= 1
+        assert res.api_duration >= 0
