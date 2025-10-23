@@ -7,7 +7,9 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence
+
+from concurrent.futures import ThreadPoolExecutor
 
 import yaml
 from rich.console import Console, Group
@@ -15,7 +17,7 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 
-from .aoai_client import ChatResult
+from .aoai_client import AOAIClient, AzureConfig, ChatResult
 from .prompt_exec import PromptExecutor, PromptRequest, PromptResult
 
 
@@ -153,8 +155,6 @@ def _run_executor(
     state: DashboardState,
     console: Console,
 ) -> List[PromptResult]:
-    results_holder: Dict[str, List[PromptResult]] = {}
-    done_event = threading.Event()
 
     def _format_status(prefix: str, metadata: Dict[str, object], extra: Optional[str] = None) -> str:
         parts = [prefix]
@@ -190,8 +190,9 @@ def _run_executor(
             state.retries += 1
             state.worker_status[worker] = _format_status("Retry", request.metadata, f"#{attempt}")
 
-    def target() -> None:
-        results = executor.run_prompts(
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="PromptExecutorSupervisor") as pool:
+        future = pool.submit(
+            executor.run_prompts,
             list(requests),
             concurrency=workers,
             on_start=on_start,
@@ -199,38 +200,43 @@ def _run_executor(
             on_error=on_error,
             on_retry=on_retry,
         )
-        results_holder["results"] = results
-        done_event.set()
 
-    thread = threading.Thread(target=target, name="PromptExecutorSupervisor", daemon=True)
-    thread.start()
-
-    with Live(_build_dashboard(state.snapshot()), console=console, refresh_per_second=5) as live:
-        while not done_event.is_set():
+        with Live(_build_dashboard(state.snapshot()), console=console, refresh_per_second=5) as live:
+            while not future.done():
+                live.update(_build_dashboard(state.snapshot()))
+                time.sleep(0.2)
+            results = future.result()
             live.update(_build_dashboard(state.snapshot()))
-            time.sleep(0.2)
-        live.update(_build_dashboard(state.snapshot()))
 
-    thread.join()
-
-    return results_holder.get("results", [])
+    return results
 
 
 def run(
-    executor: PromptExecutor,
     requests: Sequence[PromptRequest],
     *,
     workers: int,
     base_output_dir: Optional[Path] = None,
     console: Optional[Console] = None,
     output_subdir: str = "prompt_entropy",
+    client: Optional[AOAIClient] = None,
+    executor_kwargs: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, object]:
     if not requests:
         raise ValueError("run() requires at least one PromptRequest")
 
+    if workers < 1:
+        raise ValueError("workers must be >= 1")
+
     console = console or Console()
     output_dir = _ensure_output_dir(base_output_dir, subdir=output_subdir)
     console.print(f"[cyan]Output directory:[/] {output_dir}")
+
+    if client is None:
+        azure_cfg = AzureConfig.from_env()
+        client = AOAIClient(azure_cfg)
+
+    executor_kwargs = dict(executor_kwargs or {})
+    executor = PromptExecutor(client, max_concurrency=workers, **executor_kwargs)
 
     state = DashboardState(total=len(requests))
 

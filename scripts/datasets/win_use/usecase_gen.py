@@ -6,8 +6,7 @@ from typing import List
 
 from rich.console import Console
 
-from nanugpt.api_client.aoai_client import AOAIClient, AzureConfig
-from nanugpt.api_client.prompt_exec import PromptExecutor, PromptRequest
+from nanugpt.api_client.prompt_exec import PromptRequest
 from nanugpt.api_client.runner import run as run_prompt_executor
 
 
@@ -38,13 +37,8 @@ def main() -> None:
     rng = random.Random(args.seed)
     console = Console()
 
-    azure_cfg = AzureConfig.from_env()
-    client = AOAIClient(azure_cfg)
-    executor = PromptExecutor(client, max_concurrency=args.workers)
-
     requests = build_requests(args.total, rng)
     run_prompt_executor(
-        executor,
         requests,
         workers=args.workers,
         console=console,
