@@ -11,7 +11,7 @@ from nanugpt.api_client.runner import run as run_prompt_executor
 
 def random_id(rng: random.Random) -> str:
     letters = 'abcdefghijklmnopqrstuvwxyz'
-    return ''.join(rng.choices(letters, k=3)) + '-' + str(rng.randint(0, 99)).zfill(2)
+    return ''.join(rng.choices(letters, k=5)) + '-' + str(rng.randint(0, 99)).zfill(2)
 
 def build_requests(total: int, rng: random.Random) -> List[PromptRequest]:
     requests: List[PromptRequest] = []
