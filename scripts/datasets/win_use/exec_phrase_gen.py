@@ -19,7 +19,7 @@ def build_requests(total: int, rng: random.Random) -> List[PromptRequest]:
         id = random_id(rng)
         prompt = PromptRequest(
             system_prompt="",
-            user_prompt=f"""Imagine you know a lots of executive phrases that normal people or high performing executives would not use but mediocre or stereotype executives will tend to use a lot. These phrases ironically indicates their broken orgs, lack of vision and mismanagement but on surface they sound sophisticated, eloquant and elite. All of these phrases are completely different from each other and short (not full sentences) making up a very diverse and comprehensive collection. Examples of these phrases are "better to ask forgiveness", "a bias towards action", "align with stakeholders" etc. Each phrase has been given an ID that is generated using some heuristics using the content of the phrase in some manner. This ID is exactly 5 letters long followed by dash followed by 2 digit number. Generate the phrase from this collection that has ID {id}. Do not mention this ID in your output, only generate plain text of the phrase and do not output anything else.""",
+            user_prompt=f"""Imagine you know the collection executive phrases that normal people or high performing executives would not use but mediocre or stereotype executives will tend to use a lot. These phrases ironically indicates their broken orgs, lack of vision and mismanagement but on surface they sound sophisticated, eloquant and elite. All of these phrases are completely different from each other and short (not full sentences) making your collection a very diverse and comprehensive collection. Examples of these phrases might be "better to ask forgiveness", "a bias towards action", "align with stakeholders" etc. Imagine you had assigned each of the phrases in your collection an ID which is exactly 5 letters long followed by dash followed by 2 digit number. Some letters of this ID was generated using some heuristics on part of the phrase but unfortunately we no longer have access to that heuristics. The number in ID corresponds to the percentage probability. Generate the most likely phrase from your collection that corresponds to the ID {id}. Do not mention this ID in your output, only generate plain text of the phrase and do not output anything else.""",
             metadata={"index": i, "id": id},
         )
         requests.append(prompt)
@@ -44,7 +44,7 @@ def main() -> None:
         requests,
         workers=args.workers,
         console=console,
-        output_subdir="prompt_entropy_exec_phrases2",
+        output_subdir="prompt_entropy_exec_phrases3",
     )
 
 
