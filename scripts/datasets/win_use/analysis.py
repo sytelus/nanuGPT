@@ -17,7 +17,7 @@ from rich.console import Console
 from rich.table import Table
 
 OUT_DIR = Path(os.environ.get("OUT_DIR", Path.cwd()))
-DEFAULT_SUBDIR = "prompt_entropy_exec_phrases_pro"
+DEFAULT_SUBDIR = "prompt_entropy_exec_phrases3"
 DEFAULT_INPUT = OUT_DIR / DEFAULT_SUBDIR / "responses.jsonl"
 DEFAULT_REPORT = OUT_DIR / DEFAULT_SUBDIR / "report.md"
 

@@ -138,11 +138,14 @@ def _ensure_output_dir(
 
 def _result_to_record(result: PromptResult) -> Dict[str, Any]:
     metadata = result.request.metadata
+    request = result.request
     return {
         "id": metadata.get("id"),
         "metadata": metadata,
         "status": "succeeded" if result.succeeded else "failed",
         "response": result.chat_result.content if result.chat_result else None,
+        "system_prompt": request.system_prompt,
+        "user_prompt": request.user_prompt,
         "error": str(result.error) if result.error else None,
         "api_duration": result.api_duration,
         "retry_duration": result.retry_duration,
