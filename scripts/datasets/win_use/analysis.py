@@ -21,6 +21,7 @@ DEFAULT_SUBDIR = "prompt_entropy_exec_phrases_i5"
 DEFAULT_INPUT = OUT_DIR / DEFAULT_SUBDIR / "responses.jsonl"
 DEFAULT_REPORT = OUT_DIR / DEFAULT_SUBDIR / "report.md"
 DEFAULT_UNIQUE_RESPONSES = OUT_DIR / DEFAULT_SUBDIR / "unique_responses.txt"
+ITEMS_PER_RESPONSE = 1
 
 
 @dataclass(frozen=True)
@@ -152,8 +153,24 @@ def md_escape(value: str) -> str:
     return escaped if escaped else "(empty response)"
 
 
+def summarize_response(response: str, items_per_response: int = ITEMS_PER_RESPONSE) -> str:
+    if not response:
+        return ""
+    lines = [line.strip() for line in response.splitlines()]
+    if not lines:
+        return ""
+    return "\n".join(lines[:items_per_response])
+
+
+def response_item_label(items_per_response: int = ITEMS_PER_RESPONSE) -> str:
+    if items_per_response == 1:
+        return "First line"
+    return f"First {items_per_response} lines"
+
+
 def make_markdown(result: AnalysisResult, input_path: Path) -> str:
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+    items_label = response_item_label()
     lines = [
         "# prompt entropy Response Analysis",
         "",
@@ -175,12 +192,12 @@ def make_markdown(result: AnalysisResult, input_path: Path) -> str:
         "",
         "## Response Frequency",
         "",
-        "| Count | First line |",
+        f"| Count | {items_label} |",
         "| ---: | --- |",
     ]
     for response, count in result.counts.most_common():
-        first_line = response.splitlines()[0].strip() if response else ""
-        lines.append(f"| {count} | {md_escape(first_line)} |")
+        summary = summarize_response(response)
+        lines.append(f"| {count} | {md_escape(summary)} |")
     return "\n".join(lines) + "\n"
 
 
@@ -202,17 +219,18 @@ def render_console(console: Console, result: AnalysisResult, top_n: int) -> None
     summary.add_row("Range", f"{result.lengths.shortest}–{result.lengths.longest}")
     console.print(summary)
 
+    items_label = response_item_label()
     freq = Table(
-        title=f"Top {min(top_n, result.unique_count)} Responses (first line)",
+        title=f"Top {min(top_n, result.unique_count)} Responses ({items_label.lower()})",
         box=box.SIMPLE,
     )
     freq.add_column("Count", justify="right", style="magenta")
-    freq.add_column("First line", style="green")
+    freq.add_column(items_label, style="green")
 
     display_rows = result.counts.most_common(top_n if top_n > 0 else result.unique_count)
     for response, count in display_rows:
-        first_line = response.splitlines()[0].strip() if response else ""
-        freq.add_row(str(count), first_line or "(empty response)")
+        summary = summarize_response(response)
+        freq.add_row(str(count), summary or "(empty response)")
     if result.unique_count > len(display_rows):
         freq.caption = f"... {result.unique_count - len(display_rows)} additional unique responses in report."
     console.print(freq)
