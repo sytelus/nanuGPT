@@ -121,7 +121,7 @@ def load_records(path: Path) -> AnalysisResult:
                 missing += 1
                 continue
 
-            text = str(response).strip()
+            text = canonicalize_response(response)
             if not text:
                 blank += 1
             counts[text] += 1
@@ -151,6 +151,16 @@ def load_records(path: Path) -> AnalysisResult:
 def md_escape(value: str) -> str:
     escaped = value.replace("|", r"\|").replace("\n", " ")
     return escaped if escaped else "(empty response)"
+
+
+def canonicalize_response(response: str | None) -> str:
+    if response is None:
+        return ""
+    lines: list[str] = []
+    for raw_line in str(response).splitlines():
+        first_value = raw_line.split("\t", 1)[0].strip()
+        lines.append(first_value)
+    return "\n".join(lines).strip()
 
 
 def summarize_response(response: str, items_per_response: int = ITEMS_PER_RESPONSE) -> str:

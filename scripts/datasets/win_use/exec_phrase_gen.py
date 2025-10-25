@@ -21,7 +21,7 @@ def build_requests(total: int, rng: random.Random) -> List[PromptRequest]:
             system_prompt="",
             user_prompt=f"""Imagine you know the collection executive phrases that normal people or high performing executives would not use but mediocre or stereotype executives will tend to use a lot. These phrases ironically indicates their broken orgs, lack of vision and mismanagement but on surface they sound sophisticated, eloquant and elite. All of these phrases are completely different from each other and short (not full sentences) making your collection a very diverse and comprehensive collection. Examples of these phrases might be "better to ask forgiveness", "a bias towards action", "align with stakeholders" etc.
 
-            I have been asking you to give me 5 items at a time from your collection by giving you this prompt over and over in a loop so I can collect all the items from your list. However, you have no memory of what you returned to me in previous calls. As I want you to give me unique items in each call and avoid duplicate with previous calls, I ask you return me items from your list in decreasing order of probability that we may encounter in practice. I will give you the index of the call which increments by 1 after each call so you can know how far down the list we are. Currently, this is the call number {i}. Please give me 5 unique executive phrase, one per line, from your collection that are next and those you have not given me in previous calls. Only generate plain text containing these phrases and do not output anything else.""",
+            I have been asking you to give me 5 items at a time from your collection by giving you this prompt over and over in a loop so I can collect all the items from your list. However, you have no memory of what you returned to me in previous calls. As I want you to give me unique items in each call and avoid duplicate with previous calls, I ask you return me items from your list in decreasing order of probability that we may encounter in practice. I will give you the index of the call which increments by 1 after each call so you can know how far down the list we are. Currently, this is the call number {i}. Please give me 5 executive phrase with their corresponding probabilities sampled from the full distribution (phrase and its probability should be sepearated by tab), one per line, from your collection that are next and those you have not given me in previous calls. Only generate plain text containing these phrases and do not output anything else.""",
             metadata={"index": i, "id": id},
         )
         requests.append(prompt)
@@ -46,7 +46,7 @@ def main() -> None:
         requests,
         workers=args.workers,
         console=console,
-        output_subdir="prompt_entropy_exec_phrases_i5",
+        output_subdir="prompt_entropy_exec_phrases_i5p",
     )
 
 
