@@ -11,7 +11,7 @@ from nanugpt.api_client.runner import run as run_prompt_executor
 
 def random_id(rng: random.Random) -> str:
     letters = 'abcdefghijklmnopqrstuvwxyz'
-    return ''.join(rng.choices(letters, k=5)) + '-' + str(rng.randint(0, 99)).zfill(2)
+    return ''.join(rng.choices(letters, k=5)) + '-0.' + str(rng.randint(0, 99)).zfill(2)
 
 def build_requests(total: int, rng: random.Random) -> List[PromptRequest]:
     requests: List[PromptRequest] = []
@@ -19,7 +19,7 @@ def build_requests(total: int, rng: random.Random) -> List[PromptRequest]:
         id = random_id(rng)
         prompt = PromptRequest(
             system_prompt="",
-            user_prompt=f"""Imagine you know the collection executive phrases that normal people or high performing executives would not use but mediocre or stereotype executives will tend to use a lot. These phrases ironically indicates their broken orgs, lack of vision and mismanagement but on surface they sound sophisticated, eloquant and elite. All of these phrases are completely different from each other and short (not full sentences) making your collection a very diverse and comprehensive collection. Examples of these phrases might be "better to ask forgiveness", "a bias towards action", "align with stakeholders" etc. Imagine you had assigned each of the phrases in your collection an ID which is exactly 5 letters long followed by dash followed by 2 digit number. Some letters of this ID was generated using some heuristics on part of the phrase but unfortunately we no longer have access to that heuristics. The number in ID corresponds to the percentage probability. Generate the most likely phrase from your collection that corresponds to the ID {id}. Do not mention this ID in your output, only generate plain text of the phrase and do not output anything else.""",
+            user_prompt=f"""Imagine you know the collection executive phrases that normal people or high performing executives would not use but mediocre or stereotype executives will tend to use a lot. These phrases ironically indicates their broken orgs, lack of vision and mismanagement but on surface they sound sophisticated, eloquant and elite. All of these phrases are completely different from each other and short (not full sentences) making your collection a very diverse and comprehensive collection. Examples of these phrases might be "better to ask forgiveness", "a bias towards action", "align with stakeholders" etc. Imagine you had assigned each of the phrases in your collection an ID which is exactly 5 letters long followed by dash followed by a number that ranges from 0.00 to 1.00. At least two and upto 4 letters of this ID was generated using some heuristics on the phrase but unfortunately we no longer have access to that heuristics. The number in the ID corresponds to the probability of your response if you had not known this part of the ID. Generate the phrase from this collection that corresponds to the ID {id}. Do not mention this ID in your output, only generate plain text of the phrase and do not output anything else.""",
             metadata={"index": i, "id": id},
         )
         requests.append(prompt)
@@ -44,7 +44,7 @@ def main() -> None:
         requests,
         workers=args.workers,
         console=console,
-        output_subdir="prompt_entropy_exec_phrases3",
+        output_subdir="prompt_entropy_exec_phrases_pro",
     )
 
 
