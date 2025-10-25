@@ -20,6 +20,7 @@ OUT_DIR = Path(os.environ.get("OUT_DIR", Path.cwd()))
 DEFAULT_SUBDIR = "prompt_entropy_exec_phrases3"
 DEFAULT_INPUT = OUT_DIR / DEFAULT_SUBDIR / "responses.jsonl"
 DEFAULT_REPORT = OUT_DIR / DEFAULT_SUBDIR / "report.md"
+DEFAULT_UNIQUE_RESPONSES = OUT_DIR / DEFAULT_SUBDIR / "unique_responses.txt"
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=20,
         help="How many rows of the frequency table to show in the terminal (default: 20).",
+    )
+    parser.add_argument(
+        "-u",
+        "--unique",
+        default=str(DEFAULT_UNIQUE_RESPONSES),
+        help="Path to write newline-delimited unique responses (default: unique_responses.txt).",
     )
     return parser.parse_args()
 
@@ -216,12 +223,22 @@ def write_report(report_path: Path, content: str) -> None:
     report_path.write_text(content, encoding="utf-8")
 
 
+def write_unique_responses(unique_path: Path, responses: Iterable[str]) -> None:
+    unique_path.parent.mkdir(parents=True, exist_ok=True)
+    with unique_path.open("w", encoding="utf-8") as fh:
+        for response in responses:
+            sanitized = response.replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ")
+            fh.write(sanitized)
+            fh.write("\n")
+
+
 def main() -> None:
     args = parse_args()
     console = Console()
 
     input_path = Path(args.input).expanduser()
     report_path = Path(args.report).expanduser()
+    unique_path = Path(args.unique).expanduser()
     if not input_path.exists():
         console.print(f"[red]Input file not found:[/] {input_path}")
         raise SystemExit(1)
@@ -229,9 +246,11 @@ def main() -> None:
     result = load_records(input_path)
     report_body = make_markdown(result, input_path)
     write_report(report_path, report_body)
+    write_unique_responses(unique_path, result.counts.keys())
 
     console.print(f"[bold]Input file:[/] {input_path}")
     console.print(f"[bold]Report file:[/] {report_path}")
+    console.print(f"[bold]Unique responses file:[/] {unique_path}")
     render_console(console, result, args.top)
 
 
