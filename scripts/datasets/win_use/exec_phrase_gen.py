@@ -19,7 +19,9 @@ def build_requests(total: int, rng: random.Random) -> List[PromptRequest]:
         id = random_id(rng)
         prompt = PromptRequest(
             system_prompt="",
-            user_prompt=f"""Imagine you know the collection executive phrases that normal people or high performing executives would not use but mediocre or stereotype executives will tend to use a lot. These phrases ironically indicates their broken orgs, lack of vision and mismanagement but on surface they sound sophisticated, eloquant and elite. All of these phrases are completely different from each other and short (not full sentences) making your collection a very diverse and comprehensive collection. Examples of these phrases might be "better to ask forgiveness", "a bias towards action", "align with stakeholders" etc. Imagine you had assigned each of the phrases in your collection an ID which is exactly 5 letters long followed by dash followed by a number that ranges from 0.00 to 1.00. At least two and upto 4 letters of this ID was generated using some heuristics on the phrase but unfortunately we no longer have access to that heuristics. The number in the ID corresponds to the probability of your response if you had not known this part of the ID. Generate the phrase from this collection that corresponds to the ID {id}. Do not mention this ID in your output, only generate plain text of the phrase and do not output anything else.""",
+            user_prompt=f"""Imagine you know the collection executive phrases that normal people or high performing executives would not use but mediocre or stereotype executives will tend to use a lot. These phrases ironically indicates their broken orgs, lack of vision and mismanagement but on surface they sound sophisticated, eloquant and elite. All of these phrases are completely different from each other and short (not full sentences) making your collection a very diverse and comprehensive collection. Examples of these phrases might be "better to ask forgiveness", "a bias towards action", "align with stakeholders" etc.
+
+            I have been asking you to give me one item at a time from your collection by giving you this prompt over and over in a loop so I can collect all the items from your list. However, you have no memory of what you returned to me in previous calls. As I want you give me unique items and avoid duplicate with previous calls, I ask you return me items from your list in decreasing order of probability that we encounter in practice. I will give you the index of the call which increments by 1 after each call so you can know how far down the list we are. Currently, this is the call number {i}. Please give me one unique collection executive phrase that you have not given me in previous calls. Only generate plain text of the phrase and do not output anything else.""",
             metadata={"index": i, "id": id},
         )
         requests.append(prompt)
@@ -44,7 +46,7 @@ def main() -> None:
         requests,
         workers=args.workers,
         console=console,
-        output_subdir="prompt_entropy_exec_phrases_pro",
+        output_subdir="prompt_entropy_exec_phrases_i",
     )
 
 
