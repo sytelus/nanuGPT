@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import statistics
 from collections import Counter
 from dataclasses import dataclass
@@ -15,8 +16,10 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
-DEFAULT_INPUT = Path("prompt_entropy_exec_phrases_i") / "responses.jsonl"
-DEFAULT_REPORT = Path(__file__).resolve().parent / "report.md"
+OUTDIR = Path(os.environ.get("OUTDIR", Path.cwd()))
+DEFAULT_SUBDIR = "prompt_entropy_exec_phrases_i"
+DEFAULT_INPUT = OUTDIR / DEFAULT_SUBDIR / "responses.jsonl"
+DEFAULT_REPORT = OUTDIR / DEFAULT_SUBDIR / "report.md"
 
 
 @dataclass(frozen=True)
