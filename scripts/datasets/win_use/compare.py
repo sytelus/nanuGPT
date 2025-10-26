@@ -1,4 +1,26 @@
-"""Compare two unique_responses.txt files and summarize overlaps."""
+"""Compare ``unique_responses.txt`` outputs from two analysis runs.
+
+This script is meant to run right after ``analysis.py`` emits
+``unique_responses.txt`` files in separate subdirectories. It loads both
+files, prints a Rich summary (counts plus sample items), and writes a
+markdown report named ``compare_<left>_<right>.md`` next to the left
+input file.
+
+Quick start::
+
+    OUT_DIR=/tmp/bench python scripts/datasets/win_use/compare.py \\
+        --left-dir prompt_entropy_exec_phrases3 \\
+        --right-dir prompt_entropy_exec_phrases4
+
+Environment knobs:
+
+- ``OUT_DIR`` (default: current working directory)
+- ``COMPARE_LEFT_DIR`` / ``COMPARE_RIGHT_DIR`` (defaults hard-coded below)
+- ``UNIQUE_FILENAME`` (fixed at ``unique_responses.txt`` for consistency)
+
+You can override the auto-discovered files by passing explicit
+positional paths for ``left`` and/or ``right``.
+"""
 
 from __future__ import annotations
 
@@ -16,23 +38,58 @@ from rich.panel import Panel
 from rich.table import Table
 
 DEFAULT_SAMPLE_COUNT = 5
+OUT_DIR = Path(os.environ.get("OUT_DIR", Path.cwd())).expanduser()
+LEFT_DIR = os.environ.get("COMPARE_LEFT_DIR", "prompt_entropy_exec_phrases3")
+RIGHT_DIR = os.environ.get("COMPARE_RIGHT_DIR", "prompt_entropy_exec_phrases_pro")
+UNIQUE_FILENAME = "unique_responses.txt"
 
 
 def parse_args() -> argparse.Namespace:
+    """Build the CLI parser and return parsed arguments."""
     parser = argparse.ArgumentParser(
         description=(
             "Compare two unique_responses.txt files emitted by analysis.py, "
             "summarize the overlaps, and write a markdown report."
         )
     )
-    parser.add_argument("left", help="Path to the first unique_responses.txt file.")
-    parser.add_argument("right", help="Path to the second unique_responses.txt file.")
+    parser.add_argument(
+        "left",
+        nargs="?",
+        help=(
+            "Path to the first unique_responses.txt file."
+            " Defaults to $OUT_DIR/<left_dir>/unique_responses.txt."
+        ),
+    )
+    parser.add_argument(
+        "right",
+        nargs="?",
+        help=(
+            "Path to the second unique_responses.txt file."
+            " Defaults to $OUT_DIR/<right_dir>/unique_responses.txt."
+        ),
+    )
     parser.add_argument(
         "-n",
         "--samples",
         type=int,
         default=DEFAULT_SAMPLE_COUNT,
         help="How many sample items to display for each category (default: 5).",
+    )
+    parser.add_argument(
+        "--left-dir",
+        default=LEFT_DIR,
+        help=(
+            "Subdirectory under $OUT_DIR for the left file"
+            f" (default: {LEFT_DIR})."
+        ),
+    )
+    parser.add_argument(
+        "--right-dir",
+        default=RIGHT_DIR,
+        help=(
+            "Subdirectory under $OUT_DIR for the right file"
+            f" (default: {RIGHT_DIR})."
+        ),
     )
     parser.add_argument(
         "--report",
@@ -45,6 +102,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_unique_items(path: Path) -> list[str]:
+    """Load newline-delimited items, preserving first-seen order."""
     seen: set[str] = set()
     ordered: list[str] = []
     with path.open("r", encoding="utf-8") as handle:
@@ -58,20 +116,24 @@ def load_unique_items(path: Path) -> list[str]:
 
 
 def ordered_intersection(source: Iterable[str], target: set[str]) -> list[str]:
+    """Return values that appear in ``target`` without reordering ``source``."""
     return [item for item in source if item in target]
 
 
 def ordered_difference(source: Iterable[str], other: set[str]) -> list[str]:
+    """Return ``source`` values that are *not* present in ``other``."""
     return [item for item in source if item not in other]
 
 
 def sample_items(items: list[str], limit: int) -> list[str]:
+    """Return the first ``limit`` entries, or all items when ``limit`` <= 0."""
     if limit <= 0:
         return list(items)
     return items[:limit]
 
 
 def relative_label(path: Path, base: Path) -> str:
+    """Express ``path`` relative to ``base`` when possible for nicer output."""
     try:
         return str(path.relative_to(base))
     except ValueError:
@@ -79,12 +141,14 @@ def relative_label(path: Path, base: Path) -> str:
 
 
 def sanitize_fragment(value: str) -> str:
+    """Normalize a path-ish string so it is safe for filenames and markdown."""
     interim = value.replace(os.sep, "_").replace("/", "_").replace("\\", "_")
     sanitized = re.sub(r"[^A-Za-z0-9._-]", "_", interim).strip("_")
     return sanitized or "file"
 
 
 def default_report_path(left_path: Path, left_rel: str, right_rel: str) -> Path:
+    """Return the default markdown report path for the compared pair."""
     fragment_left = sanitize_fragment(left_rel)
     fragment_right = sanitize_fragment(right_rel)
     filename = f"compare_{fragment_left}_{fragment_right}.md"
@@ -92,6 +156,7 @@ def default_report_path(left_path: Path, left_rel: str, right_rel: str) -> Path:
 
 
 def ensure_file_exists(path: Path, label: str, console: Console) -> None:
+    """Exit early with a helpful Rich message if the expected file is missing."""
     if not path.exists():
         console.print(f"[red]{label} file not found:[/] {path}")
         raise SystemExit(1)
@@ -111,6 +176,7 @@ def render_console(
     right_only: list[str],
     sample_limit: int,
 ) -> None:
+    """Render the console summary table plus sample panels."""
     summary = Table(title="Unique Response Comparison", box=box.SIMPLE_HEAVY)
     summary.add_column("Metric", style="cyan", justify="left")
     summary.add_column("Value", style="magenta", justify="left")
@@ -145,6 +211,7 @@ def render_console(
 
 
 def _format_panel_body(items: list[str], sample_limit: int) -> str:
+    """Format the Rich panel body text, handling empty collections."""
     samples = sample_items(items, sample_limit)
     if not samples:
         return "[dim](no items)[/]"
@@ -161,6 +228,7 @@ def build_markdown(
     right_only: list[str],
     sample_limit: int,
 ) -> str:
+    """Compose the markdown report body with counts and code blocks."""
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
     lines: list[str] = [
         "# Unique Response Comparison",
@@ -196,16 +264,31 @@ def build_markdown(
 
 
 def write_report(report_path: Path, content: str) -> None:
+    """Persist ``content`` to ``report_path``, creating folders as needed."""
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(content, encoding="utf-8")
 
 
+def unique_path_for(subdir: str) -> Path:
+    """Return the canonical ``unique_responses.txt`` location for ``subdir``."""
+    return (OUT_DIR / subdir / UNIQUE_FILENAME).expanduser().resolve()
+
+
 def main() -> None:
+    """CLI entry point that orchestrates parsing, comparison, and reporting."""
     args = parse_args()
     console = Console()
 
-    left_path = Path(args.left).expanduser().resolve()
-    right_path = Path(args.right).expanduser().resolve()
+    left_path = (
+        Path(args.left).expanduser().resolve()
+        if args.left
+        else unique_path_for(args.left_dir)
+    )
+    right_path = (
+        Path(args.right).expanduser().resolve()
+        if args.right
+        else unique_path_for(args.right_dir)
+    )
 
     ensure_file_exists(left_path, "Left", console)
     ensure_file_exists(right_path, "Right", console)
@@ -259,4 +342,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
