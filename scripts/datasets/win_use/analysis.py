@@ -17,7 +17,7 @@ from rich.console import Console
 from rich.table import Table
 
 OUT_DIR = Path(os.environ.get("OUT_DIR", Path.cwd()))
-DEFAULT_SUBDIR = "prompt_entropy_exec_phrases_i5"
+DEFAULT_SUBDIR = "prompt_entropy_exec_phrases3"
 DEFAULT_INPUT = OUT_DIR / DEFAULT_SUBDIR / "responses.jsonl"
 DEFAULT_REPORT = OUT_DIR / DEFAULT_SUBDIR / "report.md"
 DEFAULT_UNIQUE_RESPONSES = OUT_DIR / DEFAULT_SUBDIR / "unique_responses.txt"
@@ -121,11 +121,13 @@ def load_records(path: Path) -> AnalysisResult:
                 missing += 1
                 continue
 
-            text = canonicalize_response(response)
-            if not text:
+            items = extract_response_items(response)
+            if not items:
                 blank += 1
-            counts[text] += 1
-            lengths.append(len(text))
+                continue
+            for item in items:
+                counts[item] += 1
+                lengths.append(len(item))
 
     if lengths:
         length_stats = LengthStats(
@@ -150,32 +152,24 @@ def load_records(path: Path) -> AnalysisResult:
 
 def md_escape(value: str) -> str:
     escaped = value.replace("|", r"\|").replace("\n", " ")
-    return escaped if escaped else "(empty response)"
+    return escaped if escaped else "(empty item)"
 
 
-def canonicalize_response(response: str | None) -> str:
+def extract_response_items(response: str | None, limit: int = ITEMS_PER_RESPONSE) -> list[str]:
+    items: list[str] = []
     if response is None:
-        return ""
-    lines: list[str] = []
+        return items
     for raw_line in str(response).splitlines():
+        if limit > 0 and len(items) >= limit:
+            break
         first_value = raw_line.split("\t", 1)[0].strip()
-        lines.append(first_value)
-    return "\n".join(lines).strip()
+        if first_value:
+            items.append(first_value)
+    return items
 
 
-def summarize_response(response: str, items_per_response: int = ITEMS_PER_RESPONSE) -> str:
-    if not response:
-        return ""
-    lines = [line.strip() for line in response.splitlines()]
-    if not lines:
-        return ""
-    return "\n".join(lines[:items_per_response])
-
-
-def response_item_label(items_per_response: int = ITEMS_PER_RESPONSE) -> str:
-    if items_per_response == 1:
-        return "First line"
-    return f"First {items_per_response} lines"
+def response_item_label(_: int = ITEMS_PER_RESPONSE) -> str:
+    return "Item"
 
 
 def make_markdown(result: AnalysisResult, input_path: Path) -> str:
@@ -190,24 +184,23 @@ def make_markdown(result: AnalysisResult, input_path: Path) -> str:
         f"- Records with error: {result.error_records}",
         f"- Records with malformed JSON: {result.malformed_records}",
         f"- Records missing response: {result.missing_response_records}",
-        f"- Valid responses: {result.valid_count}",
-        f"- Unique responses: {result.unique_count}",
+        f"- Valid items: {result.valid_count}",
+        f"- Unique items: {result.unique_count}",
         f"- Unique/valid ratio: {result.unique_ratio:.4f}",
-        f"- Duplicate responses: {result.duplicate_count}",
+        f"- Duplicate items: {result.duplicate_count}",
         f"- Blank (empty) responses: {result.blank_response_records}",
-        f"- Avg chars per response: {result.lengths.mean:.1f}",
-        f"- Median chars per response: {result.lengths.median:.1f}",
-        f"- Shortest response length: {result.lengths.shortest}",
-        f"- Longest response length: {result.lengths.longest}",
+        f"- Avg chars per item: {result.lengths.mean:.1f}",
+        f"- Median chars per item: {result.lengths.median:.1f}",
+        f"- Shortest item length: {result.lengths.shortest}",
+        f"- Longest item length: {result.lengths.longest}",
         "",
-        "## Response Frequency",
+        "## Item Frequency",
         "",
         f"| Count | {items_label} |",
         "| ---: | --- |",
     ]
-    for response, count in result.counts.most_common():
-        summary = summarize_response(response)
-        lines.append(f"| {count} | {md_escape(summary)} |")
+    for item, count in result.counts.most_common():
+        lines.append(f"| {count} | {md_escape(item)} |")
     return "\n".join(lines) + "\n"
 
 
@@ -219,30 +212,29 @@ def render_console(console: Console, result: AnalysisResult, top_n: int) -> None
     summary.add_row("Errors", f"{result.error_records}")
     summary.add_row("Malformed", f"{result.malformed_records}")
     summary.add_row("Missing response", f"{result.missing_response_records}")
-    summary.add_row("Valid responses", f"{result.valid_count}")
-    summary.add_row("Unique responses", f"{result.unique_count}")
+    summary.add_row("Valid items", f"{result.valid_count}")
+    summary.add_row("Unique items", f"{result.unique_count}")
     summary.add_row("Unique ratio", f"{result.unique_ratio:.2%}")
-    summary.add_row("Duplicates", f"{result.duplicate_count}")
+    summary.add_row("Duplicate items", f"{result.duplicate_count}")
     summary.add_row("Blank responses", f"{result.blank_response_records}")
-    summary.add_row("Avg chars", f"{result.lengths.mean:.1f}")
-    summary.add_row("Median chars", f"{result.lengths.median:.1f}")
-    summary.add_row("Range", f"{result.lengths.shortest}–{result.lengths.longest}")
+    summary.add_row("Avg chars/item", f"{result.lengths.mean:.1f}")
+    summary.add_row("Median chars/item", f"{result.lengths.median:.1f}")
+    summary.add_row("Item length range", f"{result.lengths.shortest}–{result.lengths.longest}")
     console.print(summary)
 
     items_label = response_item_label()
     freq = Table(
-        title=f"Top {min(top_n, result.unique_count)} Responses ({items_label.lower()})",
+        title=f"Top {min(top_n, result.unique_count)} Items",
         box=box.SIMPLE,
     )
     freq.add_column("Count", justify="right", style="magenta")
     freq.add_column(items_label, style="green")
 
     display_rows = result.counts.most_common(top_n if top_n > 0 else result.unique_count)
-    for response, count in display_rows:
-        summary = summarize_response(response)
-        freq.add_row(str(count), summary or "(empty response)")
+    for item, count in display_rows:
+        freq.add_row(str(count), item or "(empty item)")
     if result.unique_count > len(display_rows):
-        freq.caption = f"... {result.unique_count - len(display_rows)} additional unique responses in report."
+        freq.caption = f"... {result.unique_count - len(display_rows)} additional unique items in report."
     console.print(freq)
 
 
@@ -253,9 +245,15 @@ def write_report(report_path: Path, content: str) -> None:
 
 def write_unique_responses(unique_path: Path, responses: Iterable[str]) -> None:
     unique_path.parent.mkdir(parents=True, exist_ok=True)
+    seen: set[str] = set()
     with unique_path.open("w", encoding="utf-8") as fh:
         for response in responses:
-            sanitized = response.replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ")
+            if not response:
+                continue
+            sanitized = response.replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ").strip()
+            if not sanitized or sanitized in seen:
+                continue
+            seen.add(sanitized)
             fh.write(sanitized)
             fh.write("\n")
 
