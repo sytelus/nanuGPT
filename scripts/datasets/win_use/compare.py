@@ -37,10 +37,10 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
-DEFAULT_SAMPLE_COUNT = 5
+DEFAULT_SAMPLE_COUNT = 8
 OUT_DIR = Path(os.environ.get("OUT_DIR", Path.cwd())).expanduser()
-LEFT_DIR = os.environ.get("COMPARE_LEFT_DIR", "prompt_entropy_exec_phrases3")
-RIGHT_DIR = os.environ.get("COMPARE_RIGHT_DIR", "prompt_entropy_exec_phrases_pro")
+LEFT_DIR = os.environ.get("COMPARE_LEFT_DIR", "prompt_entropy_exec_phrases_i5p")
+RIGHT_DIR = os.environ.get("COMPARE_RIGHT_DIR", "prompt_entropy_exec_phrases_i10p")
 UNIQUE_FILENAME = "unique_responses.txt"
 
 
@@ -107,7 +107,7 @@ def load_unique_items(path: Path) -> list[str]:
     ordered: list[str] = []
     with path.open("r", encoding="utf-8") as handle:
         for raw_line in handle:
-            stripped = raw_line.strip()
+            stripped = raw_line.strip().lower()
             if not stripped or stripped in seen:
                 continue
             seen.add(stripped)
