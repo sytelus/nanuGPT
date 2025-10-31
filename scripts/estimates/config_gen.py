@@ -282,15 +282,59 @@ def pretty_print(design: LLMDesignOutputs) -> None:
             print("  - " + note)
 
 if __name__ == "__main__":
-    cfg = LLMDesignInputs(
-        target_params=7_000_000_000,
-        vocab_size=32_000,
-        context_length=8192,
-        linear_type="swiglu",
-        pos_encoding="rope",
-        head_dim=128,
-        tie_heads_to_layers=True,     # << your requested behavior
-        n_kv_heads=8                  # optional (GQA)
-    )
-    design = recommend_llm_config(cfg, B_for_flops=1, include_vocab_in_flops=False)
-    pretty_print(design)
+    model_targets = [
+        ("gpt2-124m", 124_000_000),
+        ("gpt2-355m", 355_000_000),
+        ("gpt2-774m", 774_000_000),
+        ("gpt2-1.5b", 1_500_000_000),
+        ("custom-1.3b", 1_300_000_000),
+        ("custom-2.7b", 2_700_000_000),
+        ("custom-3.8b", 3_800_000_000),
+        ("custom-7b", 7_000_000_000),
+        ("custom-14b", 14_000_000_000),
+        ("custom-32b", 32_000_000_000),
+        ("custom-70b", 70_000_000_000),
+    ]
+
+    headers = [
+        "model",
+        "target_params",
+        "params_total",
+        "layers",
+        "hidden",
+        "heads",
+        "head_dim",
+        "ffn_dim",
+        "kv_heads",
+        "rotary_dim",
+        "context",
+        "linear_type",
+    ]
+    print("\t".join(headers))
+
+    for model_name, params in model_targets:
+        cfg = LLMDesignInputs(
+            target_params=params,
+            vocab_size=32_000,
+            context_length=8192,
+            linear_type="swiglu",
+            pos_encoding="rope",
+            tie_heads_to_layers=True,
+        )
+        design = recommend_llm_config(cfg, B_for_flops=1, include_vocab_in_flops=False)
+
+        row = [
+            model_name,
+            str(params),
+            str(design.params_total),
+            str(design.n_layers),
+            str(design.hidden_size),
+            str(design.n_heads),
+            str(design.head_dim),
+            str(design.ffn_dim),
+            str(design.details.get("n_kv_heads")),
+            str(design.details.get("rotary_dim")),
+            str(cfg.context_length),
+            cfg.linear_type,
+        ]
+        print("\t".join(row))
