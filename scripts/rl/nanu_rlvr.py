@@ -21,6 +21,7 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
+from contextlib import nullcontext
 
 import numpy as np
 import torch
@@ -476,8 +477,8 @@ def compute_log_probs(model: PolicyModel, input_ids: torch.Tensor, attention_mas
     """
     Per-token log-probs for the `logits_to_keep` tokens at the end of the sequence.
     """
-    # Enable bf16 autocast on CUDA to reduce casting overhead during policy updates.
-    with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+    autocast_ctx = torch.autocast(device_type="cuda", dtype=torch.bfloat16) if input_ids.is_cuda else nullcontext()
+    with autocast_ctx:
         logits = model(input_ids=input_ids, attention_mask=attention_mask).logits  # (B, T, V)
     logits = logits[:, :-1, :]                            # align next-token targets
     toks = input_ids[:, -logits_to_keep:]                 # (B, K)
@@ -590,8 +591,12 @@ def grpo_loss(
     avg_reward = rewards_matrix.mean().item()
 
     mean_rewards = rewards_matrix.mean(dim=1).repeat_interleave(rollouts["n_generations"])
-    std_rewards = rewards_matrix.std(dim=1).repeat_interleave(rollouts["n_generations"])
-    advantages = ((rewards_matrix.view(-1) - mean_rewards) / (std_rewards + 1e-4)).unsqueeze(1)
+    if algo_name == "dr_grpo":
+        # Dr.GRPO: remove std normalization; use only (r - mean) as the advantage for all tokens.
+        advantages = (rewards_matrix.view(-1) - mean_rewards).unsqueeze(1)
+    else:
+        std_rewards = rewards_matrix.std(dim=1).repeat_interleave(rollouts["n_generations"])
+        advantages = ((rewards_matrix.view(-1) - mean_rewards) / (std_rewards + 1e-4)).unsqueeze(1)
 
     surr1 = ratio * advantages
     surr2 = torch.clamp(ratio, 1 - epsilon, 1 + epsilon) * advantages
@@ -609,7 +614,8 @@ def grpo_loss(
         token_counts = cmask.sum(dim=1).clamp_min(1)
         loss = -((per_token * cmask).sum(dim=1) / token_counts).mean()
     elif algo_name == "dr_grpo":
-        denom = per_token.size(0) * max(1, max_completion_length)
+        # Dr.GRPO: remove sequence-length normalization. Aggregate at token-level without dividing by per-sample token counts.
+        denom = max(per_token.size(0), 1)
         denom_tensor = per_token.new_tensor(float(denom))
         loss = -(per_token * cmask).sum() / denom_tensor
     else:
@@ -681,7 +687,8 @@ def train_iterations(
                 for group in optimizer.param_groups:
                     group["lr"] = lr
                 update_start = time.perf_counter()
-                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                autocast_ctx = torch.autocast(device_type="cuda", dtype=torch.bfloat16) if torch.cuda.is_available() else nullcontext()
+                with autocast_ctx:
                     loss, avg_reward = grpo_loss(
                         policy_model, rollouts, reward_fn, config.beta, config.epsilon, config.grpo_variant,
                         config.max_completion_length,
@@ -787,18 +794,18 @@ def main() -> None:
     run_name = config.run_name or datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     run_dir = (base_dir / "nano_rlvr" / run_name).resolve()
     run_dir.mkdir(parents=True, exist_ok=False)
-    config.update({"out_dir": str(base_dir),"run_name": run_name, "run_dir": str(run_dir),})
+    config = replace(config, out_dir=str(base_dir), run_name=run_name, run_dir=str(run_dir))
 
     configure_logging(run_dir)
-    maybe_init_wandb(config)
+    maybe_init_wandb(asdict(config))
 
     device_name, device_id = init_torch(seed=config.seed)
-    config.update({"device_name": device_name, "device_id": device_id})
+    config = replace(config, device_name=device_name, device_id=device_id)
 
     if dist.get_rank() == 0:
         config_path = run_dir / "config.json"
         with config_path.open("w", encoding="utf-8") as config_file:
-            json.dump(config, config_file, indent=2)
+            json.dump(asdict(config), config_file, indent=2)
         log_message(f"Configuration saved to {config_path}")
 
     train(config)
