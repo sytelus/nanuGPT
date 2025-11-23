@@ -240,7 +240,7 @@ def setup_torch(seed:int,
     device_type:str,
     dtype:str,
     enable_distributed:bool,
-    distributed_backend:str, # ex 'nccl
+    distributed_backend:Optional[str], # ex 'nccl
     distributed_init_method:str, # ex 'env://'
     print_precision:int=10)->TorchInfo:
 
@@ -304,11 +304,12 @@ def setup_torch(seed:int,
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
 
-        torch.distributed.init_process_group(backend=distributed_backend,
+        acc = torch.accelerator.current_accelerator()
+        backend = distributed_backend or torch.distributed.get_default_backend_for_device(acc or 'cpu')
+        torch.distributed.init_process_group(backend=backend,
                                              init_method=distributed_init_method,
                                              device_id=torch.device(device_name) if is_cuda else None,
                                              )  # type: ignore
-        torch.distributed.barrier()
 
     else: # not distributed
         is_distributed = False

@@ -94,7 +94,6 @@ def create_model(config:Mapping, logger:logging.Logger, device:torch.device,
                 vocab_size:int, get_loss:Optional[GetLossType],
                 state_dict=None)->Tuple[torch.nn.Module, Mapping]:
     model_config = config['model']
-    torch_compile = config['general']['torch_compile']
 
     get_model = utils.import_fn(model_config['module'])
 
@@ -104,9 +103,6 @@ def create_model(config:Mapping, logger:logging.Logger, device:torch.device,
     if state_dict is not None:
         logger.info("Loading model from state_dict...")
         model.load_state_dict(state_dict)
-
-    if torch_compile:
-        model = compile_torch_model(model, logger)
 
     return model, model_config
 

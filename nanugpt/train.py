@@ -93,6 +93,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     scheduler_config = config['scheduler']
     loss_config = config['loss']
     scaler_config = config['scaler']
+    torch_compile = config['general']['torch_compile']
 
     get_data = utils.import_fn(data_config['module'])
     get_optim = utils.import_fn(optimizer_config['module'])
@@ -170,10 +171,18 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
     # note that model should be initialized before call to DDP
     # as DDP broadcasts initial weight from rank 0 to all other ranks
+    # device ID must be one device or None. If it is one device then entire model
+    # is placed on that device before DDP wrapping. If None, then model (or parts of model) is
+    # expected to be already on correct device before DDP wrapping. Also, if device_ids is None,
+    # forward pass must explicitly place inputs on correct device.
     if torch_info.is_distributed:
         model = DistributedDataParallel(model,
                                         device_ids=[torch_info.device_id],
                                         gradient_as_bucket_view=True,) # grads are kept in reducer buckets avoiding 2x memory usage
+
+    # compile should be done after DDP wrapping
+    if torch_compile:
+        model = common.compile_torch_model(model, logger)
 
     # create optimizer - it can be done before or after DDP wrapping but better to do it after
     optimizer = get_optim(model,
