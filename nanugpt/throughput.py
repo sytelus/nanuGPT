@@ -80,8 +80,8 @@ def train_step(batch_iter, model, gread_acc_steps, scaler, optimizer, grad_clip,
 
 def forward_xy(x, y, model, device, torch_info, amp_ctx):
     """Run a forward pass"""
-    x, y = x.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else x.to(device), \
-        y.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else y.to(device)
+    x, y = x.pin_memory().to(device, non_blocking=True) if torch_info.is_accelerator else x.to(device), \
+        y.pin_memory().to(device, non_blocking=True) if torch_info.is_accelerator else y.to(device)
 
     n_samples = len(x)
     n_tokens = x.numel()
@@ -121,7 +121,7 @@ def measure_global_batch(config:Mapping,
         out_dir = utils.full_path(out_dir, create=True)
         logger.summary({'run/out_dir': out_dir})
 
-    if torch_info.is_cuda:
+    if torch_info.is_accelerator:
         torch.cuda.empty_cache()
 
     # setup data
@@ -140,7 +140,7 @@ def measure_global_batch(config:Mapping,
     # create optimizer
     get_optim = utils.import_fn(optimizer_config['module'])
     optimizer = get_optim(model,
-                        enable_fused=torch_info.is_cuda,
+                        enable_fused=torch_info.is_accelerator,
                         **optimizer_config['module_kwargs'])
 
     # initialize a GradScaler. If enabled=False scaler is a no-op

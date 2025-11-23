@@ -32,8 +32,8 @@ def estimate_loss(model:torch.nn.Module,
         for i, (x, y) in enumerate(data_loader):
             if i >= eval_iters / torch_info.world_size:
                 break
-            x, y = x.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else x.to(device), \
-                y.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else y.to(device)
+            x, y = x.pin_memory().to(device, non_blocking=True) if torch_info.is_accelerator else x.to(device), \
+                y.pin_memory().to(device, non_blocking=True) if torch_info.is_accelerator else y.to(device)
             #with amp_ctx:
             _, loss, correct = model(x, y, return_logits=False)
             n_samples = len(y)
@@ -186,7 +186,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
     # create optimizer - it can be done before or after DDP wrapping but better to do it after
     optimizer = get_optim(model,
-                          enable_fused=torch_info.is_cuda,
+                          enable_fused=torch_info.is_accelerator,
                           **optimizer_config['module_kwargs'])
 
     # scheduler provides warmup and then constant lr
@@ -204,7 +204,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
     if torch_info.is_master:
         common.save_artifacts(out_dir, config, logger)
 
-    if torch_info.is_cuda:
+    if torch_info.is_accelerator:
         torch.cuda.synchronize()
     step, eval_count, total_samples, total_tokens = 0, 0, 0, 0
     best_train_loss, best_val_loss = float('inf'), float('inf')
@@ -232,8 +232,8 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
         # grad accumulations
         for micro_step in range(grad_acc_steps):
-            x, y = x.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else x.to(device), \
-                y.pin_memory().to(device, non_blocking=True) if torch_info.is_cuda else y.to(device)
+            x, y = x.pin_memory().to(device, non_blocking=True) if torch_info.is_accelerator else x.to(device), \
+                y.pin_memory().to(device, non_blocking=True) if torch_info.is_accelerator else y.to(device)
 
             if torch_info.is_distributed:
                 # Instead of model.no_sync(), we do Karpathy's hack
@@ -280,7 +280,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         # flush the gradients as soon as we can, no need for this memory anymore
         optimizer.zero_grad(set_to_none=True)
 
-        if torch_info.is_cuda:
+        if torch_info.is_accelerator:
             torch.cuda.synchronize()
         fwd_bwd_interval = timeit.default_timer() - step_start_time
 
@@ -315,7 +315,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
 
         # update iteration metrics
         # sync cuda streams before updating metrics
-        if torch_info.is_cuda:
+        if torch_info.is_accelerator:
             torch.cuda.synchronize()
 
         elapsed_hr = (timeit.default_timer() - loop_start_time)/3600.0
@@ -358,7 +358,7 @@ def train(config:Mapping, logger:Optional[logging.Logger]=None):
         eval_performed = False
         if ((step+1) % eval_every == 0 or step+1 >= max_steps):
             eval_start_time = timeit.default_timer()
-            max_memory_allocated = torch.cuda.max_memory_allocated() if torch_info.is_cuda else 0
+            max_memory_allocated = torch.accelerator.memory.max_memory_allocated() if torch_info.is_accelerator else 0 # type: ignore
 
             eval_performed = True
             eval_count += 1

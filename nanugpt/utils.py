@@ -223,7 +223,7 @@ def ugroupby(iterable, key:Callable, gather:Callable=lambda d,k,g: list(g)):
 
 @dataclass
 class TorchInfo:
-    is_cuda:bool # same as device_type=='cuda'
+    is_accelerator:bool # same as device_type=='cuda'
     is_distributed: bool
     device_type:str
     dtype:str # floating point type
@@ -237,7 +237,7 @@ class TorchInfo:
     pt_dtype: torch.dtype
 
 def setup_torch(seed:int,
-    device_type:str,
+    device_type:Optional[str],
     dtype:str,
     enable_distributed:bool,
     distributed_backend:Optional[str], # ex 'nccl
@@ -252,28 +252,49 @@ def setup_torch(seed:int,
     torch.set_printoptions(precision=print_precision)
     #torch._dynamo.config.log_level = logging.WARN
 
-    assert device_type != 'cuda' or (device_type == 'cuda' and torch.cuda.is_available()), 'cuda not available. Set device_type=cpu.'
-    assert (device_type != 'cuda' or dtype != 'bfloat16') or (device_type == 'cuda' and dtype == 'bfloat16' and torch.cuda.is_bf16_supported()), 'bfloat16 not supported on your cuda device. Use float16 or float32.'
+    global_rank = int(os.environ.get('RANK', '-1'))
+    local_rank = int(os.environ.get('LOCAL_RANK', '-1'))
+    world_size = int(os.environ.get('WORLD_SIZE', '-1'))
+    local_world_size = int(os.environ.get('LOCAL_WORLD_SIZE', '-1'))
 
-    is_cuda = device_type == 'cuda'
-    device_name = device_type # we will add GPU ID later
-    device_id = -1  # we will set this later, needed to init DistributedDataParallel
+    if device_type is None:
+        if torch.accelerator.is_available():
+            accelerator = torch.accelerator.current_accelerator()
+            device_type = accelerator.type # type: ignore
+        else:
+            accelerator = torch.device('cpu')
+            device_type = 'cpu'
+    else:
+        accelerator = torch.device(device_type)
+
+    if device_type != 'cpu':
+        device_count = torch.accelerator.device_count()
+        if device_count > 1:
+            assert device_count-1 >= local_rank, f'LOCAL_RANK={local_rank} is greater than available accelerators={device_count}'
+            torch.accelerator.set_device_index(local_rank)
+            device_name = f'{device_type}:{local_rank}'
+            device_id = local_rank
+        elif device_count == 1:
+            torch.accelerator.set_device_index(0)
+            device_name = f'{device_type}:0'
+            device_id = 0
+        else:
+            raise ValueError('No Accelerator found. Set device_type=cpu.')
+
+        torch.accelerator.memory.empty_cache() # type: ignore
+        torch.accelerator.memory.reset_peak_memory_stats() # type: ignore
+        torch.accelerator.memory.reset_accumulated_memory_stats() # type: ignore
+    else:
+        device_id = -1
+        device_name = device_type
+
+    distributed_backend = distributed_backend or torch.distributed.get_default_backend_for_device(accelerator) # type: ignore
+
     pt_dtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
-
-    if is_cuda: # setup cuda
-        torch.backends.cudnn.enabled = True
-        torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
-        torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
-        torch.set_float32_matmul_precision('high')
 
     if enable_distributed:
         assert torch.distributed.is_available(), 'Distributed training not available because torch.distributed.is_available()==False'    # type: ignore
         assert distributed_init_method=='env://', f'Only env:// is supported for distributed_init_method but distributed_init_method={distributed_init_method}'
-
-        global_rank = int(os.environ.get('RANK', '-1'))
-        local_rank = int(os.environ.get('LOCAL_RANK', '-1'))
-        world_size = int(os.environ.get('WORLD_SIZE', '-1'))
-        local_world_size = int(os.environ.get('LOCAL_WORLD_SIZE', '-1'))
 
         assert global_rank >= 0, f'global_rank={global_rank} is invalid'
         assert local_rank >= 0, f'local_rank={local_rank} is invalid'
@@ -284,31 +305,9 @@ def setup_torch(seed:int,
         seed_offset = global_rank
         is_distributed = True
 
-        if is_cuda:
-            # When running from torchrun, all GPUs are visible so we select through LOCAL_RANK.
-            # When running from slurm only one GPU is visible so we select that one.
-            gpu_count = torch.cuda.device_count()
-            if gpu_count > 1:
-                assert gpu_count-1 >= local_rank, f'LOCAL_RANK={local_rank} is greater than available GPUs={gpu_count}'
-                torch.cuda.set_device(local_rank)
-                device_name = f'cuda:{local_rank}'
-                device_id = local_rank
-            elif gpu_count == 1:
-                torch.cuda.set_device(0)
-                device_name = 'cuda:0'
-                device_id = 0
-            else:
-                raise ValueError('No GPU found. Set device_type=cpu.')
-
-            # for deterministic training, reset GPU after setting the device
-            torch.cuda.empty_cache()
-            torch.cuda.reset_peak_memory_stats()
-
-        acc = torch.accelerator.current_accelerator()
-        backend = distributed_backend or torch.distributed.get_default_backend_for_device(acc or 'cpu')
-        torch.distributed.init_process_group(backend=backend,
+        torch.distributed.init_process_group(backend=distributed_backend,
                                              init_method=distributed_init_method,
-                                             device_id=torch.device(device_name) if is_cuda else None,
+                                             device_id=torch.device(device_name) if device_type != 'cpu' else None,
                                              )  # type: ignore
 
     else: # not distributed
@@ -320,13 +319,17 @@ def setup_torch(seed:int,
         seed_offset = 0
         device_id = 0 # first GPU visible
 
-    if is_cuda:
+    if device_type == 'cuda':
+        torch.backends.cudnn.enabled = True
+        torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
+        torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
+        torch.set_float32_matmul_precision('high')
         torch.cuda.manual_seed(seed+seed_offset)
     torch.manual_seed(seed+seed_offset)
 
     assert (not enable_distributed) or (enable_distributed and torch.distributed.is_initialized()), 'Distributed training not initialized. Call torch.distributed.init_process_group() first.' # type: ignore
 
-    return TorchInfo(is_cuda=is_cuda, is_distributed=is_distributed,
+    return TorchInfo(is_accelerator=device_type != 'cpu', is_distributed=is_distributed,
                      device_type=device_type, dtype=dtype, device_name=device_name,
                      global_rank=global_rank, local_rank=local_rank, world_size=world_size,
                      is_master=is_master, seed_offset=seed_offset,
