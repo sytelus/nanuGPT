@@ -147,8 +147,8 @@ class Config:
     out_dir: Optional[str] = None
     run_name: Optional[str] = None
     description: Optional[str] = field(default=None, metadata={"help": "Optional run notes logged to Weights & Biases"})
-    lr_warmup_steps: int = 256
-    lr_cooldown_frac: float = 0.4
+    lr_warmup_steps: int = 0
+    lr_cooldown_frac: float = 1.0
     device_name: str = field(default="cpu", metadata={"cli": False})
     device_id: int = field(default=-1, metadata={"cli": False})
     run_dir: str = field(default="", metadata={"cli": False})
