@@ -640,7 +640,7 @@ def unwrap(module_like: PolicyModel) -> PreTrainedModel:
     return cast(PreTrainedModel, module_like.module)
 
 def get_lr(step: int, config: Config) -> float:
-    total_updates = config.num_iterations * config.steps_per_iteration * config.mu
+    total_updates = config.steps_per_iteration * config.mu
     warmup_steps = config.lr_warmup_steps
     cooldown_start_step = int(total_updates * config.lr_cooldown_frac)
 
@@ -654,6 +654,9 @@ def get_lr(step: int, config: Config) -> float:
 def train_iterations(
     model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, train_data: Sequence[DatasetExample], config: Config,
 ) -> PreTrainedModel:
+    # num_iterations is fixed at 1, so we avoid an outer loop and keep a single reference snapshot.
+    if config.num_iterations != 1:
+        logger.warning("num_iterations is fixed to 1; ignoring provided value %s", config.num_iterations)
     train_start, total_tokens = time.perf_counter(), 0
     policy_rollout_time_total, reference_rollout_time_total, policy_update_time_total = 0, 0, 0
 
@@ -664,86 +667,87 @@ def train_iterations(
 
     update_count = 0
 
-    for iteration in range(1, config.num_iterations + 1): # number of times we freeze the reference model and copy from policy model
-        # Snapshot policy -> reference (no grads).
-        ref = copy.deepcopy(unwrap(policy_model)).to(torch.device(config.device_name)) # type: ignore[arg-type]
-        ref.eval()
-        for p in ref.parameters():
-            p.requires_grad = False
+    iteration = 1  # outer loop removed; we keep a single iteration
 
-        optimizer = torch.optim.AdamW(policy_model.parameters(), lr=config.learning_rate, fused=torch.cuda.is_available())  # type: ignore[arg-type]
+    # Snapshot policy -> reference (no grads).
+    ref = copy.deepcopy(unwrap(policy_model)).to(torch.device(config.device_name)) # type: ignore[arg-type]
+    ref.eval()
+    for p in ref.parameters():
+        p.requires_grad = False
 
-        policy_model.train()
+    optimizer = torch.optim.AdamW(policy_model.parameters(), lr=config.learning_rate, fused=torch.cuda.is_available())  # type: ignore[arg-type]
 
-        for step in range(1, config.steps_per_iteration + 1):  # number of policy updates per iteration
-            batch = random.sample(train_data, config.batch_size)
-            # rollout with policy
-            with torch.no_grad():
-                policy = unwrap(policy_model)
+    policy_model.train()
 
-                # Temporarily switch to eval + enable KV cache for faster decoding.
-                was_training = policy.training
-                prev_cache = getattr(policy.config, "use_cache", False)
-                policy.eval()
-                policy.config.use_cache = True
+    for step in range(1, config.steps_per_iteration + 1):  # number of policy updates
+        batch = random.sample(train_data, config.batch_size)
+        # rollout with policy
+        with torch.no_grad():
+            policy = unwrap(policy_model)
 
-                rollouts = gen_rollouts(policy, ref, tokenizer, batch, config)
+            # Temporarily switch to eval + enable KV cache for faster decoding.
+            was_training = policy.training
+            prev_cache = getattr(policy.config, "use_cache", False)
+            policy.eval()
+            policy.config.use_cache = True
 
-                # Restore training state.
-                policy.config.use_cache = prev_cache
-                if was_training:
-                    policy.train()
+            rollouts = gen_rollouts(policy, ref, tokenizer, batch, config)
 
-            for update_i in range(1, config.mu + 1):  # number of GRPO updates per batch
-                update_count += 1
-                lr = get_lr(update_count, config=config)
-                for group in optimizer.param_groups:
-                    group["lr"] = lr
-                update_start = time.perf_counter()
-                autocast_ctx = torch.autocast(device_type="cuda", dtype=torch.bfloat16) if torch.cuda.is_available() else nullcontext()
-                with autocast_ctx:
-                    loss, avg_reward = grpo_loss(
-                        policy_model, rollouts, reward_fn, config.beta, config.epsilon, config.grpo_variant,
-                        config.max_completion_length,
-                    )
-                optimizer.zero_grad()  # TODO: check if this would work because gradient_as_bucket_view=True
-                loss.backward()
-                total_norm = torch.nn.utils.clip_grad_norm_(policy_model.parameters(), max_norm=0.1)
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True)  # TODO: check if this would work because gradient_as_bucket_view=True
-                update_duration = time.perf_counter() - update_start
+            # Restore training state.
+            policy.config.use_cache = prev_cache
+            if was_training:
+                policy.train()
 
-                update_tokens = rollouts["completion_mask"].sum().item()
-                total_tokens += update_tokens
-                policy_update_time_total += update_duration
-                policy_rollout_time_total += rollouts["policy_duration"]
-                reference_rollout_time_total += rollouts["reference_duration"]
-                train_elapsed = time.perf_counter() - train_start
+        for update_i in range(1, config.mu + 1):  # number of GRPO updates per batch
+            update_count += 1
+            lr = get_lr(update_count, config=config)
+            for group in optimizer.param_groups:
+                group["lr"] = lr
+            update_start = time.perf_counter()
+            autocast_ctx = torch.autocast(device_type="cuda", dtype=torch.bfloat16) if torch.cuda.is_available() else nullcontext()
+            with autocast_ctx:
+                loss, avg_reward = grpo_loss(
+                    policy_model, rollouts, reward_fn, config.beta, config.epsilon, config.grpo_variant,
+                    config.max_completion_length,
+                )
+            optimizer.zero_grad()  # TODO: check if this would work because gradient_as_bucket_view=True
+            loss.backward()
+            total_norm = torch.nn.utils.clip_grad_norm_(policy_model.parameters(), max_norm=0.1)
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)  # TODO: check if this would work because gradient_as_bucket_view=True
+            update_duration = time.perf_counter() - update_start
 
-                log_metrics({
-                    "train/iteration": iteration,
-                    "train/step": step,
-                    "train/update": update_count,
-                    "train/update_i ": update_i,
-                    "train/batch_size": rollouts["batch_size"],
-                    "train/n_generations": rollouts["n_generations"],
-                    "train/avg_completion_tokens": rollouts["completion_mask"].sum(dim=1).float().mean().item(),
-                    "train/loss": loss.item(),
-                    "train/reward": avg_reward,
-                    "train/grad_norm": total_norm.item(),
-                    "train/lr": lr,
-                    "train/update_count": update_count,
-                    "train/update_tokens": update_tokens,
-                    "train/tokens_throughput": update_tokens / max(update_duration, 1e-9),
-                    "train/policy_rollout_time_s": rollouts["policy_duration"],
-                    "train/reference_rollout_time_s": rollouts["reference_duration"],
-                    "train/policy_update_time_s": update_duration,
-                    "train/train_elapsed_s": train_elapsed,
-                    "train/total_tokens": total_tokens,
-                    "train/policy_rollout_time_total_s": policy_rollout_time_total,
-                    "train/reference_rollout_time_total_s": reference_rollout_time_total,
-                    "train/policy_update_time_total_s": policy_update_time_total,
-                })
+            update_tokens = rollouts["completion_mask"].sum().item()
+            total_tokens += update_tokens
+            policy_update_time_total += update_duration
+            policy_rollout_time_total += rollouts["policy_duration"]
+            reference_rollout_time_total += rollouts["reference_duration"]
+            train_elapsed = time.perf_counter() - train_start
+
+            log_metrics({
+                "train/iteration": iteration,
+                "train/step": step,
+                "train/update": update_count,
+                "train/update_i ": update_i,
+                "train/batch_size": rollouts["batch_size"],
+                "train/n_generations": rollouts["n_generations"],
+                "train/avg_completion_tokens": rollouts["completion_mask"].sum(dim=1).float().mean().item(),
+                "train/loss": loss.item(),
+                "train/reward": avg_reward,
+                "train/grad_norm": total_norm.item(),
+                "train/lr": lr,
+                "train/update_count": update_count,
+                "train/update_tokens": update_tokens,
+                "train/tokens_throughput": update_tokens / max(update_duration, 1e-9),
+                "train/policy_rollout_time_s": rollouts["policy_duration"],
+                "train/reference_rollout_time_s": rollouts["reference_duration"],
+                "train/policy_update_time_s": update_duration,
+                "train/train_elapsed_s": train_elapsed,
+                "train/total_tokens": total_tokens,
+                "train/policy_rollout_time_total_s": policy_rollout_time_total,
+                "train/reference_rollout_time_total_s": reference_rollout_time_total,
+                "train/policy_update_time_total_s": policy_update_time_total,
+            })
 
     return unwrap(policy_model)
 
