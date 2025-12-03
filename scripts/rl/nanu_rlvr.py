@@ -5,8 +5,8 @@ language models like Qwen2.5-1.5B-Instruct using GRPO or Dr GRPO.
 Script can work with single 80GB GPU with defaults or multi-GPU with data
 parallelism. Each rank holds policy model and reference model. Policy rollouts
 are generated and compared with reference on same rank to get reward and loss
-for that rank. Gradients are averaged across ranks using DDP. After each
-iteration, the policy model is copied as the ref model.
+for that rank. Gradients are averaged across ranks using DDP. The policy model
+is copied once to initialize the reference model.
 """
 
 from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple, TypedDict, Union, Any, cast, get_args, get_origin
@@ -135,7 +135,6 @@ class Config:
     eval_batch_size: int = 32
     max_new_tokens: int = 512
     eval_temperature: float = 0.7
-    num_iterations: int = 1
     steps_per_iteration: int = 500
     batch_size: int = 7
     n_generations: int = 12
@@ -654,9 +653,6 @@ def get_lr(step: int, config: Config) -> float:
 def train_iterations(
     model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, train_data: Sequence[DatasetExample], config: Config,
 ) -> PreTrainedModel:
-    # num_iterations is fixed at 1, so we avoid an outer loop and keep a single reference snapshot.
-    if config.num_iterations != 1:
-        logger.warning("num_iterations is fixed to 1; ignoring provided value %s", config.num_iterations)
     train_start, total_tokens = time.perf_counter(), 0
     policy_rollout_time_total, reference_rollout_time_total, policy_update_time_total = 0, 0, 0
 
@@ -666,8 +662,6 @@ def train_iterations(
     )  # grads are kept in reducer buckets avoiding 2x memory usage
 
     update_count = 0
-
-    iteration = 1  # outer loop removed; we keep a single iteration
 
     # Snapshot policy -> reference (no grads).
     ref = copy.deepcopy(unwrap(policy_model)).to(torch.device(config.device_name)) # type: ignore[arg-type]
@@ -725,7 +719,6 @@ def train_iterations(
             train_elapsed = time.perf_counter() - train_start
 
             log_metrics({
-                "train/iteration": iteration,
                 "train/step": step,
                 "train/update": update_count,
                 "train/update_i ": update_i,
