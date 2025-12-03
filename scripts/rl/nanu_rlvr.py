@@ -143,6 +143,7 @@ class Config:
     learning_rate: float = 5e-6
     mu: int = 1
     epsilon: float = 0.1
+    autocast_dtype: str = field(default="bfloat16", metadata={"choices": ("bfloat16", "float16", "float32")})
     grpo_variant: str = field(default="grpo", metadata={"choices": ("grpo", "dr_grpo")})
     out_dir: Optional[str] = None
     run_name: Optional[str] = None
@@ -484,12 +485,14 @@ def selective_log_softmax(logits: torch.Tensor, input_ids: torch.Tensor) -> torc
     log_probs = torch.nn.functional.log_softmax(logits, dim=-1)  # (B, T, V)
     return log_probs.gather(dim=-1, index=input_ids.unsqueeze(-1)).squeeze(-1)
 
-
-def compute_log_probs(model: PolicyModel, input_ids: torch.Tensor, attention_mask: torch.Tensor, logits_to_keep: int) -> torch.Tensor:
+def compute_log_probs(
+    model: PolicyModel, input_ids: torch.Tensor, attention_mask: torch.Tensor, logits_to_keep: int,autocast_dtype: str,
+) -> torch.Tensor:
     """
     Per-token log-probs for the `logits_to_keep` tokens at the end of the sequence.
     """
-    autocast_ctx = torch.autocast(device_type="cuda", dtype=torch.bfloat16) if input_ids.is_cuda else nullcontext()
+    amp_dtype = torch.bfloat16 if autocast_dtype == "bfloat16" else torch.float16 if autocast_dtype == "float16" else None
+    autocast_ctx = torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=input_ids.is_cuda and amp_dtype is not None)
     with autocast_ctx:
         logits = model(input_ids=input_ids, attention_mask=attention_mask).logits  # (B, T, V)
     logits = logits[:, :-1, :]                            # align next-token targets
@@ -560,11 +563,11 @@ def gen_rollouts(
         attention_mask = torch.cat([p_mask, c_mask], dim=1)  # type: ignore[arg-type]
         logits_to_keep = c_ids.size(1)
 
-        old_log_probs = compute_log_probs(model, input_ids, attention_mask, logits_to_keep)
+        old_log_probs = compute_log_probs(model, input_ids, attention_mask, logits_to_keep, autocast_dtype=config.autocast_dtype)
         policy_duration = time.perf_counter() - policy_start
 
         ref_start = time.perf_counter()
-        ref_log_probs = compute_log_probs(ref_model, input_ids, attention_mask, logits_to_keep)
+        ref_log_probs = compute_log_probs(ref_model, input_ids, attention_mask, logits_to_keep, autocast_dtype=config.autocast_dtype)
         reference_duration = time.perf_counter() - ref_start
 
     # PERF: batch decode instead of per-sample loop
@@ -582,13 +585,14 @@ def gen_rollouts(
 
 def grpo_loss(
     model: PolicyModel, rollouts: RolloutData, reward_function: RewardFn,
-    beta: float, epsilon: float, algo_name: str,max_completion_length: int,
+    beta: float, epsilon: float, algo_name: str,max_completion_length: int, autocast_dtype: Optional[str],
 ) -> Tuple[torch.Tensor, float]:
 
     current_log_probs = compute_log_probs(model,
                                           input_ids=rollouts["input_ids"],
                                           attention_mask=rollouts["attention_mask"],
-                                          logits_to_keep=rollouts["logits_to_keep"])
+                                          logits_to_keep=rollouts["logits_to_keep"],
+                                          autocast_dtype=autocast_dtype)
     ratio = torch.exp(current_log_probs - rollouts["old_log_probs"])
 
     rewards = torch.tensor(
@@ -700,7 +704,7 @@ def train_iterations(
             update_start = time.perf_counter()
             loss, avg_reward = grpo_loss(
                 policy_model, rollouts, reward_fn, config.beta, config.epsilon, config.grpo_variant,
-                config.max_completion_length,
+                config.max_completion_length, config.autocast_dtype,
             )
             optimizer.zero_grad()  # TODO: check if this would work because gradient_as_bucket_view=True
             loss.backward()
