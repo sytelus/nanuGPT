@@ -147,6 +147,7 @@ class Config:
     grpo_variant: str = field(default="grpo", metadata={"choices": ("grpo", "dr_grpo")})
     out_dir: Optional[str] = None
     run_name: Optional[str] = None
+    description: Optional[str] = field(default=None, metadata={"help": "Optional run notes logged to Weights & Biases"})
     lr_warmup_steps: int = 256
     lr_cooldown_frac: float = 0.4
     device_name: str = field(default="cpu", metadata={"cli": False})
@@ -178,8 +179,13 @@ def maybe_init_wandb(config: Mapping[str, object]) -> None:
         import wandb
     except ModuleNotFoundError:
         return
-    _wandb_run = wandb.init(project="nano-rlvr", name=config["run_name"], config=dict(config), # type: ignore[arg-type]
-        save_code=True)
+    _wandb_run = wandb.init(  # type: ignore[arg-type]
+        project="nano-rlvr",
+        name=config["run_name"],
+        config=dict(config),
+        notes=config.get("description"),
+        save_code=True,
+    )
 
 def configure_logging(run_dir: Path) -> None:
     rank = dist.get_rank() if dist.is_available() and dist.is_initialized() else 0
