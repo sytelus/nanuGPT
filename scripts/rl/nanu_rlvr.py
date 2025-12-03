@@ -698,12 +698,10 @@ def train_iterations(
             for group in optimizer.param_groups:
                 group["lr"] = lr
             update_start = time.perf_counter()
-            autocast_ctx = torch.autocast(device_type="cuda", dtype=torch.bfloat16) if torch.cuda.is_available() else nullcontext()
-            with autocast_ctx:
-                loss, avg_reward = grpo_loss(
-                    policy_model, rollouts, reward_fn, config.beta, config.epsilon, config.grpo_variant,
-                    config.max_completion_length,
-                )
+            loss, avg_reward = grpo_loss(
+                policy_model, rollouts, reward_fn, config.beta, config.epsilon, config.grpo_variant,
+                config.max_completion_length,
+            )
             optimizer.zero_grad()  # TODO: check if this would work because gradient_as_bucket_view=True
             loss.backward()
             total_norm = torch.nn.utils.clip_grad_norm_(policy_model.parameters(), max_norm=0.1)
