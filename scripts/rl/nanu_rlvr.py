@@ -178,8 +178,8 @@ def maybe_init_wandb(config: Mapping[str, object]) -> None:
         import wandb
     except ModuleNotFoundError:
         return
-    _wandb_run = wandb.init("nano-rlvr", name=config["run_name"], config=dict(config), # type: ignore[arg-type]
-        dir=str(config.get("run_dir", "")) or None, reinit=True,)
+    _wandb_run = wandb.init(project="nano-rlvr", name=config["run_name"], config=dict(config), # type: ignore[arg-type]
+        save_code=True)
 
 def configure_logging(run_dir: Path) -> None:
     rank = dist.get_rank() if dist.is_available() and dist.is_initialized() else 0
