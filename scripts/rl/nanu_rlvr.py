@@ -32,7 +32,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, P
 
 logger = logging.getLogger("nano_rlvr")
 
-_wandb_run = None # init later if wandb is available and env vars are set
+_wandb_run = None  # init later if wandb is available and env vars are set
 
 # some type aliases
 CompletionMessage = Dict[str, str]
@@ -154,41 +154,46 @@ class Config:
     device_id: int = field(default=-1, metadata={"cli": False})
     run_dir: str = field(default="", metadata={"cli": False})
 
-def log_message(message: str, level: int=logging.INFO) -> None:
+def log_to_wandb(data: Dict[str, Any], *, summary: bool = False) -> None:
+    if _wandb_run is not None:
+        if summary:
+            _wandb_run.summary.update(data)
+    else:
+        _wandb_run.log(data)
+
+def log_message(message: str, level: int = logging.INFO) -> None:
     logger.log(level, message)
-    if _wandb_run and (not dist.is_available() or not dist.is_initialized() or dist.get_rank() == 0):
-        import wandb
-        wandb.log({'level': logging.getLevelName(level), 'message': message})
+    log_to_wandb({'level': logging.getLevelName(level), 'message': message})
 
 def log_metrics(values: Dict[str, float]) -> None:
-    if _wandb_run and (not dist.is_available() or dist.get_rank() == 0):
-        import wandb
-        wandb.log(values)
     logger.info(", ".join(f"{k}={v}" for k, v in values.items()))
+    log_to_wandb(values)
+
 
 def log_summary(values: Dict[str, Any]) -> None:
-    if _wandb_run and (not dist.is_available() or dist.get_rank() == 0):
-        _wandb_run.summary.update(values)
+    log_to_wandb(values, summary=True)
     logger.info(", ".join(f"{k}={v}" for k, v in values.items()))
 
-def maybe_init_wandb(config: Mapping[str, object]) -> None:
+def init_wandb(config: Mapping[str, object]) -> None:
     global _wandb_run
-    if _wandb_run or not (os.environ.get("WANDB_API_KEY") and os.environ.get("WANDB_HOST")):
-        return
-    try:
-        import wandb
-    except ModuleNotFoundError:
-        return
-    _wandb_run = wandb.init(  # type: ignore[arg-type]
-        project="nano-rlvr",
-        name=config["run_name"],
-        config=dict(config),
-        notes=config.get("description"),
-        save_code=True,
-    )
+    if _wandb_run is None and (os.environ.get("WANDB_API_KEY") and os.environ.get("WANDB_HOST")):
+        try:
+            import wandb
+        except ImportError:
+            logger.warning("wandb not installed; skipping wandb logging.")
+            return
+        wandb_host = os.environ.get('WANDB_HOST', None)
+        wandb.login(host=wandb_host) # use API key from WANDB_API_KEY env variable
+        _wandb_run = wandb.init(  # type: ignore[arg-type]
+            project="nano-rlvr",
+            name=config["run_name"],
+            config=dict(config),
+            notes=config.get("description"),
+            save_code=True,)
 
-def configure_logging(run_dir: Path) -> None:
+def configure_logging(run_dir: Path, config: Config) -> None:
     rank = dist.get_rank() if dist.is_available() and dist.is_initialized() else 0
+
     class _Formatter(logging.Formatter):
         def __init__(self) -> None:
             super().__init__("%(asctime)s [rank=%(rank)s] %(levelname)s %(message)s", "%H:%M:%S")
@@ -214,6 +219,8 @@ def configure_logging(run_dir: Path) -> None:
         logger.addHandler(handler)
 
     logger.info(f"Run directory: {run_dir}")
+
+    init_wandb(asdict(config))
 
 def init_torch(seed) -> Tuple[str, int]:
     device_name, device_id = 'cpu', -1
@@ -802,8 +809,7 @@ def main() -> None:
     run_dir.mkdir(parents=True, exist_ok=False)
     config = replace(config, out_dir=str(base_dir), run_name=run_name, run_dir=str(run_dir))
 
-    configure_logging(run_dir)
-    maybe_init_wandb(asdict(config))
+    configure_logging(run_dir, config)
 
     device_name, device_id = init_torch(seed=config.seed)
     config = replace(config, device_name=device_name, device_id=device_id)
