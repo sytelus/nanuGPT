@@ -127,7 +127,7 @@ dataset_configs: Dict[str, Dict[str, Any]] = {
 @dataclass(frozen=True)
 class Config:
     seed: int = 42
-    model_mode: str = field(default="completion", metadata={"choices": ("completion", "chat")})
+    model_mode: str = field(default="chat", metadata={"choices": ("completion", "chat")})
     greedy_eval: bool = False
     model_name: str = "Qwen/Qwen2.5-1.5B-Instruct"
     dataset: str = field(default="gsm8k", metadata={"choices": tuple(dataset_configs.keys())})
