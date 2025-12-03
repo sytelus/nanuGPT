@@ -174,6 +174,42 @@ def log_summary(values: Dict[str, Any]) -> None:
     log_to_wandb(values, summary=True)
     logger.info(", ".join(f"{k}={v}" for k, v in values.items()))
 
+def _format_failed_examples_md(failed: Sequence[Mapping[str, str]], title: str) -> str:
+    lines: List[str] = [f"# Failed eval examples – {title}", ""]
+    for i, ex in enumerate(failed, 1):
+        lines.append(f"## #{i}")
+        lines.append("")
+        lines.append("**Prompt**")
+        lines.append("")
+        lines.append("```")
+        lines.append(ex.get("prompt", "").strip())
+        lines.append("```")
+        lines.append("")
+        lines.append("**Expected**")
+        lines.append("")
+        lines.append("```")
+        lines.append(str(ex.get("expected", "")).strip())
+        lines.append("```")
+        lines.append("")
+        lines.append("**Model Response**")
+        lines.append("")
+        lines.append("```")
+        lines.append(ex.get("response", "").strip())
+        lines.append("```")
+        parsed = ex.get("parsed")
+        if parsed is not None:
+            lines.append("")
+            lines.append(f"Parsed answer: `{parsed}`")
+        lines.append("")
+    return "\n".join(lines)
+
+def save_failed_examples_md(failed: Sequence[Mapping[str, str]], path: Path, title: str) -> None:
+    if not failed:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_format_failed_examples_md(failed, title), encoding="utf-8")
+    logger.info("Saved failed eval examples to %s", path)
+
 def init_wandb(config: Mapping[str, object]) -> None:
     global _wandb_run
     if _wandb_run is None and (os.environ.get("WANDB_API_KEY") and os.environ.get("WANDB_HOST")):
@@ -325,7 +361,7 @@ def prepare_dataset(
 
 def evaluate_model(
     model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, eval_examples: Sequence[DatasetExample],
-    config: Config,
+    config: Config, log_failed: bool = False, eval_label: str = "", run_dir: Optional[str] = None,
 ) -> Dict[str, float]:
     if not config.greedy_eval and config.eval_temperature is None:
         raise ValueError("eval_temperature must be provided when greedy_eval is False")
@@ -352,6 +388,7 @@ def evaluate_model(
     effective_batch_size = min(config.batch_size, local_total) if local_total > 0 else config.batch_size
 
     completion_lengths: List[int] = []
+    failed_examples: List[Dict[str, str]] = []
     try:
         for start in range(0, local_total, effective_batch_size):
             batch_examples = local_examples[start : start + effective_batch_size]
@@ -402,6 +439,14 @@ def evaluate_model(
                             )
                     if is_correct:
                         correct += 1
+                    else:
+                        if log_failed and rank == 0:
+                            failed_examples.append({
+                                "prompt": example["prompt"],
+                                "expected": str(expected),
+                                "response": response,
+                                "parsed": str(predicted),
+                            })
                 except Exception as exc:
                     logger.warning(
                         "Failed to parse model output for prompt '%s': %s",
@@ -420,6 +465,11 @@ def evaluate_model(
 
     accuracy = (global_correct / global_total) * 100 if global_total > 0 else 0.0
     avg_completion_len = float(np.mean(completion_lengths)) if completion_lengths else 0.0
+
+    if log_failed and rank == 0 and failed_examples and run_dir:
+        label = eval_label or "eval"
+        path = Path(run_dir) / f"failed_example_{label}.md"
+        save_failed_examples_md(failed_examples, path, label)
 
     # complete eval on all ranks before returning
     torch.distributed.barrier()
@@ -786,12 +836,18 @@ def train(config: Config) -> None:
     eval_data = eval_data[:config.n_eval] if config.n_eval > 0 else eval_data
     log_summary({"dataset/train_examples": len(train_data), "dataset/eval_examples": len(eval_data)})
 
-    pre_rl_metrics = evaluate_model(model=model, tokenizer=tokenizer, eval_examples=eval_data, config=config)
+    pre_rl_metrics = evaluate_model(
+        model=model, tokenizer=tokenizer, eval_examples=eval_data, config=config,
+        log_failed=True, eval_label="pre", run_dir=config.run_dir,
+    )
     log_summary({'pre_rl/'+k: v for k, v in pre_rl_metrics.items()})
 
     model = train_iterations(model=model, tokenizer=tokenizer, train_data=train_data, config=config)
 
-    post_rl_metrics = evaluate_model(model=model, tokenizer=tokenizer, eval_examples=eval_data, config=config)
+    post_rl_metrics = evaluate_model(
+        model=model, tokenizer=tokenizer, eval_examples=eval_data, config=config,
+        log_failed=True, eval_label="post", run_dir=config.run_dir,
+    )
     log_summary({'post_rl/'+k: v for k, v in post_rl_metrics.items()})
 
     artifact_dir = Path(config.run_dir) / "finetuned_model"
