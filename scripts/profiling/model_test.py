@@ -3,16 +3,19 @@
 # python _memory_viz.py trace_plot "memory.pickle" -o memory.html
 """
 
+from typing import Dict, Optional, Tuple
+
 import torch
 import torch.nn as nn
+from torch import Tensor
 
 class GPTModel(nn.Module):
     def __init__(
         self,
-        hidden_size=1536,
-        num_layers=28,
-        vocab_size=151_936,
-        activation_checkpointing=True,
+        hidden_size: int = 1536,
+        num_layers: int = 28,
+        vocab_size: int = 151_936,
+        activation_checkpointing: bool = True,
     ):
         super().__init__()
         self.activation_checkpointing = activation_checkpointing
@@ -28,7 +31,12 @@ class GPTModel(nn.Module):
         ])
         self.head = nn.Linear(hidden_size, vocab_size, bias=False)
 
-    def forward(self, input_ids, labels=None, return_logits=True):
+    def forward(
+        self,
+        input_ids: Tensor,
+        labels: Optional[Tensor] = None,
+        return_logits: bool = True,
+    ) -> Tuple[Optional[Tensor], Optional[Tensor]]:
         x = self.embed(input_ids)
         for layer in self.layers:
             # Gradient checkpointing: recompute activations during backward
@@ -39,15 +47,20 @@ class GPTModel(nn.Module):
         logits = self.head(x)
 
         if return_logits:
-            loss = None
+            loss: Optional[Tensor] = None
             if labels is not None:
                 loss = nn.functional.cross_entropy(logits.view(-1, logits.size(-1)), labels.view(-1))
-            return (logits, loss)
-        else:
-            loss = nn.functional.cross_entropy(logits.view(-1, logits.size(-1)), labels.view(-1))
-            return (None, loss)
+            return logits, loss
 
-def training_step(model, optimizer, input_ids, labels):
+        loss = nn.functional.cross_entropy(logits.view(-1, logits.size(-1)), labels.view(-1))
+        return None, loss
+
+def training_step(
+    model: GPTModel,
+    optimizer: torch.optim.Optimizer,
+    input_ids: Tensor,
+    labels: Tensor,
+) -> float:
     with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
         _, loss = model(input_ids, labels, return_logits=False)
 
@@ -56,9 +69,16 @@ def training_step(model, optimizer, input_ids, labels):
     optimizer.step()
     return loss.item()
 
-def main():
+def main() -> None:
     device = torch.device("cuda")
-    cfg = dict(hidden_size=1536, num_layers=28, vocab_size=151_936, batch_size=59, seq_len=512, activation_checkpointing=True)
+    cfg: Dict[str, int | bool] = dict(
+        hidden_size=1536,
+        num_layers=28,
+        vocab_size=151_936,
+        batch_size=59,
+        seq_len=512,
+        activation_checkpointing=True,
+    )
 
     model = GPTModel(cfg["hidden_size"], cfg["num_layers"], cfg["vocab_size"], cfg["activation_checkpointing"]).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
