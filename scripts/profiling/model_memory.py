@@ -1,11 +1,4 @@
-"""For memory visualization, run:
-
-python _memory_viz.py trace_plot '$OUT_DIR/model_memory/model_memory.pickle' -o '$OUT_DIR/model_memory/model_memory.html'
-
-"""
-
-from contextlib import nullcontext
-import sys
+import pprint
 import tempfile
 from typing import Dict, Optional, Tuple
 
@@ -15,6 +8,7 @@ import torch.accelerator as accel
 import torch.nn as nn
 from torch import Tensor
 
+from nanugpt.acc_profile import AccProfile
 
 class MLP(nn.Module):
     def __init__(self, hidden_size: int, dropout: float = 0.1):
@@ -118,7 +112,13 @@ def training_step(model: GPTModel, optimizer: torch.optim.Optimizer, input_ids: 
 def main() -> None:
     device = torch.device(accel.current_accelerator(check_available=True) or "cpu")
     torch.set_default_device(device)
-    cfg: Dict[str, int | bool] = dict(hidden_size=768, num_layers=12, num_heads=12, vocab_size=50_257, batch_size=8, seq_len=256, activation_checkpointing=True)
+    cfg: Dict[str, int | bool] = dict(hidden_size=1536,
+                                      num_layers=36,
+                                      num_heads=12,
+                                      vocab_size=151_643,
+                                      batch_size=32,
+                                      seq_len=512,
+                                      activation_checkpointing=True)
 
     model = GPTModel(
         hidden_size=cfg["hidden_size"],
@@ -139,26 +139,16 @@ def main() -> None:
     for _ in range(3):
         training_step(model, optimizer, input_ids, labels)
 
-    torch.accelerator.memory.empty_cache()
-    torch.accelerator.memory.reset_peak_memory_stats()
-    torch.accelerator.memory.reset_accumulated_memory_stats()
+    with AccProfile() as prof:
+        for _ in range(3):
+            training_step(model, optimizer, input_ids, labels)
 
-    for _ in range(3):
-        training_step(model, optimizer, input_ids, labels)
+    pprint.pprint(prof.memory_stats)
 
-    accel.synchronize()
-    stats = torch.accelerator.memory.memory_stats()
-    for k, v in stats.items():
-        print(f"{k}: {v}")
-
-    torch.accelerator.memory.empty_cache()
-
-    if device.type == "cuda":
-        out_dir = os.environ.get("OUT_DIR", tempfile.gettempdir())
-        save_dir = os.path.join(out_dir, "model_memory")
-        os.makedirs(save_dir, exist_ok=True)
-        torch.cuda.memory._dump_snapshot(os.path.join(save_dir, "model_memory.pickle"))
-        print(f"Memory snapshot saved to `{save_dir}/model_memory.pickle`")
+    out_dir = os.path.join(os.environ.get("OUT_DIR", tempfile.gettempdir()), "model_memory")
+    os.makedirs(out_dir, exist_ok=True)
+    path = prof.save_html(os.path.join(out_dir, "model_memory_profile.html"))
+    print(f"Memory snapshot saved to `{path}`")
 
 if __name__ == "__main__":
     main()
