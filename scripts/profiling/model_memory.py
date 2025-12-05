@@ -5,6 +5,8 @@ python _memory_viz.py trace_plot '$OUT_DIR/model_memory/model_memory.pickle' -o 
 """
 
 from contextlib import nullcontext
+import sys
+import tempfile
 from typing import Dict, Optional, Tuple
 
 import os
@@ -65,12 +67,15 @@ class GPTModel(nn.Module):
         activation_checkpointing: bool = True,
         max_seq_len: int = 2048,
         dropout: float = 0.1,
+        device: torch.device | str | None = None,
     ):
         super().__init__()
         self.activation_checkpointing = activation_checkpointing
         self.max_seq_len = max_seq_len
-        self.embed = nn.Embedding(vocab_size, hidden_size)
-        self.pos_embed = nn.Embedding(max_seq_len, hidden_size)
+        weight = torch.empty((vocab_size, hidden_size))
+        self.embed = nn.Embedding.from_pretrained(weight, freeze=False)
+        pos_weight = torch.empty((max_seq_len, hidden_size))
+        self.pos_embed = nn.Embedding.from_pretrained(pos_weight, freeze=False)
         self.drop = nn.Dropout(dropout)
         self.layers = nn.ModuleList([GPTBlock(hidden_size, num_heads, dropout) for _ in range(num_layers)])
         self.ln_f = nn.LayerNorm(hidden_size)
@@ -86,7 +91,7 @@ class GPTModel(nn.Module):
 
         for layer in self.layers:
             fn = lambda y: layer(y)
-            x = torch.utils.checkpoint.checkpoint(fn, x, use_reentrant=False) if self.activation_checkpointing else layer(x)  # Gradient checkpointing: recompute activations during backward
+            x = torch.utils.checkpoint.checkpoint(fn, x, use_reentrant=False) if self.activation_checkpointing else layer(x)  # type: ignore[arg-type]
 
         x = self.ln_f(x)
         logits = self.head(x)
@@ -111,10 +116,18 @@ def training_step(model: GPTModel, optimizer: torch.optim.Optimizer, input_ids: 
 
 
 def main() -> None:
-    device = accel.current_accelerator(check_available=True) or torch.device("cpu")
-    cfg: Dict[str, int | bool] = dict(hidden_size=768, num_layers=12, vocab_size=50_257, batch_size=8, seq_len=256, activation_checkpointing=True)
+    device = torch.device(accel.current_accelerator(check_available=True) or "cpu")
+    torch.set_default_device(device)
+    cfg: Dict[str, int | bool] = dict(hidden_size=768, num_layers=12, num_heads=12, vocab_size=50_257, batch_size=8, seq_len=256, activation_checkpointing=True)
 
-    model = GPTModel(cfg["hidden_size"], cfg["num_layers"], cfg["vocab_size"], cfg["activation_checkpointing"]).to(device)
+    model = GPTModel(
+        hidden_size=cfg["hidden_size"],
+        num_layers=cfg["num_layers"],
+        num_heads=cfg["num_heads"],
+        vocab_size=cfg["vocab_size"],
+        activation_checkpointing=cfg["activation_checkpointing"], # type: ignore[arg-type]
+        device=device,
+    ).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
     input_ids = torch.randint(cfg["vocab_size"], (cfg["batch_size"], cfg["seq_len"]), device=device)
     labels = torch.randint_like(input_ids, cfg["vocab_size"])
@@ -126,26 +139,26 @@ def main() -> None:
     for _ in range(3):
         training_step(model, optimizer, input_ids, labels)
 
-    accel.memory.empty_cache()
-    accel.memory.reset_peak_memory_stats()
-    accel.memory.reset_accumulated_memory_stats()
+    torch.accelerator.memory.empty_cache()
+    torch.accelerator.memory.reset_peak_memory_stats()
+    torch.accelerator.memory.reset_accumulated_memory_stats()
 
     for _ in range(3):
         training_step(model, optimizer, input_ids, labels)
 
     accel.synchronize()
-    stats = accel.memory.memory_stats()
+    stats = torch.accelerator.memory.memory_stats()
     for k, v in stats.items():
         print(f"{k}: {v}")
-    active_mb = stats.get("active_bytes.all.allocated", 0) / 1e6
-    reserved_mb = stats.get("reserved_bytes.all.peak", 0) / 1e6
-    accel.memory.empty_cache()
 
-    out_dir = os.environ.get("OUT_DIR", None)
-    if out_dir:
+    torch.accelerator.memory.empty_cache()
+
+    if device.type == "cuda":
+        out_dir = os.environ.get("OUT_DIR", tempfile.gettempdir())
         save_dir = os.path.join(out_dir, "model_memory")
         os.makedirs(save_dir, exist_ok=True)
-        accel.memory._dump_snapshot(os.path.join(save_dir, "model_memory.pickle"))
+        torch.cuda.memory._dump_snapshot(os.path.join(save_dir, "model_memory.pickle"))
+        print(f"Memory snapshot saved to `{save_dir}/model_memory.pickle`")
 
 if __name__ == "__main__":
     main()
