@@ -1,9 +1,15 @@
-"""For memory visualization, run: python _memory_viz.py trace_plot 'memory.pickle' -o memory.html"""
+"""For memory visualization, run:
+
+python _memory_viz.py trace_plot '$OUT_DIR/model_memory/model_memory.pickle' -o '$OUT_DIR/model_memory/model_memory.html'
+
+"""
 
 from contextlib import nullcontext
 from typing import Dict, Optional, Tuple
 
+import os
 import torch
+import torch.accelerator as accel
 import torch.nn as nn
 from torch import Tensor
 
@@ -94,7 +100,7 @@ class GPTModel(nn.Module):
 
 def training_step(model: GPTModel, optimizer: torch.optim.Optimizer, input_ids: Tensor, labels: Tensor) -> float:
     device_type = input_ids.device.type
-    autocast_ctx = torch.autocast(device_type=device_type, dtype=torch.bfloat16) if device_type in ("cuda", "mps") else nullcontext()
+    autocast_ctx = torch.autocast(device_type=device_type, dtype=torch.bfloat16)
     with autocast_ctx:
         _, loss = model(input_ids, labels, return_logits=False)
 
@@ -105,7 +111,7 @@ def training_step(model: GPTModel, optimizer: torch.optim.Optimizer, input_ids: 
 
 
 def main() -> None:
-    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    device = accel.current_accelerator(check_available=True) or torch.device("cpu")
     cfg: Dict[str, int | bool] = dict(hidden_size=768, num_layers=12, vocab_size=50_257, batch_size=8, seq_len=256, activation_checkpointing=True)
 
     model = GPTModel(cfg["hidden_size"], cfg["num_layers"], cfg["vocab_size"], cfg["activation_checkpointing"]).to(device)
@@ -113,30 +119,33 @@ def main() -> None:
     input_ids = torch.randint(cfg["vocab_size"], (cfg["batch_size"], cfg["seq_len"]), device=device)
     labels = torch.randint_like(input_ids, cfg["vocab_size"])
 
-    if device.type == "cuda":
-        torch.cuda.reset_peak_memory_stats()
-        torch.cuda.reset_accumulated_memory_stats()
-        torch.cuda.memory._record_memory_history(max_entries=100000)
+    model.compile()
+    model.train()
+
+    # Warm-up
+    for _ in range(3):
+        training_step(model, optimizer, input_ids, labels)
+
+    accel.memory.empty_cache()
+    accel.memory.reset_peak_memory_stats()
+    accel.memory.reset_accumulated_memory_stats()
 
     for _ in range(3):
         training_step(model, optimizer, input_ids, labels)
 
-    if device.type == "cuda":
-        torch.cuda.synchronize()
-        torch.cuda.memory._dump_snapshot("memory.pickle")
-        torch.cuda.memory._record_memory_history(enabled=None)
-        stats = torch.cuda.memory.memory_stats()
-        for k, v in stats.items():
-            print(f"{k}: {v}")
-        active_mb = stats.get("active_bytes.all.allocated", 0) / 1e6  # matches Active Memory Timeline
-        reserved_mb = stats.get("reserved_bytes.all.peak", 0) / 1e6
-        torch.cuda.empty_cache()
-    else:
-        print(f"CUDA not available (device={device}); skipping CUDA memory stats.")
-        active_mb = reserved_mb = 0
+    accel.synchronize()
+    stats = accel.memory.memory_stats()
+    for k, v in stats.items():
+        print(f"{k}: {v}")
+    active_mb = stats.get("active_bytes.all.allocated", 0) / 1e6
+    reserved_mb = stats.get("reserved_bytes.all.peak", 0) / 1e6
+    accel.memory.empty_cache()
 
-    print(f"peak active: {active_mb:.0f} MB | peak reserved: {reserved_mb:.0f} MB")
-
+    out_dir = os.environ.get("OUT_DIR", None)
+    if out_dir:
+        save_dir = os.path.join(out_dir, "model_memory")
+        os.makedirs(save_dir, exist_ok=True)
+        accel.memory._dump_snapshot(os.path.join(save_dir, "model_memory.pickle"))
 
 if __name__ == "__main__":
     main()
