@@ -1,13 +1,13 @@
 """
 Accelerator Memory Profiler - A reusable context manager for PyTorch memory profiling.
 
-This module provides the AccProfile context manager that wraps any code block to capture
+This module provides the AccMemProfiler context manager that wraps any code block to capture
 memory statistics and generate visualizations without intermediate files.
 
 Usage:
-    from acc_profile import AccProfile
+    from acc_profile import AccMemProfiler
 
-    with AccProfile(profile_memory=True) as ap:
+    with AccMemProfiler(profile_memory=True) as ap:
         # Your training/inference code here
         ...
 
@@ -71,7 +71,7 @@ def _format_viz(data: dict[str, Any], viz_kind: str = "Active Memory Timeline") 
     return _MEMORY_VIZ_TEMPLATE.replace("$VIZ_KIND", repr(viz_kind)).replace("$SNAPSHOT", payload)
 
 
-class AccProfile:
+class AccMemProfiler:
     """
     Context manager for profiling accelerator memory usage.
 
@@ -84,7 +84,7 @@ class AccProfile:
         device: The accelerator device being profiled
 
     Example:
-        with AccProfile(profile_memory=True) as ap:
+        with AccMemProfiler(profile_memory=True) as ap:
             model = MyModel().to("cuda")
             output = model(input_data)
 
@@ -109,7 +109,7 @@ class AccProfile:
         self.profile_data: dict[str, Any] | None = None
         self._is_cuda = self.device.type == "cuda"
 
-    def __enter__(self) -> AccProfile:
+    def __enter__(self) -> AccMemProfiler:
         """Start profiling: reset stats and optionally begin recording history."""
         accel.memory.empty_cache()
         accel.memory.reset_peak_memory_stats()
@@ -223,4 +223,4 @@ class AccProfile:
 
     def __repr__(self) -> str:
         peak = self.memory_stats.get("allocated_bytes.all.peak", 0)
-        return f"AccProfile(device={self.device}, peak_allocated={peak / 1e9:.3f} GB)"
+        return f"AccMemProfiler(device={self.device}, peak_allocated={peak / 1e9:.3f} GB)"

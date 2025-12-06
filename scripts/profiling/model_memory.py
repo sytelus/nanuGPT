@@ -8,7 +8,7 @@ import torch.accelerator as accel
 import torch.nn as nn
 from torch import Tensor
 
-from nanugpt.acc_profile import AccProfile
+from nanugpt.acc_mem_profiler import AccMemProfiler
 
 class MLP(nn.Module):
     def __init__(self, hidden_size: int, dropout: float = 0.1):
@@ -136,12 +136,16 @@ def main() -> None:
     model.train()
 
     # Warm-up
+    print("Warming up...")
     for _ in range(3):
         training_step(model, optimizer, input_ids, labels)
+    print("Warm-up complete.")
 
-    with AccProfile() as prof:
+    with AccMemProfiler() as prof:
+        print("Starting training steps...")
         for _ in range(3):
             training_step(model, optimizer, input_ids, labels)
+        print("Training steps complete.")
 
     pprint.pprint(prof.memory_stats)
 
