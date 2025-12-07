@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import pickle
 from typing import Any
 
@@ -132,6 +133,23 @@ class AccMemProfiler:
             torch.cuda.memory._record_memory_history(enabled=None)
 
         accel.memory.empty_cache()
+
+    def dump_on_oom(self, save_to_dir: str) -> None:
+        """
+        Dump memory statistics and profile data on out-of-memory (OOM) error.
+        """
+
+        def oom_observer(device, alloc, device_alloc, device_free):
+            # snapshot right after an OOM happened
+            print('Saving allocated cuda state during OOM to:', save_to_dir)
+            self.profile_data = torch.cuda.memory._snapshot()
+            os.makedirs(save_to_dir, exist_ok=True)
+            self.save_html(os.path.join(save_to_dir, "oom_profile.html"))
+            self.save_pickle(os.path.join(save_to_dir, "oom_profile.pickle"))
+
+        if self.profile_memory and self._is_cuda:
+            torch._C._cuda_attach_out_of_memory_observer(oom_observer)
+
 
     def to_html(self, viz_kind: str = "Active Memory Timeline") -> str:
         """
