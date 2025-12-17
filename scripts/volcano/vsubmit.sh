@@ -16,6 +16,7 @@ set -eu -o pipefail # -o xtrace # fail if any command failes, log all commands, 
 # -----------------
 # JOB_NAME - must be set by user, used in job name
 # OUT_DIR - output dir on cluster, default /data/<user>
+# LOCAL_OUT_DIR - local dir where job data is staged before copying to cluster
 # INSTALL_PACKAGE - if 1 (default) then pip install -e . the source dir before running command
 # UPDATE_PYTHONPATH - if 1 then add source dir to PYTHONPATH (ignored if INSTALL_PACKAGE=1)
 # TRANSFER_VARS - space separated list of names for env vars to transfer to container
@@ -35,8 +36,11 @@ set -eu -o pipefail # -o xtrace # fail if any command failes, log all commands, 
 SOURCE_DIR=${SOURCE_DIR:-.} # where is source directory
 export USER_ALIAS=${USER%@*}
 
-OUT_DIR=${OUT_DIR:-/data/${USER_ALIAS}} # base output directory where we will create sub dir for this run
-echo "Job output will be at '${OUT_DIR}' on cluster. If you don't want this then set OUT_DIR env var."
+OUT_DIR=${OUT_DIR:-/data/runs/${USER_ALIAS}} # base output directory where we will create sub dir for this run
+echo "Job output will be at '${OUT_DIR}' on cluster."
+
+LOCAL_OUT_DIR=${LOCAL_OUT_DIR:-/tmp/volcano_jobs} # local dir where we will stage job data before copying to cluster
+echo "Local staging directory is '${LOCAL_OUT_DIR}'."
 
 # Validate JOB_NAME
 if [ -z "${JOB_NAME:-}" ]; then
@@ -114,7 +118,7 @@ export WORKERS=$(( NODES - 1 ))
 
 # create sub dir for this specific run in our dir
 export JOB_OUT_DIR=runs/${USER_ALIAS}/${JOB_NAME_FULL}-$(date +%Y-%m-%d_%H-%M-%S_%3N)
-LOCAL_JOB_OUT_DIR="${OUT_DIR}/${JOB_OUT_DIR}"
+LOCAL_JOB_OUT_DIR="${LOCAL_OUT_DIR}/${JOB_OUT_DIR}"
 rm -rf "${LOCAL_JOB_OUT_DIR}"
 mkdir -p "${LOCAL_JOB_OUT_DIR}"
 
