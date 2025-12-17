@@ -19,18 +19,21 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple, Any, Iterable
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+# pip install kubernetes
 from kubernetes import client, config
 from kubernetes.client import ApiException
 
 # ------------------------------- Utilities -------------------------------- #
+
 
 def load_kube():
     try:
         config.load_incluster_config()
     except Exception:
         config.load_kube_config()
+
 
 def env_namespace() -> str:
     ns = os.environ.get("VOLCANO_NAMESPACE")
@@ -39,8 +42,10 @@ def env_namespace() -> str:
         sys.exit(2)
     return ns
 
+
 def now_utc_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z")
+
 
 def human_ts(ts) -> str:
     try:
@@ -52,6 +57,7 @@ def human_ts(ts) -> str:
     except Exception:
         return "unknown"
 
+
 def safe_int(x: Any, default: int = 0) -> int:
     try:
         return int(x)
@@ -61,8 +67,10 @@ def safe_int(x: Any, default: int = 0) -> int:
         except Exception:
             return default
 
+
 def pad(s: str, w: int) -> str:
     return s + (" " * max(0, w - len(s)))
+
 
 def print_table(headers: List[str], rows: List[List[Any]]) -> None:
     widths = [len(h) for h in headers]
@@ -74,10 +82,12 @@ def print_table(headers: List[str], rows: List[List[Any]]) -> None:
     for row in rows:
         print("  " + "  ".join(pad(str(cell), widths[i]) for i, cell in enumerate(row)))
 
+
 # ---- Quantity parsing ---- #
 
 _BIN = {"ki": 1024**1, "mi": 1024**2, "gi": 1024**3, "ti": 1024**4, "pi": 1024**5, "ei": 1024**6}
 _DEC = {"k": 1000**1, "m": 1000**2, "g": 1000**3, "t": 1000**4, "p": 1000**5, "e": 1000**6}
+
 
 def parse_cpu_millicores(v: Any) -> int:
     if v is None:
@@ -89,6 +99,7 @@ def parse_cpu_millicores(v: Any) -> int:
         return int(float(s) * 1000.0)
     except Exception:
         return 0
+
 
 def parse_mem_bytes(v: Any) -> int:
     if v is None:
@@ -117,23 +128,28 @@ def parse_mem_bytes(v: Any) -> int:
         return int(f * _DEC[u])
     return int(f)
 
+
 def bytes_to_gib(b: int) -> str:
     if b <= 0:
         return "0.00"
     return f"{b / (1024**3):.2f}"
 
+
 # ----------------------------- Kubernetes I/O ------------------------------ #
 
+
 def list_ns_pods(v1: client.CoreV1Api, ns: str) -> List[client.V1Pod]:
-    return (v1.list_namespaced_pod(ns).items or [])
+    return v1.list_namespaced_pod(ns).items or []
+
 
 def list_ns_resourcequotas(v1: client.CoreV1Api, ns: str) -> List[client.V1ResourceQuota]:
     try:
-        return (v1.list_namespaced_resource_quota(ns).items or [])
+        return v1.list_namespaced_resource_quota(ns).items or []
     except ApiException as e:
         if e.status == 403:
             return []
         raise
+
 
 def list_ns_podgroups(ns: str) -> List[dict]:
     try:
@@ -147,6 +163,7 @@ def list_ns_podgroups(ns: str) -> List[dict]:
     except Exception:
         return []
 
+
 def list_ns_events(ns: str) -> List[dict]:
     out: List[dict] = []
     # events.k8s.io/v1
@@ -154,14 +171,22 @@ def list_ns_events(ns: str) -> List[dict]:
         ev1 = client.EventsV1Api()
         resp = ev1.list_namespaced_event(ns)
         for e in resp.items or []:
-            out.append({
-                "reason": getattr(e, "reason", "") or "",
-                "message": getattr(e, "note", "") or "",
-                "type": getattr(e, "type", "") or "",
-                "obj_name": getattr(getattr(e, "regarding", None), "name", "") if getattr(e, "regarding", None) else "",
-                "obj_kind": getattr(getattr(e, "regarding", None), "kind", "") if getattr(e, "regarding", None) else "",
-                "ts": getattr(e, "event_time", None) or (getattr(getattr(e, "series", None), "last_observed_time", None)) or getattr(e, "deprecated_last_timestamp", None),
-            })
+            out.append(
+                {
+                    "reason": getattr(e, "reason", "") or "",
+                    "message": getattr(e, "note", "") or "",
+                    "type": getattr(e, "type", "") or "",
+                    "obj_name": (
+                        getattr(getattr(e, "regarding", None), "name", "") if getattr(e, "regarding", None) else ""
+                    ),
+                    "obj_kind": (
+                        getattr(getattr(e, "regarding", None), "kind", "") if getattr(e, "regarding", None) else ""
+                    ),
+                    "ts": getattr(e, "event_time", None)
+                    or (getattr(getattr(e, "series", None), "last_observed_time", None))
+                    or getattr(e, "deprecated_last_timestamp", None),
+                }
+            )
     except Exception:
         pass
     # core/v1
@@ -169,14 +194,24 @@ def list_ns_events(ns: str) -> List[dict]:
         v1 = client.CoreV1Api()
         resp = v1.list_namespaced_event(ns)
         for e in resp.items or []:
-            out.append({
-                "reason": getattr(e, "reason", "") or "",
-                "message": getattr(e, "message", "") or "",
-                "type": getattr(e, "type", "") or "",
-                "obj_name": getattr(getattr(e, "involved_object", None), "name", "") if getattr(e, "involved_object", None) else "",
-                "obj_kind": getattr(getattr(e, "involved_object", None), "kind", "") if getattr(e, "involved_object", None) else "",
-                "ts": getattr(e, "last_timestamp", None) or getattr(e, "event_time", None),
-            })
+            out.append(
+                {
+                    "reason": getattr(e, "reason", "") or "",
+                    "message": getattr(e, "message", "") or "",
+                    "type": getattr(e, "type", "") or "",
+                    "obj_name": (
+                        getattr(getattr(e, "involved_object", None), "name", "")
+                        if getattr(e, "involved_object", None)
+                        else ""
+                    ),
+                    "obj_kind": (
+                        getattr(getattr(e, "involved_object", None), "kind", "")
+                        if getattr(e, "involved_object", None)
+                        else ""
+                    ),
+                    "ts": getattr(e, "last_timestamp", None) or getattr(e, "event_time", None),
+                }
+            )
     except Exception:
         pass
 
@@ -195,13 +230,12 @@ def list_ns_events(ns: str) -> List[dict]:
     out.sort(key=ts_key, reverse=True)
     return out
 
+
 def list_ns_vcjobs(ns: str) -> List[dict]:
     api = client.CustomObjectsApi()
     for ver in ("v1alpha1", "v1beta1"):
         try:
-            resp = api.list_namespaced_custom_object(
-                group="batch.volcano.sh", version=ver, namespace=ns, plural="jobs"
-            )
+            resp = api.list_namespaced_custom_object(group="batch.volcano.sh", version=ver, namespace=ns, plural="jobs")
             items = resp.get("items", []) or []
             for it in items:
                 it["_apiVersionResolved"] = f"batch.volcano.sh/{ver}"
@@ -211,11 +245,13 @@ def list_ns_vcjobs(ns: str) -> List[dict]:
                 continue
     return []
 
+
 # -------------------------- Parsing & Aggregation -------------------------- #
 
-AVAIL_RE = re.compile(r'(\d+)\s*/\s*(\d+)\s+nodes?\s+(?:are|were)\s+available', re.IGNORECASE)
-COUNT_PREFIX_RE = re.compile(r'^\s*(\d+)\s+(.+?)\s*$', re.IGNORECASE)
+AVAIL_RE = re.compile(r"(\d+)\s*/\s*(\d+)\s+nodes?\s+(?:are|were)\s+available", re.IGNORECASE)
+COUNT_PREFIX_RE = re.compile(r"^\s*(\d+)\s+(.+?)\s*$", re.IGNORECASE)
 UNSCHED_REASONS_ALLOW = {"FailedScheduling", "Unschedulable", "NotTriggerScaleUp", "PodGroupNotReady", "EnqueueFailed"}
+
 
 def sum_gpu_requests_in_pod(p: client.V1Pod) -> int:
     def get_gpu(res):
@@ -223,27 +259,34 @@ def sum_gpu_requests_in_pod(p: client.V1Pod) -> int:
             return 0
         req = 0
         if res.requests and "nvidia.com/gpu" in res.requests:
-            try: req = max(req, int(res.requests["nvidia.com/gpu"]))
-            except Exception: pass
+            try:
+                req = max(req, int(res.requests["nvidia.com/gpu"]))
+            except Exception:
+                pass
         if res.limits and "nvidia.com/gpu" in res.limits:
-            try: req = max(req, int(res.limits["nvidia.com/gpu"]))
-            except Exception: pass
+            try:
+                req = max(req, int(res.limits["nvidia.com/gpu"]))
+            except Exception:
+                pass
         return req
 
     total = 0
-    for c in (p.spec.containers or []):
+    for c in p.spec.containers or []:
         total += get_gpu(getattr(c, "resources", None))
     # init: not concurrent with app; take max
     init_max = 0
-    for c in (p.spec.init_containers or []):
+    for c in p.spec.init_containers or []:
         init_max = max(init_max, get_gpu(getattr(c, "resources", None)))
     return max(total, init_max)
+
 
 def is_gpu_pod(p: client.V1Pod) -> bool:
     return sum_gpu_requests_in_pod(p) > 0
 
+
 def is_pending(p: client.V1Pod) -> bool:
-    return (p.status and p.status.phase == "Pending")
+    return p.status and p.status.phase == "Pending"
+
 
 def parse_failed_scheduling_message(msg: str) -> Tuple[Optional[int], Optional[int], Dict[str, int]]:
     if not msg:
@@ -279,10 +322,11 @@ def parse_failed_scheduling_message(msg: str) -> Tuple[Optional[int], Optional[i
             reasons[key] = reasons.get(key, 0) + cnt
     return a, t, reasons
 
-def collect_diag_from_pod_conditions(pods: List[client.V1Pod]) -> List[Tuple[int,int,Dict[str,int],dict]]:
+
+def collect_diag_from_pod_conditions(pods: List[client.V1Pod]) -> List[Tuple[int, int, Dict[str, int], dict]]:
     out = []
     for p in pods:
-        conds = (p.status.conditions or [])
+        conds = p.status.conditions or []
         for c in conds:
             if getattr(c, "type", "") != "PodScheduled":
                 continue
@@ -293,12 +337,15 @@ def collect_diag_from_pod_conditions(pods: List[client.V1Pod]) -> List[Tuple[int
             if a is None or t is None:
                 continue
             ts = getattr(c, "last_transition_time", None) or p.metadata.creation_timestamp
-            out.append((a, t, r, {"src":"pod_condition", "pod":p.metadata.name, "ts":ts}))
+            out.append((a, t, r, {"src": "pod_condition", "pod": p.metadata.name, "ts": ts}))
     # newest first
     out.sort(key=lambda x: int(x[3]["ts"].timestamp()) if x[3].get("ts") else 0, reverse=True)
     return out
 
-def collect_diag_from_events(events: List[dict], names: Iterable[str], kinds: Iterable[str]) -> List[Tuple[int,int,Dict[str,int],dict]]:
+
+def collect_diag_from_events(
+    events: List[dict], names: Iterable[str], kinds: Iterable[str]
+) -> List[Tuple[int, int, Dict[str, int], dict]]:
     name_set = set(names)
     kind_set = set(kinds)
     out = []
@@ -308,13 +355,16 @@ def collect_diag_from_events(events: List[dict], names: Iterable[str], kinds: It
         if name_set and e.get("obj_name") not in name_set:
             continue
         # accept if message has the pattern, regardless of reason
-        if e.get("reason") not in UNSCHED_REASONS_ALLOW and AVAIL_RE.search(e.get("message","")) is None:
+        if e.get("reason") not in UNSCHED_REASONS_ALLOW and AVAIL_RE.search(e.get("message", "")) is None:
             continue
-        a, t, r = parse_failed_scheduling_message(e.get("message","") or "")
+        a, t, r = parse_failed_scheduling_message(e.get("message", "") or "")
         if a is None or t is None:
             continue
-        out.append((a, t, r, {"src":"event", "obj_kind":e.get("obj_kind"), "obj":e.get("obj_name"), "ts":e.get("ts")}))
+        out.append(
+            (a, t, r, {"src": "event", "obj_kind": e.get("obj_kind"), "obj": e.get("obj_name"), "ts": e.get("ts")})
+        )
     return out
+
 
 def aggregate_schedulability_for_kind(pods: List[client.V1Pod], events: List[dict], podgroups: List[dict], kind: str):
     """Return (avail,total,reasons,meta, reasons_agg_any_messages) for CPU/GPU."""
@@ -342,7 +392,7 @@ def aggregate_schedulability_for_kind(pods: List[client.V1Pod], events: List[dic
             pg_names.add(pg)
     if not pg_names:
         # add PGs present in ns as a last resort
-        pg_names = {pg.get("metadata",{}).get("name","") for pg in podgroups if pg.get("metadata")}
+        pg_names = {pg.get("metadata", {}).get("name", "") for pg in podgroups if pg.get("metadata")}
     if pg_names:
         diags += collect_diag_from_events(events, pg_names, kinds={"PodGroup"})
 
@@ -355,69 +405,85 @@ def aggregate_schedulability_for_kind(pods: List[client.V1Pod], events: List[dic
             return int(t.timestamp())
         except Exception:
             try:
-                return int(datetime.fromisoformat(str(t).replace("Z","+00:00")).timestamp())
+                return int(datetime.fromisoformat(str(t).replace("Z", "+00:00")).timestamp())
             except Exception:
                 return 0
+
     diags.sort(key=lambda x: ts_val(x[3]), reverse=True)
 
     # Aggregate reason counts from any messages we saw (even if we can't pick a single 'X/Y')
-    reasons_agg: Dict[str,int] = {}
-    for a,t,r,meta in diags:
-        for k,v in r.items():
-            reasons_agg[k] = reasons_agg.get(k,0) + v
+    reasons_agg: Dict[str, int] = {}
+    for a, t, r, meta in diags:
+        for k, v in r.items():
+            reasons_agg[k] = reasons_agg.get(k, 0) + v
 
     if diags:
         # pick the newest diagnostic that has X/Y
-        a,t,r,meta = diags[0]
-        return a,t,r,meta,reasons_agg
+        a, t, r, meta = diags[0]
+        return a, t, r, meta, reasons_agg
 
-    return None,None,{},None,reasons_agg  # no direct X/Y, but we might still have reasons_agg=={}
+    return None, None, {}, None, reasons_agg  # no direct X/Y, but we might still have reasons_agg=={}
+
 
 # ----------------------- Volcano Jobs (Running only) ----------------------- #
 
-def per_pod_requests_from_task(task: dict) -> Tuple[int,int,int]:
+
+def per_pod_requests_from_task(task: dict) -> Tuple[int, int, int]:
     """(gpu, cpu_m, mem_b) for one pod of this task."""
-    gpu = 0; cpu_m = 0; mem_b = 0
+    gpu = 0
+    cpu_m = 0
+    mem_b = 0
     tpl = (task.get("template") or {}).get("spec", {})
     containers = tpl.get("containers", []) or []
     init_containers = tpl.get("initContainers", []) or []
 
     def add_res(res: dict):
-        nonlocal gpu,cpu_m,mem_b
+        nonlocal gpu, cpu_m, mem_b
         if not res:
             return
         req = res.get("requests", {}) or {}
         lim = res.get("limits", {}) or {}
         g = req.get("nvidia.com/gpu", lim.get("nvidia.com/gpu"))
         if g is not None:
-            try: gpu += int(g)
-            except Exception: pass
+            try:
+                gpu += int(g)
+            except Exception:
+                pass
         c = req.get("cpu")
-        if c is not None: cpu_m += parse_cpu_millicores(c)
+        if c is not None:
+            cpu_m += parse_cpu_millicores(c)
         m = req.get("memory")
-        if m is not None: mem_b += parse_mem_bytes(m)
+        if m is not None:
+            mem_b += parse_mem_bytes(m)
 
     for c in containers:
         add_res(c.get("resources") or {})
 
     # init containers => max (not concurrent)
-    init_gpu = 0; init_cpu_m = 0; init_mem_b = 0
+    init_gpu = 0
+    init_cpu_m = 0
+    init_mem_b = 0
     for c in init_containers:
         res = c.get("resources") or {}
         req = res.get("requests", {}) or {}
         lim = res.get("limits", {}) or {}
         g = req.get("nvidia.com/gpu", lim.get("nvidia.com/gpu"))
         if g is not None:
-            try: init_gpu = max(init_gpu, int(g))
-            except Exception: pass
+            try:
+                init_gpu = max(init_gpu, int(g))
+            except Exception:
+                pass
         cv = req.get("cpu")
-        if cv is not None: init_cpu_m = max(init_cpu_m, parse_cpu_millicores(cv))
+        if cv is not None:
+            init_cpu_m = max(init_cpu_m, parse_cpu_millicores(cv))
         mv = req.get("memory")
-        if mv is not None: init_mem_b = max(init_mem_b, parse_mem_bytes(mv))
+        if mv is not None:
+            init_mem_b = max(init_mem_b, parse_mem_bytes(mv))
     gpu = max(gpu, init_gpu)
     cpu_m = max(cpu_m, init_cpu_m)
     mem_b = max(mem_b, init_mem_b)
-    return gpu,cpu_m,mem_b
+    return gpu, cpu_m, mem_b
+
 
 def summarize_running_vcjobs(ns: str, pods: List[client.V1Pod]) -> List[List[Any]]:
     jobs = list_ns_vcjobs(ns)
@@ -425,13 +491,13 @@ def summarize_running_vcjobs(ns: str, pods: List[client.V1Pod]) -> List[List[Any
         return []
 
     # index pods by (job, task)
-    pods_by_job_task: Dict[Tuple[str,str], List[client.V1Pod]] = {}
+    pods_by_job_task: Dict[Tuple[str, str], List[client.V1Pod]] = {}
     for p in pods:
         labels = p.metadata.labels or {}
         jn = labels.get("volcano.sh/job-name") or labels.get("volcano.sh/job") or ""
         tn = labels.get("volcano.sh/task-name") or labels.get("volcano.sh/task") or ""
         if jn and tn:
-            pods_by_job_task.setdefault((jn,tn), []).append(p)
+            pods_by_job_task.setdefault((jn, tn), []).append(p)
 
     rows: List[List[Any]] = []
     for j in jobs:
@@ -440,7 +506,7 @@ def summarize_running_vcjobs(ns: str, pods: List[client.V1Pod]) -> List[List[Any
         status = j.get("status", {}) or {}
 
         # phase/state may be 'state' or 'phase'
-        phase = (status.get("state") or status.get("phase") or "-")
+        phase = status.get("state") or status.get("phase") or "-"
         if str(phase).lower() != "running":
             continue  # show only running
 
@@ -449,13 +515,19 @@ def summarize_running_vcjobs(ns: str, pods: List[client.V1Pod]) -> List[List[Any
         min_avail = spec.get("minAvailable", "-")
         created = meta.get("creationTimestamp")
         try:
-            age = f"{int((datetime.now(timezone.utc) - datetime.fromisoformat(created.replace('Z','+00:00'))).total_seconds()//3600)}h"
+            age = f"{int((datetime.now(timezone.utc) - datetime.fromisoformat(created.replace('Z', '+00:00'))).total_seconds()//3600)}h"
         except Exception:
             age = "-"
 
         tasks = spec.get("tasks", []) or []
-        desired_total = 0; desired_gpu = 0; desired_cpu_m = 0; desired_mem_b = 0
-        active_total = 0; active_gpu = 0; active_cpu_m = 0; active_mem_b = 0
+        desired_total = 0
+        desired_gpu = 0
+        desired_cpu_m = 0
+        desired_mem_b = 0
+        active_total = 0
+        active_gpu = 0
+        active_cpu_m = 0
+        active_mem_b = 0
 
         pg_status = status.get("podGroup", {}) or {}
         pg_running = pg_status.get("running", "-")
@@ -463,39 +535,47 @@ def summarize_running_vcjobs(ns: str, pods: List[client.V1Pod]) -> List[List[Any
         pg_failed = pg_status.get("failed", "-")
 
         for t in tasks:
-            tname = t.get("name","")
-            replicas = safe_int(t.get("replicas",0),0)
+            tname = t.get("name", "")
+            replicas = safe_int(t.get("replicas", 0), 0)
             per_gpu, per_cpu_m, per_mem_b = per_pod_requests_from_task(t)
 
             desired_total += replicas
-            desired_gpu  += per_gpu   * replicas
-            desired_cpu_m+= per_cpu_m * replicas
-            desired_mem_b+= per_mem_b * replicas
+            desired_gpu += per_gpu * replicas
+            desired_cpu_m += per_cpu_m * replicas
+            desired_mem_b += per_mem_b * replicas
 
             # active (Running) pods for this task
-            running_pods = [p for p in pods_by_job_task.get((name,tname), []) if (p.status and p.status.phase=="Running")]
+            running_pods = [
+                p for p in pods_by_job_task.get((name, tname), []) if (p.status and p.status.phase == "Running")
+            ]
             rcount = len(running_pods)
             active_total += rcount
-            active_gpu   += per_gpu   * rcount
+            active_gpu += per_gpu * rcount
             active_cpu_m += per_cpu_m * rcount
             active_mem_b += per_mem_b * rcount
 
-        rows.append([
-            name,
-            phase,
-            queue or "-",
-            age,
-            f"{active_total}/{desired_total}",
-            f"{active_gpu}/{desired_gpu}",
-            f"{active_cpu_m}/{desired_cpu_m}",
-            f"{bytes_to_gib(active_mem_b)}/{bytes_to_gib(desired_mem_b)}",
-            min_avail,
-            pg_running, pg_succeeded, pg_failed,
-            j.get("_apiVersionResolved","-")
-        ])
+        rows.append(
+            [
+                name,
+                phase,
+                queue or "-",
+                age,
+                f"{active_total}/{desired_total}",
+                f"{active_gpu}/{desired_gpu}",
+                f"{active_cpu_m}/{desired_cpu_m}",
+                f"{bytes_to_gib(active_mem_b)}/{bytes_to_gib(desired_mem_b)}",
+                min_avail,
+                pg_running,
+                pg_succeeded,
+                pg_failed,
+                j.get("_apiVersionResolved", "-"),
+            ]
+        )
     return rows
 
+
 # ------------------------------- Main Report ------------------------------- #
+
 
 def main():
     ns = env_namespace()
@@ -520,12 +600,16 @@ def main():
         rec = observed_nodes.setdefault(node, {"gpu": False})
         if is_gpu_pod(p):
             rec["gpu"] = True
-    observed_gpu_nodes = sum(1 for _,rec in observed_nodes.items() if rec["gpu"])
+    observed_gpu_nodes = sum(1 for _, rec in observed_nodes.items() if rec["gpu"])
     observed_cpu_nodes = len(observed_nodes) - observed_gpu_nodes
 
     # Diagnostics per kind
-    cpu_avail, cpu_total, cpu_reasons, cpu_meta, cpu_reasons_any = aggregate_schedulability_for_kind(pods, events, podgroups, "CPU")
-    gpu_avail, gpu_total, gpu_reasons, gpu_meta, gpu_reasons_any = aggregate_schedulability_for_kind(pods, events, podgroups, "GPU")
+    cpu_avail, cpu_total, cpu_reasons, cpu_meta, cpu_reasons_any = aggregate_schedulability_for_kind(
+        pods, events, podgroups, "CPU"
+    )
+    gpu_avail, gpu_total, gpu_reasons, gpu_meta, gpu_reasons_any = aggregate_schedulability_for_kind(
+        pods, events, podgroups, "GPU"
+    )
 
     # ------------------- Schedulability (node counts) ------------------- #
     print("Schedulability (node counts)")
@@ -552,19 +636,22 @@ def main():
     def breakdown(kind, avail, total, reasons, reasons_any, lb):
         if avail is None or total is None:
             # When we can't get X/Y, still avoid 'N/A' and show something helpful
-            full_guess = (reasons_any.get("insufficient/nvidia.com/gpu", 0) if kind=="GPU"
-                          else reasons_any.get("insufficient/cpu", 0))
-            label_full = "Full (capacity-limited/absent)" if kind=="GPU" else "Full (capacity-limited)"
-            return [[kind, "Available (lower bound)", f">= {lb}"],
-                    [kind, label_full, full_guess if full_guess>0 else "unknown"],
-                    [kind, "Other unschedulable reasons", "unknown"]]
+            full_guess = (
+                reasons_any.get("insufficient/nvidia.com/gpu", 0)
+                if kind == "GPU"
+                else reasons_any.get("insufficient/cpu", 0)
+            )
+            label_full = "Full (capacity-limited/absent)" if kind == "GPU" else "Full (capacity-limited)"
+            return [
+                [kind, "Available (lower bound)", f">= {lb}"],
+                [kind, label_full, full_guess if full_guess > 0 else "unknown"],
+                [kind, "Other unschedulable reasons", "unknown"],
+            ]
         # With X/Y available
-        full = reasons.get("insufficient/nvidia.com/gpu", 0) if kind=="GPU" else reasons.get("insufficient/cpu", 0)
+        full = reasons.get("insufficient/nvidia.com/gpu", 0) if kind == "GPU" else reasons.get("insufficient/cpu", 0)
         other = max(0, (total - avail) - full)
-        label_full = "Full (capacity-limited/absent)" if kind=="GPU" else "Full (capacity-limited)"
-        return [[kind, "Available", avail],
-                [kind, label_full, full],
-                [kind, "Other unschedulable reasons", other]]
+        label_full = "Full (capacity-limited/absent)" if kind == "GPU" else "Full (capacity-limited)"
+        return [[kind, "Available", avail], [kind, label_full, full], [kind, "Other unschedulable reasons", other]]
 
     avail_rows += breakdown("CPU", cpu_avail, cpu_total, cpu_reasons, cpu_reasons_any, observed_cpu_nodes)
     avail_rows += breakdown("GPU", gpu_avail, gpu_total, gpu_reasons, gpu_reasons_any, observed_gpu_nodes)
@@ -573,35 +660,49 @@ def main():
 
     # ----------------------- Observed nodes summary ---------------------- #
     print("Observed nodes currently running this namespace's Pods")
-    print_table(["METRIC", "VALUE"], [
-        ["Distinct nodes observed", len(observed_nodes)],
-        ["Nodes observed with GPU Pods (ns)", observed_gpu_nodes],
-        ["Nodes observed with only CPU Pods (ns)", observed_cpu_nodes],
-    ])
+    print_table(
+        ["METRIC", "VALUE"],
+        [
+            ["Distinct nodes observed", len(observed_nodes)],
+            ["Nodes observed with GPU Pods (ns)", observed_gpu_nodes],
+            ["Nodes observed with only CPU Pods (ns)", observed_cpu_nodes],
+        ],
+    )
     print()
 
     # ------------------------ Pending Pods summary ----------------------- #
     pending_gpu = [p for p in pods if is_gpu_pod(p) and is_pending(p)]
     pending_cpu = [p for p in pods if (not is_gpu_pod(p)) and is_pending(p)]
     print("Pending Pods summary")
-    print_table(["KIND", "PENDING_PODS"], [
-        ["CPU", len(pending_cpu)],
-        ["GPU", len(pending_gpu)],
-    ])
+    print_table(
+        ["KIND", "PENDING_PODS"],
+        [
+            ["CPU", len(pending_cpu)],
+            ["GPU", len(pending_gpu)],
+        ],
+    )
     print()
 
     # ---------------------- Namespace ResourceQuotas --------------------- #
     def quota_value(qstatus, key):
-        try: return qstatus.hard.get(key), qstatus.used.get(key)
-        except Exception: return None, None
+        try:
+            return qstatus.hard.get(key), qstatus.used.get(key)
+        except Exception:
+            return None, None
 
     rq_rows = []
     for rq in quotas:
         st = rq.status
         if not st:
             continue
-        for res_key in ["requests.cpu", "limits.cpu", "requests.memory", "limits.memory",
-                        "requests.nvidia.com/gpu", "limits.nvidia.com/gpu"]:
+        for res_key in [
+            "requests.cpu",
+            "limits.cpu",
+            "requests.memory",
+            "limits.memory",
+            "requests.nvidia.com/gpu",
+            "limits.nvidia.com/gpu",
+        ]:
             hard, used = quota_value(st, res_key)
             if hard or used:
                 rq_rows.append([rq.metadata.name, res_key, used or "-", hard or "-"])
@@ -617,8 +718,22 @@ def main():
     print("Running Volcano Jobs (requested resources)")
     if running_rows:
         print_table(
-            ["NAME", "STATE", "QUEUE", "AGE", "RUNNING/DESIRED", "GPU (act/des)", "CPU m (act/des)", "MEM Gi (act/des)", "MIN_AVAIL", "PG RUN", "PG SUCC", "PG FAIL", "API"],
-            running_rows
+            [
+                "NAME",
+                "STATE",
+                "QUEUE",
+                "AGE",
+                "RUNNING/DESIRED",
+                "GPU (act/des)",
+                "CPU m (act/des)",
+                "MEM Gi (act/des)",
+                "MIN_AVAIL",
+                "PG RUN",
+                "PG SUCC",
+                "PG FAIL",
+                "API",
+            ],
+            running_rows,
         )
     else:
         print("  (none)")
@@ -632,7 +747,9 @@ def main():
     print("  running Pods from this namespace (observed). 'Unknown' means the value cannot be derived")
     print("  without cluster-wide/node permissions and no diagnostics were available.")
     print("- 'GPU (act/des)' for a running vcjob means: the sum of *requested* GPUs across pods that are")
-    print("  currently Running in that job (act) / the sum of *requested* GPUs if all desired replicas were running (des).")
+    print(
+        "  currently Running in that job (act) / the sum of *requested* GPUs if all desired replicas were running (des)."
+    )
     print("  CPU is in millicores; MEM is in GiB, both computed from per-task pod template requests.")
     if cpu_meta or gpu_meta:
         print("- Diagnostics source used:")
@@ -649,6 +766,7 @@ def main():
     else:
         print("- Diagnostics source: lower-bound fallback (no recent unschedulable diagnostics found)")
     print()
+
 
 if __name__ == "__main__":
     try:

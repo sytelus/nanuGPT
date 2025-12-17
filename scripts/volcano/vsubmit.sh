@@ -22,6 +22,7 @@ set -eu -o pipefail # -o xtrace # fail if any command failes, log all commands, 
 #                 (e.g. DATA_ROOT WANDB_API_KEY WANDB_HOST)
 #                 All these vars will be set on cluster to same value in current environment
 # START_COMMAND - command to run in container, default all args to this script
+# USE_TORCHRUN - if 1 (default) run START_COMMAND under torchrun launcher; if 0 execute START_COMMAND directly
 # NODES - number of nodes to use, default 1
 # GPUS_PER_NODE - number of gpus per node, default 8
 # CONTAINER_IMAGE_PATH - container image to use, default nvcr.io/nvidia/pytorch:25.08-py3
@@ -73,6 +74,7 @@ export VOLCANO_DATA_PVC_NAME=${VOLCANO_DATA_PVC_NAME:-} # data PVC claim in volc
 
 export INSTALL_PACKAGE=${INSTALL_PACKAGE:-1} # assume source directory is package and first do pip install -e .
 export UPDATE_PYTHONPATH=${UPDATE_PYTHONPATH:-0} # add source dir to PYTHONPATH (ignored if INSTALL_PACKAGE=1)
+export USE_TORCHRUN=${USE_TORCHRUN:-1} # if 1 run torchrun launcher, if 0 execute START_COMMAND directly
 
 export CONTAINER_PORT=${CONTAINER_PORT:-23456} # pytorch MASTER_PORT
 export NPROC_PER_NODE=${NPROC_PER_NODE:-8}
@@ -82,9 +84,10 @@ export PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
 
 export MEMORY_SIZE_LIMIT=${MEMORY_SIZE_LIMIT:-100Gi}
-export CPU_REQUESTS=${CPU_REQUESTS:-192}
-export MEMORY_REQUESTS=${MEMORY_REQUESTS:-2600Gi}
-export RDMA_REQUESTS=${RDMA_REQUESTS:-1}
+export CPU_REQUESTS=${CPU_REQUESTS:-104}
+export MEMORY_REQUESTS=${MEMORY_REQUESTS:-2808Gi}
+export RDMA_REQUESTS=${RDMA_REQUESTS:-8}
+export PRIORITY=${PRIORITY:-low}
 
 # good defaults for Pytorch
 # avoid OOM errors by allowing segments to expand
@@ -126,6 +129,7 @@ echo "NODES: ${NODES:-<not set>}"
 echo "GPUS_PER_NODE: ${GPUS_PER_NODE:-<not set>}"
 echo "INSTALL_PACKAGE: ${INSTALL_PACKAGE:-<not set>}"
 echo "UPDATE_PYTHONPATH: ${UPDATE_PYTHONPATH:-<not set>}"
+echo "USE_TORCHRUN: ${USE_TORCHRUN:-<not set>}"
 
 # some clusters may need additional env vars in which case specify script that sets them
 if [ ! -z "${ENV_SETUP_SCRIPT}" ]; then
@@ -179,7 +183,8 @@ make_env_vars() {
 # make ENV_VARS variable that will be script to setup env in container
 make_env_vars ${TRANSFER_VARS} CUDA_LAUNCH_BLOCKING TORCHINDUCTOR_COORDINATE_DESCENT_TUNING \
   TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS \
-  PYTORCH_CUDA_ALLOC_CONF TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS
+  PYTORCH_CUDA_ALLOC_CONF TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS \
+  USE_TORCHRUN
 
 echo "ENV_VARS to be setup in container:"
 echo "--------------------------------"

@@ -45,10 +45,25 @@ else
     fi
 fi
 
-# build the torchrun command
-# RANK variable is set by Pytorch plugin and its actually one per node (i.e. node index), as opposed to global rank of worker which torchrun will reset to
-TORCH_RUN_ARGS="--nproc_per_node=${NPROC_PER_NODE} --nnodes=${NODES} --node_rank=${RANK} --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT}"
-
 # Reconstruct original argv from START_COMMAND (shell-escaped tokens) and exec torchrun
+# below replace the script’s positional parameters ($1, $2, …).
 eval "set -- ${START_COMMAND}"
-OUT_DIR="${JOB_OUT_DIR}" exec torchrun ${TORCH_RUN_ARGS} "$@"
+
+USE_TORCHRUN="${USE_TORCHRUN:-1}"
+case "${USE_TORCHRUN}" in
+    1|true|TRUE|True) USE_TORCHRUN=1 ;;
+    0|false|FALSE|False) USE_TORCHRUN=0 ;;
+    *) echo "Error: USE_TORCHRUN must be 0/1/true/false (got '${USE_TORCHRUN}')." >&2; exit 1 ;;
+esac
+
+if [[ "${USE_TORCHRUN}" == "1" ]]; then
+    # build the torchrun command
+    # RANK variable is set by Pytorch plugin and its index of the node (this is not same as GLOBAL_RANK which is index of the process and set later by torchrun)
+    TORCH_RUN_ARGS="--nproc_per_node=${NPROC_PER_NODE} --nnodes=${NODES} --node_rank=${RANK} --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT}"
+    OUT_DIR="${JOB_OUT_DIR}" exec torchrun ${TORCH_RUN_ARGS} "$@"
+fi
+
+if [[ "${NODES}" != "1" ]]; then
+    echo "Running '${START_COMMAND}' once per pod/node..." >&2
+fi
+OUT_DIR="${JOB_OUT_DIR}" exec "$@"
