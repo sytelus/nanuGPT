@@ -19,8 +19,8 @@ export JOB_NAME=gpt-std
 # directory where this script is running
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 
-export OUT_DIR=/data/shitals
-export DATA_ROOT=/data/shitals/data
+export OUT_DIR=/data/runs/shitals
+export DATA_ROOT=/data
 export TRANSFER_VARS="DATA_ROOT WANDB_API_KEY WANDB_HOST"
 
 NODES=1 \

@@ -32,6 +32,7 @@ spec:
             role: master
         spec: &podspec
           schedulerName: volcano
+          priorityClassName: ${PRIORITY}
           restartPolicy: Never
           volumes:
             - name: dshm
@@ -42,7 +43,9 @@ spec:
               persistentVolumeClaim:
                claimName: ${VOLCANO_DATA_PVC_NAME}
 
-          ${TOLERENCE_YAML}
+          ${NODE_SELECTOR_YAML}
+
+          ${TOLERANCE_YAML}
 
           affinity:
             podAntiAffinity:
@@ -61,6 +64,8 @@ spec:
                 - name: data
                   mountPath: /data
               ports:
+                - name: rdma
+                  containerPort: 18515
                 - name: torch
                   containerPort: ${CONTAINER_PORT}   # pytorch MASTER_PORT; svc plugin creates DNS
               env:

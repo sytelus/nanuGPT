@@ -6,8 +6,8 @@ set -eu -o pipefail # -o xtrace # fail if any command failes, log all commands, 
 #
 # Invoke this script as:
 # ----------------------
-# vdevbox.sh # gets 1 node GPU devbox
-# vdevbox.sh --cpu # gets 1 node CPU only devbox
+# vdevbox.sh # gets 1 node CPU only devbox
+# vdevbox.sh --gpu # gets 8 node GPU devbox
 #
 # Useful variables:
 # -----------------
@@ -30,26 +30,51 @@ export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
 export NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-0}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
 
-if [ "$#" -eq 0 ]; then
+usage() {
+  cat >&2 <<EOF
+Usage: $0 [--cpu|--gpu]
+
+  --cpu   Start CPU devbox (default)
+  --gpu   Start GPU devbox
+
+EOF
+}
+
+DEVBOX_TYPE="cpu"
+if [[ "$#" -gt 1 ]]; then
+  usage
+  exit 1
+fi
+if [[ "$#" -eq 1 ]]; then
+  case "$1" in
+    --cpu) DEVBOX_TYPE="cpu" ;;
+    --gpu) DEVBOX_TYPE="gpu" ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage; exit 1 ;;
+  esac
+fi
+
+if [[ "${DEVBOX_TYPE}" == "gpu" ]]; then
   # prompt user that GPU devboxes are expensive and should not be kept alivve beyond short duration and
   # if they agree with responsible usage then proceed else ask them to use --cpu switch and exit
   echo "You are about to start a GPU devbox. This is expensive and MUST not be kept alive beyond short duration."
   read -p "Are you aware about responsible use guidelines for this cluster? (y/n): " -n 1 -r
   echo    # (optional) move to a new line
   if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-      echo "Please use --cpu switch to start a CPU only devbox. Contact Shital or Sahaj for learning more about responsible usage."
+      echo "Please start a CPU devbox instead (default): $0"
       exit 1
   fi
 
   # default GPU devbox vars
   export JOB_NAME=${USER_ALIAS}-devbox
   export GPUS_PER_NODE=${GPUS_PER_NODE:-8}
-  export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"sytelus/gpu-devbox:2025.09.28"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
+  export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"sytelus/gpu-devbox:latest"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
 
   export MEMORY_SIZE_LIMIT=${MEMORY_SIZE_LIMIT:-100Gi}
-  export CPU_REQUESTS=${CPU_REQUESTS:-192}
-  export MEMORY_REQUESTS=${MEMORY_REQUESTS:-2600Gi}
-  export RDMA_REQUESTS=${RDMA_REQUESTS:-1}
+  export CPU_REQUESTS=${CPU_REQUESTS:-104}
+  export MEMORY_REQUESTS=${MEMORY_REQUESTS:-2808Gi}
+  export RDMA_REQUESTS=${RDMA_REQUESTS:-8}
+  export PRIORITY=${PRIORITY:-low}
 
   # good defaults for Pytorch
   # avoid OOM errors by allowing segments to expand
@@ -57,14 +82,17 @@ if [ "$#" -eq 0 ]; then
   # turn on heavy optimizations in torchinductor
   # export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=${TORCHINDUCTOR_COORDINATE_DESCENT_TUNING:-1}
 
-  export TOLERENCE_YAML='tolerations:
+  export NODE_SELECTOR_YAML=''
+
+  export TOLERANCE_YAML='tolerations:
             - key: "nvidia.com/gpu"
               operator: "Exists"
               effect: "NoSchedule"
 '
+
   # if RDMA_REQUESTS is 1 then add nvidia gpu toleration as well
   if [[ "${RDMA_REQUESTS}" -eq 1 ]]; then
-    TOLERENCE_YAML+='
+    TOLERANCE_YAML+='
             - key: "rdma"
               operator: "Exists"
               effect: "NoSchedule"
@@ -72,23 +100,21 @@ if [ "$#" -eq 0 ]; then
   fi
   export RDMA_YAML="rdma/rdma_shared_device_a: \"${RDMA_REQUESTS}\""
 else
-  if [[ "$1" == "--cpu" ]]; then
-    # CPU only devbox
-    export JOB_NAME=${USER_ALIAS}-devbox-cpu
-    export GPUS_PER_NODE=${GPUS_PER_NODE:-0}
-    export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"sytelus/cpu-devbox:2025.09.26"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
+  # CPU only devbox
+  export JOB_NAME=${USER_ALIAS}-devbox-cpu
+  export GPUS_PER_NODE=${GPUS_PER_NODE:-0}
+  export CONTAINER_IMAGE_PATH=${CONTAINER_IMAGE_PATH:-"sytelus/cpu-devbox:latest"} #docker://@nvcr.io#nvidia/pytorch:24.07-py3
 
-    export MEMORY_SIZE_LIMIT=${MEMORY_SIZE_LIMIT:-8Gi}
-    export CPU_REQUESTS=${CPU_REQUESTS:-12}
-    export MEMORY_REQUESTS=${MEMORY_REQUESTS:-64Gi}
-    export RDMA_REQUESTS=${RDMA_REQUESTS:-0}
+  export MEMORY_SIZE_LIMIT=${MEMORY_SIZE_LIMIT:-8Gi}
+  export CPU_REQUESTS=${CPU_REQUESTS:-12}
+  export MEMORY_REQUESTS=${MEMORY_REQUESTS:-64Gi}
+  export RDMA_REQUESTS=${RDMA_REQUESTS:-0}
 
-    export TOLERENCE_YAML=''
-    export RDMA_YAML=''
-  else
-    echo "Usage: $0 [--cpu]" >&2
-    exit 1
-  fi
+  export NODE_SELECTOR_YAML='nodeSelector:
+              k8s.lambda.ai/node-type: cpu
+'
+  export TOLERANCE_YAML=''
+  export RDMA_YAML=''
 fi
 
 if kubectl get vcjob "${JOB_NAME}" -n "${VOLCANO_NAMESPACE}" >/dev/null 2>&1; then
@@ -201,4 +227,3 @@ echo
 set +e; kubectl -n "${VOLCANO_NAMESPACE}" exec -it "${POD_NAME}" -c master -- bash; rc=$?; set -e; echo "session exit code rc=$rc"
 
 wait
-
