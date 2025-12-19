@@ -177,8 +177,7 @@ echo "Uploading '${ABS_LOCAL}' -> '${PVC_TARGET_DIR}' ..."
 tar -C "${ABS_LOCAL}" -cf - . \
 | kubectl -n "${VOLCANO_NAMESPACE}" exec -i "${POD_NAME}" -- sh -lc "mkdir -p '${PVC_TARGET_DIR}' && tar -C '${PVC_TARGET_DIR}' -xpf -"
 
-echo "Upload complete. Verifying listing:"
-kubectl -n "${VOLCANO_NAMESPACE}" exec "${POD_NAME}" -- /bin/sh -lc "ls -lah ${PVC_TARGET_DIR} | head -50" || true
+echo "Upload complete."
 
 # Show tail of logs (optional)
 echo
