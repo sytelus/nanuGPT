@@ -21,6 +21,28 @@ fi
 
 cd ${REMOTE_JOB_OUT_DIR}/source_dir
 
+# If torch is installed, print torch and CUDA versions
+PYBIN="${PYBIN:-}"
+if [[ -z "${PYBIN}" ]]; then
+    if command -v python3 >/dev/null 2>&1; then PYBIN="python3"
+    elif command -v python >/dev/null 2>&1; then PYBIN="python"
+    else PYBIN=""
+    fi
+fi
+
+if [[ -n "${PYBIN}" ]] && "${PYBIN}" -c 'import torch' >/dev/null 2>&1; then
+    "${PYBIN}" - <<'PY'
+import torch
+print(f"[info] torch version: {torch.__version__}")
+print(f"[info] torch CUDA version: {torch.version.cuda}")
+print(f"[info] torch cuda available: {torch.cuda.is_available()}")
+if torch.cuda.is_available():
+    print(f"[info] cuda device count: {torch.cuda.device_count()}")
+PY
+else
+    echo "[info] torch not installed; skipping torch/CUDA version print."
+fi
+
 # package installation if requested
 if [ "${INSTALL_PACKAGE}" = "1" ]; then
     LOCK=/tmp/pip-install.lock
@@ -29,7 +51,7 @@ if [ "${INSTALL_PACKAGE}" = "1" ]; then
     # Everyone blocks on the lock. Only the first one actually installs; others skip.
     flock -x "$LOCK" bash -eu -c '
     if [[ ! -f "'"$STAMP"'" ]]; then
-        echo "[info] installing pcakge..."
+        echo "[info] installing packages..."
         pip install -e .
         # Create the stamp only if install succeeded
         : > "'"$STAMP"'"
