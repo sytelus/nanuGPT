@@ -483,7 +483,7 @@ class Logger:
                         'env/MASTER_PORT': os.environ.get('MASTER_PORT', None),
                         'env/OMP_NUM_THREADS': os.environ.get('OMP_NUM_THREADS', None),
                         'env/CUDA_HOME': os.environ.get('CUDA_HOME', None),
-                        'env/PYTORCH_CUDA_ALLOC_CONF': os.environ.get('PYTORCH_CUDA_ALLOC_CONF', None),
+                        'env/PYTORCH_ALLOC_CONF': os.environ.get('PYTORCH_ALLOC_CONF', None),
                         'env/CUDA_VISIBLE_DEVICES': os.environ.get('CUDA_VISIBLE_DEVICES', None),
                         'env/CUDA_LAUNCH_BLOCKING': os.environ.get('CUDA_LAUNCH_BLOCKING', None),
                         'env/NCCL_DEBUG': os.environ.get('NCCL_DEBUG', None),

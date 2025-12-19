@@ -3,8 +3,8 @@ import os
 import timeit
 import math
 
-# if os.environ.get("PYTORCH_CUDA_ALLOC_CONF", None) is None:
-#     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+# if os.environ.get("PYTORCH_ALLOC_CONF", None) is None:
+#     os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 # ref: https://rocm.docs.amd.com/en/docs-6.1.0/how-to/llm-fine-tuning-optimization/optimizing-triton-kernel.html
 if os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING", None) is None:
     os.environ["TORCHINDUCTOR_COORDINATE_DESCENT_TUNING"] = "1"

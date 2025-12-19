@@ -61,7 +61,7 @@ console = Console()
 
 SUPPRESS_COMPILE_WARNINGS = False  # Set to False to see full torch.compile warning output.
 
-os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
 
 _RICH_TAG_PATTERN = re.compile(r"\[/?[^\]]+\]")
 

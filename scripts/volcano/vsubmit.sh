@@ -95,7 +95,7 @@ export PRIORITY=${PRIORITY:-low}
 
 # good defaults for Pytorch
 # avoid OOM errors by allowing segments to expand
-export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
+export PYTORCH_ALLOC_CONF=${PYTORCH_ALLOC_CONF:-expandable_segments:True}
 # Don't turn on heavy optimizations in torchinductor, this causes compile error for some models
 # export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=${TORCHINDUCTOR_COORDINATE_DESCENT_TUNING:-1}
 
@@ -187,7 +187,7 @@ make_env_vars() {
 # make ENV_VARS variable that will be script to setup env in container
 make_env_vars ${TRANSFER_VARS} CUDA_LAUNCH_BLOCKING TORCHINDUCTOR_COORDINATE_DESCENT_TUNING \
   TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS \
-  PYTORCH_CUDA_ALLOC_CONF TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS \
+  PYTORCH_ALLOC_CONF TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS \
   USE_TORCHRUN
 
 echo "ENV_VARS to be setup in container:"
