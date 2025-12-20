@@ -321,10 +321,22 @@ def setup_torch(seed:int,
 
     if device_type == 'cuda':
         torch.backends.cudnn.enabled = True
-        torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
-        torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
-        torch.set_float32_matmul_precision('high')
-        torch.cuda.manual_seed(seed+seed_offset)
+
+        # Prefer the new TF32 API (PyTorch 2.9+) to avoid deprecation warnings.
+        if hasattr(torch.backends.cuda.matmul, "fp32_precision"):
+            torch.backends.cuda.matmul.fp32_precision = "tf32"
+        else:
+            torch.backends.cuda.matmul.allow_tf32 = True
+
+        if hasattr(torch.backends.cudnn, "conv") and hasattr(torch.backends.cudnn.conv, "fp32_precision"):
+            torch.backends.cudnn.conv.fp32_precision = "tf32"
+            if hasattr(torch.backends.cudnn, "rnn") and hasattr(torch.backends.cudnn.rnn, "fp32_precision"):
+                torch.backends.cudnn.rnn.fp32_precision = "tf32"
+        else:
+            torch.backends.cudnn.allow_tf32 = True
+
+        torch.set_float32_matmul_precision("high")
+        torch.cuda.manual_seed(seed + seed_offset)
     torch.manual_seed(seed+seed_offset)
 
     assert (not enable_distributed) or (enable_distributed and torch.distributed.is_initialized()), 'Distributed training not initialized. Call torch.distributed.init_process_group() first.' # type: ignore

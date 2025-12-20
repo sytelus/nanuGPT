@@ -229,3 +229,45 @@ for P in $(kubectl get pods -l volcano.sh/job-name="$VCJOB_NAME" -o name); do
   kubectl logs -f "$P" &
 done
 wait
+
+# After log streaming ends, check pod status and report any failures
+echo ""
+echo "=== Job Status ==="
+FAILED_PODS=0
+for P in $(kubectl get pods -l volcano.sh/job-name="$VCJOB_NAME" -o name); do
+  POD_BASE="${P#*/}"
+  # Get pod phase and container statuses
+  POD_STATUS=$(kubectl -n "${VOLCANO_NAMESPACE}" get "$P" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+  EXIT_CODE=$(kubectl -n "${VOLCANO_NAMESPACE}" get "$P" -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}' 2>/dev/null || echo "")
+  TERM_REASON=$(kubectl -n "${VOLCANO_NAMESPACE}" get "$P" -o jsonpath='{.status.containerStatuses[0].state.terminated.reason}' 2>/dev/null || echo "")
+  TERM_MSG=$(kubectl -n "${VOLCANO_NAMESPACE}" get "$P" -o jsonpath='{.status.containerStatuses[0].state.terminated.message}' 2>/dev/null || echo "")
+
+  echo "Pod: ${POD_BASE} | Status: ${POD_STATUS} | Exit Code: ${EXIT_CODE:-N/A} | Reason: ${TERM_REASON:-N/A}"
+
+  # If pod failed, show detailed information
+  if [[ "${POD_STATUS}" == "Failed" ]] || [[ -n "${EXIT_CODE}" && "${EXIT_CODE}" != "0" ]]; then
+    FAILED_PODS=$((FAILED_PODS + 1))
+    echo ""
+    echo "=== FAILURE DETAILS for ${POD_BASE} ==="
+    if [[ -n "${TERM_MSG}" ]]; then
+      echo "Termination Message: ${TERM_MSG}"
+    fi
+    echo ""
+    echo "--- Last 100 lines of logs ---"
+    kubectl -n "${VOLCANO_NAMESPACE}" logs --tail=100 "$P" 2>/dev/null || echo "(unable to fetch logs)"
+    echo ""
+    echo "--- Pod Events ---"
+    kubectl -n "${VOLCANO_NAMESPACE}" get events --sort-by=.lastTimestamp --field-selector involvedObject.name="${POD_BASE}" 2>/dev/null | tail -20 || echo "(unable to fetch events)"
+    echo "=== END FAILURE DETAILS ==="
+    echo ""
+  fi
+done
+
+if [[ "${FAILED_PODS}" -gt 0 ]]; then
+  echo ""
+  echo "ERROR: ${FAILED_PODS} pod(s) failed. See details above."
+  exit 1
+else
+  echo ""
+  echo "All pods completed successfully."
+fi
