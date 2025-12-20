@@ -37,6 +37,14 @@ Some of the features this code base adds:
 
 This code base is designed for GPU poor. Using tiny datasets, I often do experimental training runs in just 10 minutes on single RTX 3080. For Grokking experiments, you can even do CPU-only runs!!
 
+## Documentation
+
+| Document | Description |
+|:---------|:------------|
+| [OVERVIEW.md](OVERVIEW.md) | Technical overview of the codebase architecture, training pipeline, distributed training, and all major components |
+| [STYLE.md](STYLE.md) | Coding style guide and conventions for contributors |
+| [CLAUDE.md](CLAUDE.md) | Quick reference for AI assistants and common commands |
+
 ## How to Install
 
 ```python
