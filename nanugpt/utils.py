@@ -334,8 +334,6 @@ def setup_torch(seed:int,
                 torch.backends.cudnn.rnn.fp32_precision = "tf32"
         else:
             torch.backends.cudnn.allow_tf32 = True
-
-        torch.set_float32_matmul_precision("high")
         torch.cuda.manual_seed(seed + seed_offset)
     torch.manual_seed(seed+seed_offset)
 
