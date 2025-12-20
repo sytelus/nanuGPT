@@ -230,7 +230,29 @@ for P in $(kubectl get pods -l volcano.sh/job-name="$VCJOB_NAME" -o name); do
 done
 wait
 
-# After log streaming ends, check pod status and report any failures
+# Log streaming ended - could be due to pod completion, failure, or network error
+# Wait for pods to reach terminal state before checking status
+echo ""
+echo "=== Waiting for pods to terminate ==="
+for P in $(kubectl get pods -l volcano.sh/job-name="$VCJOB_NAME" -o name); do
+  POD_BASE="${P#*/}"
+  echo "Waiting for ${POD_BASE} to terminate..."
+  # Wait up to 5 minutes for pod to reach terminal state
+  # Use a loop since --for=jsonpath doesn't support OR conditions
+  for i in {1..60}; do
+    POD_PHASE=$(kubectl -n "${VOLCANO_NAMESPACE}" get "$P" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+    if [[ "${POD_PHASE}" == "Succeeded" ]] || [[ "${POD_PHASE}" == "Failed" ]]; then
+      echo "${POD_BASE} terminated with phase: ${POD_PHASE}"
+      break
+    fi
+    if [[ $i -eq 60 ]]; then
+      echo "WARNING: ${POD_BASE} still in phase ${POD_PHASE} after 5 minutes"
+    fi
+    sleep 5
+  done
+done
+
+# Now check pod status and report any failures
 echo ""
 echo "=== Job Status ==="
 FAILED_PODS=0
