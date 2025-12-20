@@ -137,6 +137,7 @@ class GPT(nn.Module):
                 labels: Optional[torch.Tensor] = None,
                 return_logits: bool = True,
                 only_last=False,
+                **kwargs,  # Accept extra args like is_first_microbatch (used by TransformerEngine models)
     )-> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[int]]: # logits, loss, num_correct
         b, t = idx.size()
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
