@@ -1,0 +1,36 @@
+__include__: ['base_config.yaml']
+
+# Karpathy's model+scaler and Keller's Optim+Sched
+general:
+  project_name: 'gpt2_owt'
+
+data:
+  module_kwargs:
+    tokenized_train_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/train.bin'
+    tokenized_val_path: '$DATA_ROOT/tokenized/openwebtext/tiktoken/val.bin'
+    eval_batch_size: 32 # same as llm.c
+
+training:
+  device_batch_size: 64
+  max_steps: 20345 # 9536 for 4999610368 tokens, 20345 for 10.6666B tokens
+  global_batch_size: 512
+
+optimizer:
+  module: 'nanugpt.optimizers.adamw.get_optim'
+  module_kwargs:
+    learning_rate: 18.0E-4 # default 6.0E-4, GH200 12.0E-4
+    zero_stage: 0 # 0: off, 1: shard optimizer
+
+scheduler:
+  module: 'nanugpt.schedulers.constant.get_scheduler'
+  module_kwargs:
+    warmup_iters: 256
+    cooldown_frac: 0.4  # CAUSION: many old runs uses constant 2048 incorrectly, instead of 0.4 cooldown_frac
+
+eval:
+  eval_every: 250
+  eval_iters: 1600 # 200*8 workers
+  save_checkpoint: false
+  checkoint_after: 0 # starts saving checkpoint after these steps
+  checkpoint_every_hr: 200 # take checkpoint every this hours
+  checkpoint_keep_best: false # keep only the best checkpoint, otherwise keep all with  _{step}.pt
