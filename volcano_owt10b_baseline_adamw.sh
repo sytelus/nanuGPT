@@ -8,8 +8,8 @@ set -eu -o pipefail # fail if any command failes, log all commands, -o xtrace
 # setup below values
 
 # can't inline these vars because we are using it as parameter to submit script
-export RUN_NAME=owt-10b-karpathy-wsd
-export RUN_DESC="Baseline: Keller optim+sched but Karpathy model and std scaler, 10.7B tokens"
+export RUN_NAME=owt-10b-baseline
+export RUN_DESC="Baseline: Karpathy's model with WSD sched and 3X LR, 10.7B tokens"
 export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=1
 # do not optimize scaler outputs on compile, will cause graph break warnings
 export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1

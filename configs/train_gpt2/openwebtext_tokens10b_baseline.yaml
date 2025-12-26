@@ -1,6 +1,9 @@
+# this is the recommanded baseline config for OpenWebText 10B tokens training
+# it works better than Karpathy's classic which uses lower LR and almost same as
+# Karpathy's llm.c config but with WSD schedule and 3X higher LR.
+
 __include__: ['base_config.yaml']
 
-# Karpathy's model+scaler and Keller's Optim+Sched
 general:
   project_name: 'gpt2_owt'
 
@@ -26,6 +29,7 @@ scheduler:
   module_kwargs:
     warmup_iters: 256
     cooldown_frac: 0.4  # CAUSION: many old runs uses constant 2048 incorrectly, instead of 0.4 cooldown_frac
+    end_factor: 1.0E-3
 
 eval:
   eval_every: 250

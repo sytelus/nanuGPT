@@ -15,6 +15,12 @@ from torch.nn import functional as F
 
 from nanugpt import common
 
+# Differences from nanoGPT's original GPT implementation:
+# - RMSNorm instead of LayerNorm
+# - Rotary embeddings instead of absolute positional embeddings
+# - No MLP/attn_proj/layer_norm biases
+
+
 @dataclass
 class GPTConfig:
     block_size: int = 1024
