@@ -1,0 +1,4 @@
+interface:
+  display_name: "Volcano Submit"
+  short_description: "Submit nanugpt Volcano jobs"
+  default_prompt: "Use $vsubmit to dry-run or submit a nanugpt job on the Volcano cluster."
