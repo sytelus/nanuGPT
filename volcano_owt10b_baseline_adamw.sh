@@ -23,6 +23,7 @@ export PROJECT_NAME=rlscaling
 export OUT_DIR=/data/runs/shitals
 export DATA_ROOT=/data
 export TRANSFER_VARS="DATA_ROOT WANDB_API_KEY WANDB_HOST"
+export PROJECT_NAME=rlscaling
 
 NODES=1 \
 bash "${SCRIPT_DIR}/scripts/volcano/vsubmit.sh" train.py configs/train_gpt2/openwebtext_tokens10b_baseline.yaml \

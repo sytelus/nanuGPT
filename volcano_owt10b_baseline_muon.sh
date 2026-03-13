@@ -24,6 +24,7 @@ SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 export OUT_DIR=/data/shitals
 export DATA_ROOT=/data/shitals/data
 export TRANSFER_VARS="DATA_ROOT WANDB_API_KEY WANDB_HOST"
+export PROJECT_NAME=rlscaling
 
 # for 160B use --training.max_steps 325520 \
 
