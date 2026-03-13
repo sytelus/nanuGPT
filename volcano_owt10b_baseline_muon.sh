@@ -12,9 +12,9 @@ export RUN_NAME=owt-10b-keller-muon
 export RUN_DESC="Baseline: Keller Model+Scaler+WSD+Muon 10.666B tokens with Muon"
 # export RUN_NAME=owt-160b-keller-muon
 # export RUN_DESC="Baseline: Keller Model+Scaler+WSD+Muon 160B tokens with Muon"
-export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=0
-# do not optimize scaler outputs on compile, will cause graph break warnings
-export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=0
+# export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=0
+# # do not optimize scaler outputs on compile, will cause graph break warnings
+# export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=0
 
 export JOB_NAME=gpt-std
 
