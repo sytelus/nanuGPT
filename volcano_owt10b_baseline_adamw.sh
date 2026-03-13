@@ -19,6 +19,7 @@ export JOB_NAME=gpt-std
 # directory where this script is running
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 
+export PROJECT_NAME=rlscaling
 export OUT_DIR=/data/runs/shitals
 export DATA_ROOT=/data
 export TRANSFER_VARS="DATA_ROOT WANDB_API_KEY WANDB_HOST"

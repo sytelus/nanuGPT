@@ -5,6 +5,7 @@ metadata:
   namespace: ${VOLCANO_NAMESPACE}
   labels:
     submitter: "${USER_ALIAS}"
+    workstream: "${PROJECT_NAME}"
 spec:
   queue: ${VOLCANO_NAMESPACE}
   minAvailable: ${NODES} # this is number of pods in k8s, one pod=one node in volcano
@@ -97,7 +98,6 @@ spec:
                   value: "${UPDATE_PYTHONPATH}"
                 - name: JOB_OUT_DIR
                   value: "${JOB_OUT_DIR}"
-
 
               command: ["/bin/bash","-lc"]
               args:

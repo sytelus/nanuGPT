@@ -56,6 +56,15 @@ EOF
   exit 1
 fi
 
+# Validate PROJECT_NAME
+if [ -z "${PROJECT_NAME:-}" ]; then
+  read -r -p "Enter the project this job is part of: " PROJECT_NAME
+  while [ -z "${PROJECT_NAME}" ]; do
+    read -r -p "Project name cannot be empty. Enter the project this job is part of: " PROJECT_NAME
+  done
+fi
+export PROJECT_NAME
+
 export JOB_NAME_FULL=${USER_ALIAS}-${JOB_NAME}
 export TRANSFER_VARS=${TRANSFER_VARS:-} # space separated list of additional env vars to transfer to container
 # Build START_COMMAND by shell-escaping each original arg, preserving spaces/quotes

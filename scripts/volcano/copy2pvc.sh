@@ -12,8 +12,8 @@ set -euo pipefail
 
 # Resource defaults (aligned with volcano_job.yaml usage)
 GPUS_PER_NODE=0
-CPU_REQUESTS=12 # typical default 192
-MEMORY_REQUESTS=64Gi # typical default 2600Gi
+CPU_REQUESTS=8 # typical default 104
+MEMORY_REQUESTS=64Gi # typical default 2808Gi
 RDMA_REQUESTS=0
 MEMORY_SIZE_LIMIT=8Gi # typical default 100Gi
 CONTAINER_IMAGE=busybox:1.36

@@ -53,6 +53,10 @@ if [ "${INSTALL_PACKAGE}" = "1" ]; then
     if [[ ! -f "'"$STAMP"'" ]]; then
         echo "[info] installing packages..."
         pip install -e .
+        # Image ships mlflow 1.26.1 + protobuf 6.x which are incompatible.
+        # Upgrade mlflow; force-overwrite system cryptography first (no RECORD).
+        pip install "cryptography>=43" --ignore-installed
+        pip install "mlflow>=2.0"
         # Create the stamp only if install succeeded
         : > "'"$STAMP"'"
         echo "[info] install complete; stamp written."
