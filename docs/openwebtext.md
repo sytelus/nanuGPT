@@ -9,14 +9,13 @@ python scripts/datasets/openwebtext/download.py
 # tokenize input file using byte tokenizer
 python tokenize_dataset.py configs/tokenize/openwebtext_tiktoken_gpt2.yaml
 
-# training using GPT2 124M model on single GPU
-# with Karpathy's original NanoGPT configuration
-python train.py configs/train_gpt2/openwebtext_classic.yaml
+# training using GPT2 124M model using new WSD scheduler and more optimal LR
+python train.py configs/train_gpt2/openwebtext_tokens10b_baseline.yaml
 
 # training using GPT2 124M model with 10B tokens of OpenWebText dataset
 # with Keller Jorden's model+WSD schedule+AdamW+3X LR configuration
-# on slurm infra
-bash volcano_karpathy_owt10b.sh
+# on k8s/volcano infra
+bash volcano_owt10b_baseline_adamw.sh
 
 # training using GPT2 124M model with 10B tokens of OpenWebText dataset
 # with Karpathy's llm.c configuration
@@ -24,7 +23,7 @@ bash volcano_karpathy_owt10b.sh
 bash slurm_owt10b_baseline.sh
 
 # generate completitions for the prompt
-python generate.py configs/train_gpt2/openwebtext_classic.yaml
+python generate.py configs/train_gpt2/openwebtext_tokens10b_baseline.yaml
 ```
 
 ![Training and Validation Loss](results/openwebtext/loss-log_step.png)

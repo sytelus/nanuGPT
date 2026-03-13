@@ -1,76 +1,97 @@
 ---
 name: vsubmit
-description: Build, explain, dry-run, and submit nanugpt training jobs to this repo's Kubernetes Volcano cluster via scripts/volcano/vsubmit.sh. Use when the user wants to launch or modify a Volcano job from natural language, reuse one of the repo's Volcano launcher presets, generate the exact submit command, or troubleshoot the required Volcano submission variables for nanugpt.
+description: Build, review, dry-run, and submit Kubernetes Volcano jobs through scripts/volcano/vsubmit.sh. Use when the user wants to turn a natural-language job request into the exact submission command, infer defaults from launcher scripts such as volcano_owt10b_baseline_adamw.sh, adjust env vars or training overrides, or submit only after an explicit confirmation step.
 ---
 
 # Vsubmit
 
-Use this skill only for the `nanugpt` Volcano workflow in the current repo.
+Use this skill whenever the repo contains `scripts/volcano/vsubmit.sh` and the user wants a Volcano command, a dry run, or a real submission.
 
 ## Workflow
 
-1. Distinguish between `explain`, `prepare`, and `submit`.
-2. Prefer dry-run output unless the user explicitly asks to submit a job.
-3. Read [references/volcano-workflow.md](references/volcano-workflow.md) when you need preset names, required environment variables, or repo-specific defaults.
-4. Prefer the helper script for command construction:
+1. Determine the intent: explain, prepare, dry-run, or submit.
+2. Start from a launcher template instead of hard-coded presets.
+   In this repo, default to `volcano_owt10b_baseline_adamw.sh` unless the user names a different launcher or clearly needs a different command.
+3. Infer as much as possible from the prompt and the template:
+   - `START_COMMAND`
+   - `JOB_NAME`
+   - `PROJECT_NAME` workstream label for `vsubmit.sh`
+   - `OUT_DIR`, `DATA_ROOT`, `TRANSFER_VARS`, and other submission env vars
+   - run metadata embedded in the training command, such as `--general.run_name` and `--general.run_description`
+4. For `nanugpt`, the common command shape is `train.py <config> <override args>`, but do not assume that shape when the prompt or launcher points to a different entrypoint.
+5. If any critical value is still unknown, ask only for those values and stop.
+   Critical values:
+   - `JOB_NAME`
+   - `PROJECT_NAME`
+   - `VOLCANO_NAMESPACE` for a real submit
+   - `VOLCANO_DATA_PVC_NAME` for a real submit
+   - any command argument the target program cannot run without
+6. Before any real submit, present a proposal that includes:
+   - inferred values and the important overrides
+   - final `START_COMMAND`
+   - final environment variables
+   - exact rendered `vsubmit.sh` shell command
+7. Ask for confirmation and allow changes.
+   Never submit in the same turn that first introduces the command.
+8. Submit only after the user explicitly confirms the final command.
 
-If the skill is repo-local, the script path from the repo root is `.agents/skills/vsubmit/scripts/vsubmit_job.py`. If the skill is globally installed, use the same script under `~/.codex/skills/vsubmit/scripts/`.
+## Helper Script
+
+Prefer the helper script for template parsing and command rendering:
+
+If the skill is repo-local, use `.agents/skills/vsubmit/scripts/vsubmit_job.py`.
+If the skill is globally installed, use the same relative path under `~/.codex/skills/vsubmit/`.
+
+Use `--json` during planning so you can inspect inferred defaults, missing critical values, warnings, and the exact rendered shell command.
 
 ```bash
-python .agents/skills/vsubmit/scripts/vsubmit_job.py --list-presets
-python .agents/skills/vsubmit/scripts/vsubmit_job.py --preset baseline-adamw
-python .agents/skills/vsubmit/scripts/vsubmit_job.py --preset baseline-adamw --job-name my-exp --nodes 2 --submit
+python .agents/skills/vsubmit/scripts/vsubmit_job.py --json
 ```
 
-5. Show the exact rendered `vsubmit.sh` command before execution. Briefly explain only non-default choices.
+Use `--template` when the user names a different launcher:
 
-## Command Building
+```bash
+python .agents/skills/vsubmit/scripts/vsubmit_job.py \
+  --template volcano_karpathy_llmc_owt10b.sh \
+  --json
+```
 
-- Use a preset when the user's request matches one of the repo launchers: `baseline-adamw`, `karpathy-classic`, `karpathy-llmc`, or `baseline-muon`.
-- For custom runs, pass `--entrypoint` and optionally `--config`.
-- Put extra training overrides after `--` so they are forwarded verbatim to the training command.
-- Use structured flags for common submission controls: `--job-name`, `--nodes`, `--gpus-per-node`, `--nproc-per-node`, `--project-name`, `--run-name`, `--run-description`, `--data-root`, `--out-dir`, `--container-image`, `--volcano-namespace`, `--volcano-data-pvc-name`.
-- Use `--env KEY=VALUE` for other `vsubmit.sh` environment variables.
-- Use `--add-transfer-var NAME` when a new local environment variable must be exported into the cluster container.
+Use `--start-command` when the final command should differ from the template command:
+
+```bash
+python .agents/skills/vsubmit/scripts/vsubmit_job.py \
+  --start-command "train.py configs/train_gpt2/openwebtext_tokens10b_karpathy_llmc.yaml --general.project_name nanugpt-owt10k --general.run_name owt-10b-karpathy-llmc --general.run_description 'Karpathy llm.c run'" \
+  --job-name gpt-std \
+  --workstream rlscaling \
+  --json
+```
+
+Append extra command arguments without rebuilding the whole command:
+
+```bash
+python .agents/skills/vsubmit/scripts/vsubmit_job.py \
+  --json \
+  --append-arg=--optimizer.lr \
+  --append-arg 0.0006
+```
+
+Use the `--append-arg=...` form when the appended token itself starts with `-`.
+
+After the user confirms, rerun the same command with `--submit`.
+
+## Inference Rules
+
+- Prefer values found in the user prompt over template defaults.
+- Prefer template defaults over guessing.
+- Infer run names and descriptions from the config name and the user's stated goal when the prompt does not specify them.
+- Keep `PROJECT_NAME` separate from training flags such as `--general.project_name`.
+- If the template exports `TRANSFER_VARS`, preserve it and add new entries with `--add-transfer-var` instead of replacing it unless the user clearly wants a replacement.
+- Mention transfer vars that are not set in the local environment before any submit.
 
 ## Safety
 
-- Do not silently invent config paths, preset names, or cluster settings.
-- Do not submit if the user only asked for a command, example, or review.
-- When `VOLCANO_NAMESPACE` or `VOLCANO_DATA_PVC_NAME` is missing, surface that clearly before any submit attempt.
-- Treat helper warnings about unset transfer variables as important; mention them in the response.
-- Run submission commands from the repo root or pass `--repo-root` explicitly if Codex is not already there.
-
-## Examples
-
-Dry run the baseline launcher:
-
-```bash
-python .agents/skills/vsubmit/scripts/vsubmit_job.py --preset baseline-adamw
-```
-
-Dry run with overrides:
-
-```bash
-python .agents/skills/vsubmit/scripts/vsubmit_job.py \
-  --preset karpathy-llmc \
-  --job-name gpt-llmc-2n \
-  --nodes 2 \
-  --project-name nanugpt-owt10k \
-  --run-name owt-10b-karpathy-2n \
-  --run-description "Karpathy llm.c preset on 2 nodes" \
-  -- --optimizer.lr 0.0006
-```
-
-Submit a custom config:
-
-```bash
-python .agents/skills/vsubmit/scripts/vsubmit_job.py \
-  --entrypoint train.py \
-  --config configs/train_gpt2/openwebtext_tokens10b_keller_adamw.yaml \
-  --job-name keller-adamw \
-  --nodes 1 \
-  --volcano-namespace my-namespace \
-  --volcano-data-pvc-name my-pvc \
-  --submit
-```
+- Do not silently invent launcher names, config paths, namespaces, or PVC names.
+- Do not submit if the user asked only for a command, explanation, or review.
+- Do not rely on `vsubmit.sh` interactive prompts for missing `JOB_NAME` or `PROJECT_NAME`; ask the user first.
+- For actual submissions, run from the repo root or pass `--repo-root` explicitly.
+- If the user wants to change a proposed value after the dry run, regenerate the command and show the full updated command again before submitting.

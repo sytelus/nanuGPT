@@ -1,4 +1,4 @@
 interface:
-  display_name: "Volcano Submit"
-  short_description: "Submit nanugpt Volcano jobs"
-  default_prompt: "Use $vsubmit to dry-run or submit a nanugpt job on the Volcano cluster."
+  display_name: "Volcano Vsubmit"
+  short_description: "Render and submit Volcano jobs from prompts"
+  default_prompt: "Use $vsubmit to infer a Volcano job command from a launcher template, show the exact vsubmit.sh command, and only submit after my confirmation."

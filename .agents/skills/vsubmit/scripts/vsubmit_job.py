@@ -5,77 +5,42 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
-PRESETS = {
-    "baseline-adamw": {
-        "launcher": "volcano_owt10b_baseline_adamw.sh",
-        "description": "Keller-style 10B baseline that calls train.py with the baseline config.",
-        "entrypoint": "train.py",
-        "config": "configs/train_gpt2/openwebtext_tokens10b_baseline.yaml",
-        "project_name": "nanugpt-owt10k",
-        "run_name": "owt-10b-baseline",
-        "run_description": "Baseline: Karpathy's model with WSD sched and 3X LR, 10.7B tokens",
-        "env": {
-            "JOB_NAME": "gpt-std",
-            "TRANSFER_VARS": "DATA_ROOT WANDB_API_KEY WANDB_HOST",
-            "TORCHINDUCTOR_COORDINATE_DESCENT_TUNING": "1",
-            "TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS": "1",
-        },
-    },
-    "karpathy-classic": {
-        "launcher": "volcano_karpathy_classic_owt10b.sh",
-        "description": "Karpathy classic OpenWebText 10B-token run.",
-        "entrypoint": "train.py",
-        "config": "configs/train_gpt2/openwebtext_tokens10b_karpathy_classic.yaml",
-        "project_name": "nanugpt-owt10k",
-        "run_name": "owt-10b-karpathy-classic",
-        "run_description": "Baseline: Karpathy classic 10.666B tokens",
-        "env": {
-            "JOB_NAME": "gpt-std",
-            "TRANSFER_VARS": "DATA_ROOT WANDB_API_KEY WANDB_HOST",
-            "TORCHINDUCTOR_COORDINATE_DESCENT_TUNING": "1",
-            "TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS": "1",
-        },
-    },
-    "karpathy-llmc": {
-        "launcher": "volcano_karpathy_llmc_owt10b.sh",
-        "description": "Karpathy llm.c OpenWebText 10B-token run.",
-        "entrypoint": "train.py",
-        "config": "configs/train_gpt2/openwebtext_tokens10b_karpathy_llmc.yaml",
-        "project_name": "nanugpt-owt10k",
-        "run_name": "owt-10b-karpathy-llmc",
-        "run_description": "Baseline: Karpathy llm.c 10.666B tokens",
-        "env": {
-            "JOB_NAME": "gpt-std",
-            "TRANSFER_VARS": "DATA_ROOT WANDB_API_KEY WANDB_HOST",
-            "TORCHINDUCTOR_COORDINATE_DESCENT_TUNING": "1",
-            "TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS": "1",
-        },
-    },
-    "baseline-muon": {
-        "launcher": "volcano_owt10b_baseline_muon.sh",
-        "description": "Keller muon variant using the alternate training entrypoint.",
-        "entrypoint": "scripts/alt_training/keller_train_gpt2_muon.py",
-        "config": None,
-        "project_name": None,
-        "run_name": None,
-        "run_description": None,
-        "env": {
-            "JOB_NAME": "gpt-std",
-            "TRANSFER_VARS": "DATA_ROOT WANDB_API_KEY WANDB_HOST",
-            "TORCHINDUCTOR_COORDINATE_DESCENT_TUNING": "0",
-            "TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS": "0",
-        },
-    },
+TEMPLATE_ENV_KEYS = {
+    "JOB_NAME",
+    "PROJECT_NAME",
+    "NODES",
+    "GPUS_PER_NODE",
+    "NPROC_PER_NODE",
+    "DATA_ROOT",
+    "OUT_DIR",
+    "SOURCE_DIR",
+    "LOCAL_OUT_DIR",
+    "TRANSFER_VARS",
+    "CONTAINER_IMAGE_PATH",
+    "ENV_SETUP_SCRIPT",
+    "USE_TORCHRUN",
+    "INSTALL_PACKAGE",
+    "UPDATE_PYTHONPATH",
+    "CPU_REQUESTS",
+    "MEMORY_REQUESTS",
+    "RDMA_REQUESTS",
+    "MEMORY_SIZE_LIMIT",
+    "PRIORITY",
+    "TORCHINDUCTOR_COORDINATE_DESCENT_TUNING",
+    "TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS",
 }
 
 PREFERRED_ENV_ORDER = [
     "JOB_NAME",
+    "PROJECT_NAME",
     "NODES",
     "GPUS_PER_NODE",
     "NPROC_PER_NODE",
@@ -100,23 +65,38 @@ PREFERRED_ENV_ORDER = [
     "TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS",
 ]
 
+CRITICAL_RENDER_KEYS = ("JOB_NAME", "PROJECT_NAME")
+CRITICAL_SUBMIT_KEYS = ("JOB_NAME", "PROJECT_NAME", "VOLCANO_NAMESPACE", "VOLCANO_DATA_PVC_NAME")
+OBSERVED_ENV_KEYS = tuple(dict.fromkeys([*PREFERRED_ENV_ORDER, *CRITICAL_SUBMIT_KEYS]))
+VAR_REF_RE = re.compile(r"\$(\w+)|\$\{([^}]+)\}")
+
+
+@dataclass
+class TemplateSpec:
+    path: str
+    context_vars: dict[str, str]
+    env_defaults: dict[str, str]
+    start_command: list[str]
+
 
 def parse_args() -> tuple[argparse.Namespace, argparse.ArgumentParser]:
     parser = argparse.ArgumentParser(
-        description="Prepare or submit nanugpt Volcano jobs through scripts/volcano/vsubmit.sh.",
+        description="Prepare or submit Volcano jobs through scripts/volcano/vsubmit.sh using a launcher template.",
     )
-    parser.add_argument("--repo-root", help="Path to the nanugpt repo root.")
-    parser.add_argument("--list-presets", action="store_true", help="List supported repo presets and exit.")
-    parser.add_argument("--preset", choices=sorted(PRESETS), help="Preset mapped from a repo launcher.")
-    parser.add_argument("--entrypoint", help="Training entrypoint relative to the repo root.")
-    parser.add_argument("--config", help="Config path relative to the repo root.")
+    parser.add_argument("--repo-root", help="Path to the repo root that contains scripts/volcano/vsubmit.sh.")
+    parser.add_argument(
+        "--template",
+        help="Launcher shell script used to infer defaults. Defaults to volcano_owt10b_baseline_adamw.sh if present.",
+    )
+    parser.add_argument(
+        "--start-command",
+        help="Full shell command to run inside the container. If omitted, the helper uses the template command.",
+    )
     parser.add_argument("--job-name", help="JOB_NAME passed to vsubmit.sh.")
+    parser.add_argument("--workstream", help="PROJECT_NAME used by vsubmit.sh and volcano_job.yaml.")
     parser.add_argument("--nodes", type=int, help="NODES passed to vsubmit.sh.")
     parser.add_argument("--gpus-per-node", type=int, help="GPUS_PER_NODE passed to vsubmit.sh.")
     parser.add_argument("--nproc-per-node", type=int, help="NPROC_PER_NODE passed to vsubmit.sh.")
-    parser.add_argument("--project-name", help="Value for --general.project_name.")
-    parser.add_argument("--run-name", help="Value for --general.run_name.")
-    parser.add_argument("--run-description", help="Value for --general.run_description.")
     parser.add_argument("--data-root", help="DATA_ROOT exported before submission.")
     parser.add_argument("--out-dir", help="OUT_DIR exported before submission.")
     parser.add_argument("--source-dir", help="SOURCE_DIR exported before submission.")
@@ -146,33 +126,21 @@ def parse_args() -> tuple[argparse.Namespace, argparse.ArgumentParser]:
         default=[],
         help="Extra environment assignment in KEY=VALUE format.",
     )
-    parser.add_argument("--json", action="store_true", help="Emit dry-run details as JSON.")
-    parser.add_argument("--submit", action="store_true", help="Execute the rendered vsubmit.sh command.")
     parser.add_argument(
-        "training_args",
-        nargs=argparse.REMAINDER,
-        help="Extra args appended to the training command. Put them after --.",
+        "--append-arg",
+        action="append",
+        default=[],
+        help="Extra command argument appended after the inferred or explicit start command.",
     )
+    parser.add_argument("--json", action="store_true", help="Emit details as JSON.")
+    parser.add_argument("--submit", action="store_true", help="Execute the rendered vsubmit.sh command.")
     args = parser.parse_args()
-    if args.training_args and args.training_args[0] == "--":
-        args.training_args = args.training_args[1:]
     return args, parser
-
-
-def list_presets() -> int:
-    for name in sorted(PRESETS):
-        preset = PRESETS[name]
-        config = preset["config"] or "<none>"
-        print(f"{name}: {preset['description']}")
-        print(f"  launcher: {preset['launcher']}")
-        print(f"  entrypoint: {preset['entrypoint']}")
-        print(f"  config: {config}")
-    return 0
 
 
 def find_repo_root(start: Path) -> Path | None:
     for candidate in [start, *start.parents]:
-        if (candidate / "scripts/volcano/vsubmit.sh").is_file() and (candidate / "train.py").is_file():
+        if (candidate / "scripts/volcano/vsubmit.sh").is_file():
             return candidate.resolve()
     return None
 
@@ -186,9 +154,24 @@ def resolve_repo_root(repo_root_arg: str | None) -> Path:
     repo_root = find_repo_root(Path.cwd().resolve())
     if repo_root is None:
         raise SystemExit(
-            "could not locate the nanugpt repo root from the current directory; run inside the repo or pass --repo-root"
+            "could not locate a repo root containing scripts/volcano/vsubmit.sh; run inside the repo or pass --repo-root"
         )
     return repo_root
+
+
+def resolve_template_path(repo_root: Path, template_arg: str | None) -> Path | None:
+    default_template = repo_root / "volcano_owt10b_baseline_adamw.sh"
+    raw = template_arg
+    if raw is None and default_template.is_file():
+        raw = str(default_template)
+    if raw is None:
+        return None
+    template_path = Path(raw).expanduser()
+    if not template_path.is_absolute():
+        template_path = repo_root / template_path
+    if not template_path.is_file():
+        raise SystemExit(f"template does not exist: {raw}")
+    return template_path.resolve()
 
 
 def parse_env_assignments(items: list[str]) -> dict[str, str]:
@@ -218,48 +201,98 @@ def merge_transfer_vars(existing: str | None, additions: list[str]) -> str | Non
     return " ".join(values) if values else None
 
 
-def resolve_file(repo_root: Path, raw_path: str | None, label: str, required: bool = False) -> str | None:
-    if not raw_path:
-        if required:
-            raise SystemExit(f"{label} is required")
-        return None
-    original = Path(raw_path).expanduser()
-    candidate = original
-    if not candidate.is_absolute():
-        candidate = repo_root / candidate
-    if not candidate.exists():
-        raise SystemExit(f"{label} does not exist: {raw_path}")
-    try:
-        return str(candidate.resolve().relative_to(repo_root))
-    except ValueError:
-        return str(candidate.resolve())
+def shell_unquote(raw: str) -> str:
+    value = raw.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
 
 
-def build_start_command(args: argparse.Namespace, repo_root: Path) -> list[str]:
-    preset = PRESETS.get(args.preset, {})
-    entrypoint = args.entrypoint or preset.get("entrypoint")
-    entrypoint = resolve_file(repo_root, entrypoint, "entrypoint", required=True)
-    config = args.config if args.config is not None else preset.get("config")
-    if config:
-        config = resolve_file(repo_root, config, "config")
+def join_logical_lines(text: str) -> list[str]:
+    logical_lines = []
+    current = ""
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if current:
+            current = f"{current} {line}"
+        else:
+            current = line
+        if current.endswith("\\"):
+            current = current[:-1].rstrip()
+            continue
+        logical_lines.append(current)
+        current = ""
+    if current:
+        logical_lines.append(current)
+    return logical_lines
 
-    project_name = args.project_name if args.project_name is not None else preset.get("project_name")
-    run_name = args.run_name if args.run_name is not None else preset.get("run_name")
-    run_description = (
-        args.run_description if args.run_description is not None else preset.get("run_description")
+
+def expand_vars(text: str, variables: dict[str, str]) -> str:
+    def replace(match: re.Match[str]) -> str:
+        name = match.group(1) or match.group(2)
+        return variables.get(name, match.group(0))
+
+    return VAR_REF_RE.sub(replace, text)
+
+
+def parse_template(template_path: Path) -> TemplateSpec:
+    logical_lines = join_logical_lines(template_path.read_text())
+    context_vars: dict[str, str] = {}
+    invocation_tokens: list[str] | None = None
+
+    export_re = re.compile(r"^export\s+([A-Za-z_][A-Za-z0-9_]*)=(.+)$")
+    assign_re = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.+)$")
+
+    for line in logical_lines:
+        export_match = export_re.match(line)
+        if export_match:
+            key, value = export_match.groups()
+            context_vars[key] = shell_unquote(value)
+            continue
+        if "vsubmit.sh" in line:
+            invocation_tokens = shlex.split(line)
+
+    if invocation_tokens is None:
+        raise SystemExit(f"template does not contain a vsubmit.sh invocation: {template_path}")
+
+    prefix_assignments: dict[str, str] = {}
+    start_index = None
+    for index, token in enumerate(invocation_tokens):
+        if token == "bash":
+            start_index = index
+            break
+        assign_match = assign_re.match(token)
+        if assign_match:
+            key, value = assign_match.groups()
+            prefix_assignments[key] = shell_unquote(value)
+
+    if start_index is None:
+        raise SystemExit(f"template invocation does not call bash ... vsubmit.sh: {template_path}")
+
+    script_index = None
+    for index in range(start_index + 1, len(invocation_tokens)):
+        if "vsubmit.sh" in invocation_tokens[index]:
+            script_index = index
+            break
+    if script_index is None:
+        raise SystemExit(f"template invocation does not include the vsubmit.sh path: {template_path}")
+
+    context_vars = {**context_vars, **prefix_assignments}
+    start_command = [expand_vars(token, context_vars) for token in invocation_tokens[script_index + 1 :]]
+    env_defaults = {
+        key: expand_vars(value, context_vars)
+        for key, value in context_vars.items()
+        if key in TEMPLATE_ENV_KEYS
+    }
+
+    return TemplateSpec(
+        path=str(template_path),
+        context_vars=context_vars,
+        env_defaults=env_defaults,
+        start_command=start_command,
     )
-
-    argv = [entrypoint]
-    if config:
-        argv.append(config)
-    if project_name:
-        argv.extend(["--general.project_name", project_name])
-    if run_name:
-        argv.extend(["--general.run_name", run_name])
-    if run_description:
-        argv.extend(["--general.run_description", run_description])
-    argv.extend(args.training_args)
-    return argv
 
 
 def preferred_env_items(env_updates: dict[str, str]) -> list[tuple[str, str]]:
@@ -273,12 +306,11 @@ def render_shell_command(env_updates: dict[str, str], start_argv: list[str]) -> 
     return f"{env_part} {argv_part}".strip()
 
 
-def build_env_updates(args: argparse.Namespace) -> dict[str, str]:
-    preset = PRESETS.get(args.preset, {})
-    env_updates = dict(preset.get("env", {}))
-
+def build_env_updates(args: argparse.Namespace, template: TemplateSpec | None) -> dict[str, str]:
+    env_updates = dict(template.env_defaults if template else {})
     structured_updates = {
         "JOB_NAME": args.job_name,
+        "PROJECT_NAME": args.workstream,
         "NODES": str(args.nodes) if args.nodes is not None else None,
         "GPUS_PER_NODE": str(args.gpus_per_node) if args.gpus_per_node is not None else None,
         "NPROC_PER_NODE": str(args.nproc_per_node) if args.nproc_per_node is not None else None,
@@ -312,6 +344,35 @@ def build_env_updates(args: argparse.Namespace) -> dict[str, str]:
     return env_updates
 
 
+def build_start_command(args: argparse.Namespace, template: TemplateSpec | None) -> list[str]:
+    if args.start_command:
+        start_argv = shlex.split(args.start_command)
+    elif template:
+        start_argv = list(template.start_command)
+    else:
+        raise SystemExit("provide --start-command or use a template that defines one")
+
+    start_argv.extend(args.append_arg)
+    if not start_argv:
+        raise SystemExit("start command is empty")
+    return start_argv
+
+
+def find_missing_values(effective_env: dict[str, str], required_keys: tuple[str, ...]) -> list[str]:
+    return [key for key in required_keys if not effective_env.get(key)]
+
+
+def collect_inherited_env(env_updates: dict[str, str], effective_env: dict[str, str]) -> dict[str, str]:
+    inherited = {}
+    for key in OBSERVED_ENV_KEYS:
+        if key in env_updates:
+            continue
+        value = effective_env.get(key)
+        if value:
+            inherited[key] = value
+    return inherited
+
+
 def validate_submit_prereqs(env_updates: dict[str, str], effective_env: dict[str, str]) -> list[str]:
     warnings = []
     transfer_vars = env_updates.get("TRANSFER_VARS", "")
@@ -320,50 +381,46 @@ def validate_submit_prereqs(env_updates: dict[str, str], effective_env: dict[str
             warnings.append(
                 f"transfer var {key} is not set in the current environment; it will not be exported into the container"
             )
-    for key in ("VOLCANO_NAMESPACE", "VOLCANO_DATA_PVC_NAME"):
-        if not effective_env.get(key):
-            warnings.append(f"{key} is not set")
     return warnings
 
 
 def main() -> int:
-    args, parser = parse_args()
-
-    if args.list_presets:
-        return list_presets()
+    args, _parser = parse_args()
 
     if args.json and args.submit:
         raise SystemExit("--json is only supported for dry-run output")
 
-    if not args.preset and not args.entrypoint:
-        parser.error("provide either --preset or --entrypoint")
-
     repo_root = resolve_repo_root(args.repo_root)
-    start_argv = build_start_command(args, repo_root)
-    env_updates = build_env_updates(args)
-
-    if "JOB_NAME" not in env_updates:
-        raise SystemExit("JOB_NAME is required; pass --job-name or set it through --env JOB_NAME=...")
+    template_path = resolve_template_path(repo_root, args.template)
+    template = parse_template(template_path) if template_path else None
+    start_argv = build_start_command(args, template)
+    env_updates = build_env_updates(args, template)
 
     effective_env = os.environ.copy()
     effective_env.update(env_updates)
+    render_missing = find_missing_values(effective_env, CRITICAL_RENDER_KEYS)
+    submit_missing = find_missing_values(effective_env, CRITICAL_SUBMIT_KEYS)
+    inherited_env = collect_inherited_env(env_updates, effective_env)
     warnings = validate_submit_prereqs(env_updates, effective_env)
 
     if args.submit:
         if shutil.which("kubectl") is None:
             raise SystemExit("kubectl is not available in PATH")
-        missing = [key for key in ("VOLCANO_NAMESPACE", "VOLCANO_DATA_PVC_NAME") if not effective_env.get(key)]
-        if missing:
-            raise SystemExit("cannot submit; missing required cluster variables: " + ", ".join(missing))
+        if submit_missing:
+            raise SystemExit("cannot submit; missing required values: " + ", ".join(submit_missing))
 
     command = render_shell_command(env_updates, start_argv)
-
     summary = {
         "mode": "submit" if args.submit else "dry-run",
         "repo_root": str(repo_root),
-        "preset": args.preset,
+        "template": template.path if template else None,
+        "template_env": dict(preferred_env_items(template.env_defaults)) if template else {},
+        "template_start_command": template.start_command if template else [],
         "start_command": start_argv,
         "env_updates": dict(preferred_env_items(env_updates)),
+        "inherited_env": dict(preferred_env_items(inherited_env)),
+        "missing_for_render": render_missing,
+        "missing_for_submit": submit_missing,
         "warnings": warnings,
         "command": command,
     }
@@ -374,10 +431,26 @@ def main() -> int:
 
     print(f"Mode: {summary['mode']}")
     print(f"Repo root: {summary['repo_root']}")
-    print(f"Preset: {summary['preset'] or '<custom>'}")
-    print(f"Start command: {' '.join(shlex.quote(token) for token in start_argv)}")
+    print(f"Template: {summary['template'] or '<none>'}")
+    if template:
+        print("Template start command:")
+        print(" ".join(shlex.quote(token) for token in summary["template_start_command"]))
+    print("Start command:")
+    print(" ".join(shlex.quote(token) for token in summary["start_command"]))
+    if summary["env_updates"]:
+        print("Environment:")
+        for key, value in preferred_env_items(summary["env_updates"]):
+            print(f"- {key}={value}")
+    if summary["inherited_env"]:
+        print("Inherited environment from the current shell:")
+        for key, value in preferred_env_items(summary["inherited_env"]):
+            print(f"- {key}={value}")
     print("Rendered vsubmit command:")
     print(command)
+    if summary["missing_for_render"]:
+        print("Missing values that would cause vsubmit.sh to prompt or fail:")
+        for key in summary["missing_for_render"]:
+            print(f"- {key}")
     if warnings:
         print("Warnings:")
         for warning in warnings:

@@ -1,26 +1,30 @@
 # Volcano Workflow Reference
 
-## Required Cluster Environment
+## What `vsubmit.sh` Needs
 
-`scripts/volcano/vsubmit.sh` requires a working `kubectl` context and these cluster variables before an actual submission:
+`scripts/volcano/vsubmit.sh` is the generic primitive. It needs:
+
+- a command to run inside the container
+- `JOB_NAME`
+- `PROJECT_NAME`
+
+For a real cluster submission it also needs:
 
 - `VOLCANO_NAMESPACE`
 - `VOLCANO_DATA_PVC_NAME`
 
-Common optional variables:
+Common optional variables that are often worth inferring from a launcher template:
 
 - `DATA_ROOT`
 - `OUT_DIR`
-- `WANDB_API_KEY`
-- `WANDB_HOST`
+- `TRANSFER_VARS`
 - `CONTAINER_IMAGE_PATH`
 - `ENV_SETUP_SCRIPT`
+- `NODES`
+- `GPUS_PER_NODE`
+- `NPROC_PER_NODE`
 
-`JOB_NAME` is mandatory for every run, but the helper script can set it directly.
-
-## Default Behavior in `vsubmit.sh`
-
-Important defaults from `scripts/volcano/vsubmit.sh`:
+## Important Defaults From `scripts/volcano/vsubmit.sh`
 
 - `NODES=1`
 - `GPUS_PER_NODE=8`
@@ -29,91 +33,92 @@ Important defaults from `scripts/volcano/vsubmit.sh`:
 - `UPDATE_PYTHONPATH=0`
 - `USE_TORCHRUN=1`
 - `CONTAINER_IMAGE_PATH=sytelus/gpu-devbox:latest`
-- `TRANSFER_VARS=""` unless set by the caller
+- `OUT_DIR=/data/runs/${USER_ALIAS}`
+- `SOURCE_DIR=.`
+- `LOCAL_OUT_DIR=/tmp/volcano_jobs`
+- `TRANSFER_VARS=""` unless the caller sets it
 
-The script copies the working tree to PVC storage, renders `scripts/volcano/volcano_job.yaml`, creates a Volcano job, waits for pods, streams logs, and then reports pod termination status.
+`vsubmit.sh` will prompt interactively if `PROJECT_NAME` is missing. The skill should avoid that by asking the user before execution.
 
-## Repo Presets
+## Template-First Pattern
 
-These presets mirror the launcher scripts in the repo root:
+Use a launcher script as a template for defaults. In this repo, the normal default template is:
 
-| Preset | Launcher | Entrypoint | Config | Notes |
-|:--|:--|:--|:--|:--|
-| `baseline-adamw` | `volcano_owt10b_baseline_adamw.sh` | `train.py` | `configs/train_gpt2/openwebtext_tokens10b_baseline.yaml` | Keller-style baseline with run metadata passed through CLI |
-| `karpathy-classic` | `volcano_karpathy_classic_owt10b.sh` | `train.py` | `configs/train_gpt2/openwebtext_tokens10b_karpathy_classic.yaml` | Karpathy classic 10B-token run |
-| `karpathy-llmc` | `volcano_karpathy_llmc_owt10b.sh` | `train.py` | `configs/train_gpt2/openwebtext_tokens10b_karpathy_llmc.yaml` | Karpathy llm.c variant |
-| `baseline-muon` | `volcano_owt10b_baseline_muon.sh` | `scripts/alt_training/keller_train_gpt2_muon.py` | none | Alternate training entrypoint, no config argument by default |
+- `volcano_owt10b_baseline_adamw.sh`
 
-All presets also set:
+That template usually provides:
 
-- `TRANSFER_VARS="DATA_ROOT WANDB_API_KEY WANDB_HOST"`
-- `JOB_NAME=gpt-std` by default
+- `JOB_NAME`
+- `PROJECT_NAME`
+- `OUT_DIR`
+- `DATA_ROOT`
+- `TRANSFER_VARS`
+- `NODES`
+- a default `START_COMMAND`
 
-Preset-specific tuning flags:
-
-- `baseline-adamw`, `karpathy-classic`, `karpathy-llmc`
-  - `TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=1`
-  - `TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1`
-- `baseline-muon`
-  - `TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=0`
-  - `TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=0`
+The helper script can parse those values and render the final command without assuming one of a few fixed presets.
 
 ## Helper Script Usage
 
-If the skill is globally installed instead of repo-local, replace `.agents/skills/vsubmit/` with `~/.codex/skills/vsubmit/` in the examples below.
-
-List presets:
+Render inferred defaults from the default template:
 
 ```bash
-python .agents/skills/vsubmit/scripts/vsubmit_job.py --list-presets
+python .agents/skills/vsubmit/scripts/vsubmit_job.py --json
 ```
 
-Prepare a preset command:
-
-```bash
-python .agents/skills/vsubmit/scripts/vsubmit_job.py --preset baseline-adamw --job-name my-run
-```
-
-Forward extra training flags after `--`:
+Switch to another launcher template:
 
 ```bash
 python .agents/skills/vsubmit/scripts/vsubmit_job.py \
-  --preset baseline-adamw \
-  --job-name my-run \
-  -- --optimizer.lr 0.0006 --training.max_steps 2000
+  --template volcano_karpathy_classic_owt10b.sh \
+  --json
 ```
 
-Prepare a manual command:
+Override the command while keeping inferred env defaults:
 
 ```bash
 python .agents/skills/vsubmit/scripts/vsubmit_job.py \
-  --entrypoint train.py \
-  --config configs/train_gpt2/tinyshakespeare.yaml \
-  --job-name tiny-test
+  --template volcano_owt10b_baseline_adamw.sh \
+  --start-command "train.py configs/train_gpt2/openwebtext_tokens10b_baseline.yaml --general.project_name nanugpt-owt10k --general.run_name my-run --general.run_description 'custom baseline run'" \
+  --job-name gpt-std \
+  --workstream rlscaling \
+  --json
 ```
 
-Submit for real:
+Append additional training arguments:
 
 ```bash
 python .agents/skills/vsubmit/scripts/vsubmit_job.py \
-  --preset baseline-adamw \
-  --job-name my-run \
-  --volcano-namespace my-ns \
+  --json \
+  --append-arg=--optimizer.lr \
+  --append-arg 0.0006
+```
+
+Submit only after confirmation:
+
+```bash
+python .agents/skills/vsubmit/scripts/vsubmit_job.py \
+  --template volcano_owt10b_baseline_adamw.sh \
+  --start-command "train.py configs/train_gpt2/openwebtext_tokens10b_baseline.yaml --general.project_name nanugpt-owt10k --general.run_name approved-run --general.run_description 'approved baseline run'" \
+  --job-name gpt-std \
+  --workstream rlscaling \
+  --volcano-namespace my-namespace \
   --volcano-data-pvc-name my-pvc \
   --submit
 ```
 
-## Prompt Inputs That Matter
+## Prompt Fields To Extract
 
-When translating a prompt into a submission, extract these fields if present:
+When translating a prompt into a submission proposal, extract:
 
-- intent: `explain`, `dry-run`, or `submit`
-- preset or explicit `entrypoint` + `config`
-- `job_name`
-- `nodes`, `gpus_per_node`, `nproc_per_node`
-- `project_name`, `run_name`, `run_description`
-- cluster placement: namespace, PVC, image, priority
-- data paths and secrets to transfer
-- trailing config overrides after `--`
+- intent: explain, prepare, dry-run, or submit
+- launcher template, if the user names one
+- start command or command shape
+- workstream label for `PROJECT_NAME`
+- job name
+- cluster placement: namespace and PVC
+- output and data paths
+- extra environment variables
+- extra command arguments or config overrides
 
-If the user omits one of the cluster variables for a real submit, stop and point out what is missing.
+If the prompt omits a real-submit requirement such as namespace or PVC, stop and ask for it instead of guessing.
