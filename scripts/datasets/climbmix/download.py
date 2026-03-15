@@ -1,9 +1,11 @@
+# python scripts/datasets/climbmix/download.py
+
 from datasets import load_dataset
 
 from nanugpt import utils
 
 # Specify the folder where the dataset will be saved
-save_directory = "$DATA_ROOT/datasets/openwebtext"
+save_directory = "$DATA_ROOT/datasets/climbmix"
 
 # resolve env vars
 save_directory = utils.full_path(save_directory, create=True)
